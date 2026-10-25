@@ -10,6 +10,12 @@ COVER_RETREAT = "cover_retreat"
 HEAL_ASSIGN = "heal_assign"
 ADAPTIVE_FOCUS_FIRE = "adaptive_focus_fire"
 ADAPTIVE_POSTURES = ("aggressive", "balanced", "defensive")
+# Spatial group skills (v8). Opt-in: candidates appear only when the runner
+# explicitly enables them, appended AFTER all existing candidates so every
+# legacy id, order and decode stays byte-identical when disabled.
+REGROUP = "regroup"
+COHESIVE_SEARCH = "cohesive_search"
+SPATIAL_MODES = (REGROUP, COHESIVE_SEARCH)
 
 SKILL_INSTRUCTIONS = (
     "Choose the squad control mode for this StarCraft II micro battle step window. "
@@ -35,13 +41,17 @@ SKILL_INSTRUCTIONS = (
 MAX_EXPLICIT_TARGETS = 4
 
 
-def skill_choices(visible_enemies, healers_present=True, max_explicit_targets=MAX_EXPLICIT_TARGETS):
+def skill_choices(visible_enemies, healers_present=True, max_explicit_targets=MAX_EXPLICIT_TARGETS,
+                  spatial_modes=()):
     """Dynamic candidate table: 0=direct, 1=auto focus, 2=cover_retreat,
     3=heal_assign (only when the snapshot has healers), then explicit focus
     targets bound to the currently visible enemies.
 
     Candidates are bound to the current snapshot only; no fixed number of
     targets or healers is assumed. Unavailable skills never get a candidate.
+    Spatial group skills (regroup / cohesive_search) are appended last and
+    only when the runner enabled them; the default empty tuple reproduces the
+    legacy table exactly.
     """
     criteria = {
         "0": "direct_control: JEV chooses every surviving ally's action each step.",
@@ -74,11 +84,28 @@ def skill_choices(visible_enemies, healers_present=True, max_explicit_targets=MA
                             "retreating no longer helps.")
         priorities[choice] = posture  # Carries the posture, not a target ID.
         modes[choice] = ADAPTIVE_FOCUS_FIRE
+    next_id += len(ADAPTIVE_POSTURES)
+    # Spatial modes appended only when explicitly enabled; suitability (no
+    # contact, split team) is judged by the caller, not by the model.
+    spatial_descriptions = {
+        REGROUP: ("regroup: scattered allies rally around the main group with "
+                  "budgeted waits; hands back to combat control on contact."),
+        COHESIVE_SEARCH: ("cohesive_search: the squad advances together toward a "
+                          "shared search target without losing cohesion."),
+    }
+    for mode in spatial_modes:
+        if mode not in SPATIAL_MODES:
+            continue
+        choice = str(next_id)
+        criteria[choice] = spatial_descriptions[mode]
+        priorities[choice] = None
+        modes[choice] = mode
+        next_id += 1
     return criteria, priorities, modes
 
 
 def skill_request(payload, model, skill_max_steps, max_explicit_targets=MAX_EXPLICIT_TARGETS,
-                  active_skill=None, last_termination=None):
+                  active_skill=None, last_termination=None, spatial_modes=()):
     """Build a compact team-level Choice request from an existing snapshot.
 
     Uses only shared team-visible state already present in the payload
@@ -152,18 +179,22 @@ def skill_request(payload, model, skill_max_steps, max_explicit_targets=MAX_EXPL
         }
     criteria, _, _ = skill_choices(state["visible_enemies"],
                                    healers_present=skill_state["healers_present"],
-                                   max_explicit_targets=max_explicit_targets)
+                                   max_explicit_targets=max_explicit_targets,
+                                   spatial_modes=spatial_modes)
     return {"model": model, "state": skill_state,
             "questions": {"team_skill": {
                 "type": "choice", "instructions": SKILL_INSTRUCTIONS,
                 "criteria": criteria}}}
 
 
-def decode_skill(payload, answers):
+def decode_skill(payload, answers, spatial_modes=()):
     """Validate and decode the single team_skill answer.
 
     Returns (mode, priority_target): priority_target is an enemy ID string for
     explicit focus candidates, else None. Never routed through decode_actions().
+    The candidate map MUST be rebuilt with the same spatial_modes the request
+    was built with; the runner passes both from one snapshot-bound source, so a
+    response can never renumber against a changed situation.
     """
     try:
         answer = answers["team_skill"]
@@ -172,7 +203,8 @@ def decode_skill(payload, answers):
     choice = answer.get("choice") if isinstance(answer, dict) else None
     visible = payload["state"].get("visible_enemy_coverage", payload["state"].get("visible_enemies", {}))
     healers_present = payload["state"].get("healers_present", True)
-    criteria, priorities, modes = skill_choices(visible, healers_present=healers_present)
+    criteria, priorities, modes = skill_choices(visible, healers_present=healers_present,
+                                                spatial_modes=spatial_modes)
     if choice not in criteria:
         raise ValueError("Skill choice is outside the candidate set.")
     return modes[choice], priorities[choice]

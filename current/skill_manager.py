@@ -4,13 +4,50 @@ from time import perf_counter
 from copy import deepcopy
 
 from .unit_value import evaluate_unit_values, validate_parameters
-from .skill_policy import (ADAPTIVE_FOCUS_FIRE, COVER_RETREAT, DIRECT_CONTROL,
-                           FOCUS_FIRE_BUDGET, HEAL_ASSIGN)
+from .skill_policy import (ADAPTIVE_FOCUS_FIRE, COHESIVE_SEARCH, COVER_RETREAT,
+                           DIRECT_CONTROL, FOCUS_FIRE_BUDGET, HEAL_ASSIGN, REGROUP)
 from .skills.focus_fire import allocate_focus_fire
 from .skills.cover_retreat import allocate_cover_retreat, PARAMS as COVER_PARAMS
 from .skills.heal_assign import assign_healing, PARAMS as HEAL_PARAMS
 from .skills.adaptive_focus_fire import (PARAMS as ADAPTIVE_PARAMS,
                                          allocate_adaptive_focus_fire)
+from .skills.regroup import allocate_regroup, PARAMS as REGROUP_PARAMS
+from .skills.cohesive_search import allocate_cohesive_search, PARAMS as SEARCH_PARAMS
+from .skills.group_geometry import cohesion_report
+
+# Spatial group skills (v8), all OFF by default: disabled flags must leave the
+# legacy action path, candidate order and telemetry semantics untouched.
+SPATIAL_DEFAULTS = {
+    **{k: v for k, v in REGROUP_PARAMS.items()},
+    **{k: v for k, v in SEARCH_PARAMS.items()},
+    "enable_regroup": False,
+    "enable_cohesive_search": False,
+    "enable_combat_positioning": False,
+    "auto_spatial_dispatch": False,
+    "dispatch_enter_share": 0.45,     # split worse than this -> consider regroup
+    "dispatch_exit_share": 0.8,       # coherence above this exits regroup phase
+    "dispatch_min_windows": 2,        # minimum phase duration (windows) vs flapping
+    "dispatch_cooldown_windows": 4,   # failed-phase retry cooldown
+}
+
+
+def validate_spatial_parameters(params):
+    """Reject negative, non-finite or non-enum values before any skill runs."""
+    merged = {**SPATIAL_DEFAULTS, **(params or {})}
+    for key in ("enable_regroup", "enable_cohesive_search", "enable_combat_positioning",
+                "auto_spatial_dispatch"):
+        merged[key] = bool(merged.get(key, False))
+    for key, value in list(merged.items()):
+        if key in ("positioning_spacing",) and value not in ("compact", "normal", "spread"):
+            raise ValueError(f"spatial parameter {key} must be compact|normal|spread")
+        if key in ("positioning_layout",) and value not in ("free", "front_back"):
+            raise ValueError(f"spatial parameter {key} must be free|front_back")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if value != value or value in (float("inf"), float("-inf")):
+                raise ValueError(f"spatial parameter {key} must be finite")
+            if value < 0 and key not in ():
+                raise ValueError(f"spatial parameter {key} must be >= 0")
+    return merged
 
 
 class SkillManager:
@@ -22,9 +59,17 @@ class SkillManager:
 
     def __init__(self, max_steps=4, risk_threshold=None, safe_streak_required=2,
                  heal_switch_margin=None, adaptive_params=None, combat_params=None,
-                 unit_value_params=None):
+                 unit_value_params=None, spatial_params=None):
         self.max_steps = max_steps
         self.safe_streak_required = max(1, safe_streak_required)
+        # Combat positioning lives inside the combat mode: its switch rides on
+        # combat_params but is validated with the other spatial flags.
+        self.spatial_params = validate_spatial_parameters(
+            {**(spatial_params or {}),
+             **({"combat_positioning": bool(spatial_params.get("enable_combat_positioning")),
+                 "positioning_spacing": spatial_params.get("positioning_spacing", "normal"),
+                 "positioning_layout": spatial_params.get("positioning_layout", "free")}
+                if spatial_params and spatial_params.get("enable_combat_positioning") else {})})
         self.cover_params = dict(COVER_PARAMS)
         if risk_threshold is not None:
             self.cover_params["risk_threshold"] = risk_threshold
@@ -37,6 +82,11 @@ class SkillManager:
         # Shared Sharpy-inspired combat mechanisms (window fire, move scoring,
         # target scoring): one source of truth for every skill.
         self.combat_params = dict(combat_params or {})
+        if self.spatial_params.get("enable_combat_positioning"):
+            self.combat_params.update(
+                combat_positioning=True,
+                positioning_spacing=self.spatial_params.get("positioning_spacing", "normal"),
+                positioning_layout=self.spatial_params.get("positioning_layout", "free"))
         self.unit_value_params = validate_parameters(unit_value_params)
         self.stats = {"activations": 0, "steps": 0, "terminations": {},
                       "reassignments": 0, "estimated_overkill": 0.0,
@@ -62,6 +112,8 @@ class SkillManager:
                           engagement_repeated_moves_blocked=0,
                           target_switches=0, unit_value_evaluations=0,
                           unit_value_evaluation_ms=0.0, unit_value_influenced_decisions=0)
+        self.stats.update(regroup_steps=0, cohesive_search_steps=0, spatial_interrupts=0,
+                          spatial_timeouts=0, spatial_dispatch_switches=0)
         self.reset()
 
     def reset(self):
@@ -93,14 +145,28 @@ class SkillManager:
         self._last_seen_enemies = {}
         self._unit_values = None  # Per-call sidecar, never a cross-snapshot cache.
         self._engagement_cached_step = None
+        # Spatial skill memory: one shared store per episode; budgets, search
+        # visits and dispatch cooldowns survive execution-window boundaries
+        # but never a reset. Enemy last-seen memory stays in
+        # _last_seen_enemies (shared with _step_adaptive, no second ledger).
+        self._regroup_memory = {}
+        self._search_memory = {}
+        self._spatial_cached = None  # (game_loop, skill) -> (partial, telemetry)
+        self._dispatch_state = {"phase": "idle", "windows_in_phase": 0,
+                                "cooldown": {REGROUP: 0, COHESIVE_SEARCH: 0},
+                                "last_reason": None}
 
     # -- selection -------------------------------------------------------
 
     def select(self, skill, priority_target=None, posture=None):
         """JEV (or --skill-mode always) chose a mode; hold it for one window."""
         if skill not in (DIRECT_CONTROL, FOCUS_FIRE_BUDGET, COVER_RETREAT,
-                         HEAL_ASSIGN, ADAPTIVE_FOCUS_FIRE):
+                         HEAL_ASSIGN, ADAPTIVE_FOCUS_FIRE, REGROUP, COHESIVE_SEARCH):
             raise ValueError(f"Unknown skill: {skill}")
+        if skill == REGROUP and not self.spatial_params["enable_regroup"]:
+            raise ValueError("regroup requires enable_regroup")
+        if skill == COHESIVE_SEARCH and not self.spatial_params["enable_cohesive_search"]:
+            raise ValueError("cohesive_search requires enable_cohesive_search")
         self.current_skill = skill
         self.priority_target = priority_target
         if posture:
@@ -127,7 +193,8 @@ class SkillManager:
     @property
     def active(self):
         return (self.current_skill in (FOCUS_FIRE_BUDGET, COVER_RETREAT,
-                                       HEAL_ASSIGN, ADAPTIVE_FOCUS_FIRE)
+                                       HEAL_ASSIGN, ADAPTIVE_FOCUS_FIRE,
+                                       REGROUP, COHESIVE_SEARCH)
                 and self.termination_reason is None)
 
     # -- execution -------------------------------------------------------
@@ -193,6 +260,10 @@ class SkillManager:
             actions, telemetry = self._step_heal_assign(payload, n_agents)
         elif self.current_skill == ADAPTIVE_FOCUS_FIRE:
             actions, telemetry = self._step_adaptive(payload, n_agents)
+        elif self.current_skill == REGROUP and self.spatial_params["enable_regroup"]:
+            return self._step_regroup(payload, n_agents)
+        elif self.current_skill == COHESIVE_SEARCH and self.spatial_params["enable_cohesive_search"]:
+            return self._step_cohesive_search(payload, n_agents)
         else:
             actions, telemetry = self._step_focus_fire(payload, n_agents)
         if self.current_skill != HEAL_ASSIGN:
@@ -536,6 +607,199 @@ class SkillManager:
         if engagement_enabled:
             self._engagement_cached_step = (state['game_loop'], deepcopy(result['actions']), deepcopy(telemetry))
         return result["actions"], telemetry
+
+    # -- spatial group skills (v8) -----------------------------------------
+
+    def _update_spatial_enemy_memory(self, state):
+        """Refresh shared last-seen enemy memory while a spatial mode runs.
+
+        Same ledger as ``_step_adaptive`` (no second, contradictory memory).
+        Old positions are search hints only, never attack targets; known
+        deaths are not inferred here — leaving vision keeps the hint until TTL.
+        """
+        loop = state["game_loop"]
+        for enemy, unit in state["visible_enemies"].items():
+            self._last_seen_enemies[enemy] = {"position": list(unit["position"]),
+                                              "game_loop": loop}
+        ttl = self.spatial_params["search_memory_ttl_loops"]
+        self._last_seen_enemies = {
+            e: record for e, record in self._last_seen_enemies.items()
+            if 0 <= loop - record["game_loop"] <= ttl}
+
+    def _spatial_common(self, payload, n_agents):
+        """Shared preamble: memory TTLs, controlled ids, observation stamp."""
+        state = payload["state"]
+        self._update_spatial_enemy_memory(state)
+        for mode, remaining in list(self._dispatch_state["cooldown"].items()):
+            if remaining > 0:
+                self._dispatch_state["cooldown"][mode] = remaining - 1
+        controlled = [a for a, u in sorted(state["allies"].items())
+                      if u.get("alive") and int(a[1:]) < n_agents]
+        self.last_observation_step = state["game_loop"]
+        self.skill_start_step = self.skill_start_step if self.skill_start_step is not None \
+            else state["game_loop"]
+        self.elapsed_steps += 1
+        self.stats["steps"] += 1
+        return state, controlled
+
+    def _spatial_partial(self, result):
+        """Actor-keyed partial proposal -> index-keyed partial for the caller.
+
+        Only units with an emitted action are taken over; everyone else keeps
+        the caller's declared base policy. The final action array stays
+        n_agents long with the environment's index mapping.
+        """
+        return {int(actor[1:]): action for actor, action in result["actions"].items()}
+
+    def _spatial_cached_step(self, skill, payload, compute):
+        """Repeating the same snapshot must not double-charge any budget."""
+        loop = payload["state"]["game_loop"]
+        cached = self._spatial_cached
+        if cached is not None and cached[0] == loop and cached[1] == skill:
+            return cached[2]
+        outcome = compute()
+        self._spatial_cached = (loop, skill, outcome)
+        return outcome
+
+    def _step_regroup(self, payload, n_agents):
+        return self._spatial_cached_step(REGROUP, payload,
+                                          lambda: self._compute_regroup(payload, n_agents))
+
+    def _compute_regroup(self, payload, n_agents):
+        state, controlled = self._spatial_common(payload, n_agents)
+        result = allocate_regroup(state, controlled, self._regroup_memory,
+                                  self.spatial_params, self._last_move)
+        self.stats["regroup_steps"] += 1
+        for actor, action in result["actions"].items():
+            if action in (2, 3, 4, 5):
+                self._last_move[actor] = action
+        self._regroup_memory = {**self._regroup_memory, **result["state_updates"]}
+        if result["state_updates"].get("phase") == "cooldown":
+            self._dispatch_state["cooldown"][REGROUP] = \
+                self.spatial_params["regroup_retry_cooldown_windows"]
+        telemetry = {"skill": "regroup", "skill_step": self.elapsed_steps,
+                     "skill_start_step": self.skill_start_step,
+                     "status": result["status"], "reason": result["reason"],
+                     "controlled_units": result["controlled_units"],
+                     "partial_actions": self._spatial_partial(result),
+                     "cohesion": result["diagnostics"].get("cohesion"),
+                     "anchor": result["diagnostics"].get("anchor"),
+                     "blocked_stragglers": result["diagnostics"].get("blocked_stragglers", {}),
+                     "regroup_budget_windows": self._regroup_memory.get("elapsed_windows", 0)}
+        if result["status"] == "interrupted":
+            self.stats["spatial_interrupts"] += 1
+            self._terminate("interrupted_" + result["reason"])
+        elif result["status"] == "timeout":
+            self.stats["spatial_timeouts"] += 1
+            self._terminate("regroup_timeout")
+        elif result["status"] == "blocked":
+            self._terminate("regroup_blocked")
+        elif result["status"] == "success":
+            self._terminate("regroup_complete")
+        elif self.elapsed_steps >= self.max_steps:
+            self._terminate("max_steps")
+        if self.termination_reason is not None:
+            telemetry["termination_reason"] = self.termination_reason
+        return self._spatial_partial(result), telemetry
+
+    def _step_cohesive_search(self, payload, n_agents):
+        return self._spatial_cached_step(COHESIVE_SEARCH, payload,
+                                          lambda: self._compute_cohesive_search(payload, n_agents))
+
+    def _compute_cohesive_search(self, payload, n_agents):
+        state, controlled = self._spatial_common(payload, n_agents)
+        result = allocate_cohesive_search(state, controlled, self._search_memory,
+                                          self.spatial_params, self._last_move)
+        self.stats["cohesive_search_steps"] += 1
+        for actor, action in result["actions"].items():
+            if action in (2, 3, 4, 5):
+                self._last_move[actor] = action
+        self._search_memory = {**self._search_memory, **result["state_updates"]}
+        if result["state_updates"].get("phase") == "cooldown":
+            self._dispatch_state["cooldown"][COHESIVE_SEARCH] = \
+                self.spatial_params["search_waypoint_ttl_windows"]
+        telemetry = {"skill": "cohesive_search", "skill_step": self.elapsed_steps,
+                     "skill_start_step": self.skill_start_step,
+                     "status": result["status"], "reason": result["reason"],
+                     "controlled_units": result["controlled_units"],
+                     "partial_actions": self._spatial_partial(result),
+                     "cohesion": result["diagnostics"].get("cohesion"),
+                     "waypoint": result["diagnostics"].get("waypoint"),
+                     "waypoint_source": result["diagnostics"].get("waypoint_source"),
+                     "degenerate_mode": result["diagnostics"].get("degenerate", False),
+                     "visited_waypoints": self._search_memory.get("visited_waypoints", []),
+                     "search_budget_windows": self._search_memory.get("elapsed_windows", 0)}
+        if result["status"] == "interrupted":
+            self.stats["spatial_interrupts"] += 1
+            self._terminate("enemy_contact")
+        elif result["status"] == "timeout":
+            self.stats["spatial_timeouts"] += 1
+            self._terminate("search_timeout")
+        elif result["status"] == "blocked":
+            self._terminate(result["reason"])  # e.g. needs_regroup
+        elif self.elapsed_steps >= self.max_steps:
+            self._terminate("max_steps")
+        if self.termination_reason is not None:
+            telemetry["termination_reason"] = self.termination_reason
+        return self._spatial_partial(result), telemetry
+
+    def spatial_dispatch(self, payload):
+        """Explicit rule scheduler for local no-model running (auto dispatch).
+
+        Returns REGROUP / COHESIVE_SEARCH / None (None = existing combat
+        controller keeps control). Enter/exit hysteresis, minimum phase length
+        and failure cooldowns prevent regroup<->search flapping; contact and
+        observed damage interrupt immediately regardless of min duration.
+        """
+        if not self.spatial_params["auto_spatial_dispatch"]:
+            return None
+        state = payload["state"]
+        contact = bool(state["visible_enemies"]) or any(
+            relation.get("smac_attack_available")
+            for row in state.get("relations", {}).values()
+            for relation in row.values())
+        damaged = any((u.get("health_lost_since_previous_decision", 0)
+                       + u.get("shield_lost_since_previous_decision", 0)) > 0
+                      for u in state["allies"].values() if u.get("alive"))
+        dispatch = self._dispatch_state
+        if contact or damaged:
+            if dispatch["phase"] in (REGROUP, COHESIVE_SEARCH):
+                self.stats["spatial_dispatch_switches"] += 1
+            dispatch.update(phase="combat", windows_in_phase=0,
+                            last_reason="contact_or_damage")
+            return None
+        report = cohesion_report(state, self.spatial_params)
+        share = report["main_share"]
+        minimum = self.spatial_params["dispatch_min_windows"]
+        if dispatch["phase"] == REGROUP:
+            if share >= self.spatial_params["dispatch_exit_share"]:
+                dispatch.update(phase="idle", windows_in_phase=0,
+                                last_reason="regrouped")
+                return None
+            if dispatch["windows_in_phase"] < minimum:
+                dispatch["windows_in_phase"] += 1
+                return REGROUP
+        elif dispatch["phase"] == COHESIVE_SEARCH:
+            if dispatch["windows_in_phase"] < minimum:
+                dispatch["windows_in_phase"] += 1
+                return COHESIVE_SEARCH
+        if (self.spatial_params["enable_regroup"] and len(report["groups"]) > 1
+                and (share < self.spatial_params["dispatch_enter_share"]
+                     or len(report["outliers"]) >= len(report["main_group"]))
+                and dispatch["cooldown"][REGROUP] == 0):
+            if dispatch["phase"] != REGROUP:
+                self.stats["spatial_dispatch_switches"] += 1
+            dispatch.update(phase=REGROUP, windows_in_phase=1, last_reason="severe_split")
+            return REGROUP
+        if (self.spatial_params["enable_cohesive_search"]
+                and dispatch["cooldown"][COHESIVE_SEARCH] == 0
+                and not state["visible_enemies"]):
+            if dispatch["phase"] != COHESIVE_SEARCH:
+                self.stats["spatial_dispatch_switches"] += 1
+            dispatch.update(phase=COHESIVE_SEARCH, windows_in_phase=1,
+                            last_reason="no_contact_advance")
+            return COHESIVE_SEARCH
+        return None
 
     def _terminate(self, reason):
         self.termination_reason = reason

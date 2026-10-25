@@ -436,8 +436,18 @@ def allocate_adaptive_focus_fire(state, n_agents, unit_states=None, all_in=False
     if params.get("coordinated_approach"):
         approach_actors = [a for a, role in roles.items() if role == "reposition"]
         fixed_actions = {a: actions[int(a[1:])] for a in roles if a not in approach_actors}
-        approach_actions, approach_diagnostics, approach_updates = coordinate_approaches(
-            state, approach_actors, unit_states, fixed_actions, params)
+        if params.get("combat_positioning"):
+            # Positioning is a sub-skill of the combat mode: it only receives
+            # the units the combat controller already released, never attack /
+            # retreat / heal / recovery actions. Falls back internally to the
+            # plain coordinated approach.
+            from .combat_positioning import allocate_combat_positioning
+            approach_actions, approach_diagnostics, approach_updates = \
+                allocate_combat_positioning(state, approach_actors, unit_states,
+                                            fixed_actions, params)
+        else:
+            approach_actions, approach_diagnostics, approach_updates = coordinate_approaches(
+                state, approach_actors, unit_states, fixed_actions, params)
         for actor, action in approach_actions.items():
             actions[int(actor[1:])] = action
 
