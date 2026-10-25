@@ -1,0 +1,196 @@
+{
+  "scope": "Offline replay of saved observations; no SC2, model calls, or new win-rate estimate.",
+  "source_bytes": {
+    "current": {
+      "historical_reference": "native-5v5-v6-skill-n20-seed150",
+      "byte_identical_count": 14,
+      "sha256": {
+        "client.py": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+        "skill_manager.py": "0ea30b642e601c57920f31d575f802039ff587b814f88b046984e141df1570a6",
+        "skill_policy.py": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2",
+        "unit_value.py": "29906321e9191393213d5ca85977656e7f486b1061e63095d41eefee74fce854",
+        "skills/__init__.py": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+        "skills/adaptive_focus_fire.py": "738a421e99b1db2a23670725322a71a89043cc1c10fbbe499cba7b6f3f0a35d2",
+        "skills/combat_timing.py": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+        "skills/coordinated_approach.py": "65b7d1ace0df2fa83a8294b498e002221b9590d885f17f8f895ce26449db9297",
+        "skills/cover_retreat.py": "99f203139cec50f9ad1c40a1acedd0e3a222235737e6eeb29c8229c2f0e571bd",
+        "skills/damage_model.py": "45a93ac8f3d1ff090d52cd77bd54ea7e85d50f89c4c03a8449daa8ba3630903d",
+        "skills/engagement_control.py": "9f11477589ab2f7dd04380f6925721df54ad5edb87cb9a2702edb40d1943a7a5",
+        "skills/focus_fire.py": "e54414e6471fc0963f891dfbef2a431b7e67bac5d3e7ee3abe5a269c98baa8a1",
+        "skills/heal_assign.py": "5601f43e4641a932321042fcab083cb2b47ccb8532703a8f3847838564db28a6",
+        "skills/movement_scoring.py": "c53cd09cc5ca4e3a613b0bdea5abf6a4c0a0da6854875d69816da8150c6c5a2f"
+      }
+    },
+    "baseline_v2_70pct": {
+      "historical_reference": "native-10v10-v2-jev-astra-skill-n10-seed100/adaptive-skill",
+      "byte_identical_count": 10,
+      "sha256": {
+        "client.py": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+        "skill_manager.py": "fe2bfb311328922dc32cbe7c7c08ec15d02211b65d2a04bbfa42aacce8948757",
+        "skill_policy.py": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2",
+        "skills/__init__.py": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+        "skills/adaptive_focus_fire.py": "600df9fed8b9d2c15eb368fbeb3d3e4664e89c8b7c63df1989d04b6b09ed1eee",
+        "skills/combat_timing.py": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+        "skills/cover_retreat.py": "877b74ecffe4aca7c1e9076df0d6cdaa1f9cbadc45d2362b8ce6a8e281b1e449",
+        "skills/focus_fire.py": "939ff95eb71a170abba6f251bcdfc0482c4de211964fe1d4d9626a1c570d5a33",
+        "skills/heal_assign.py": "980792dffc199195b874cac4cc4d0beca0f0d213b0e2b86f43f1e882c83c21f5",
+        "skills/movement_scoring.py": "55e053cfa0d4743d3fcaa8190ee111afd0a88ba9d843bf8e7e2150fac6063eb5"
+      }
+    }
+  },
+  "fresh_process_probes": {
+    "adapter": {
+      "probe": "adapter",
+      "versions": {
+        "current": {
+          "module_paths": {
+            "client": "C:\\Users\\ry\\skill\\skills\\current\\client.py",
+            "skill_manager": "C:\\Users\\ry\\skill\\skills\\current\\skill_manager.py",
+            "skill_policy": "C:\\Users\\ry\\skill\\skills\\current\\skill_policy.py",
+            "unit_value": "C:\\Users\\ry\\skill\\skills\\current\\unit_value.py",
+            "skills": "C:\\Users\\ry\\skill\\skills\\current\\skills\\__init__.py",
+            "skills.adaptive_focus_fire": "C:\\Users\\ry\\skill\\skills\\current\\skills\\adaptive_focus_fire.py",
+            "skills.combat_timing": "C:\\Users\\ry\\skill\\skills\\current\\skills\\combat_timing.py",
+            "skills.coordinated_approach": "C:\\Users\\ry\\skill\\skills\\current\\skills\\coordinated_approach.py",
+            "skills.cover_retreat": "C:\\Users\\ry\\skill\\skills\\current\\skills\\cover_retreat.py",
+            "skills.damage_model": "C:\\Users\\ry\\skill\\skills\\current\\skills\\damage_model.py",
+            "skills.engagement_control": "C:\\Users\\ry\\skill\\skills\\current\\skills\\engagement_control.py",
+            "skills.focus_fire": "C:\\Users\\ry\\skill\\skills\\current\\skills\\focus_fire.py",
+            "skills.heal_assign": "C:\\Users\\ry\\skill\\skills\\current\\skills\\heal_assign.py",
+            "skills.movement_scoring": "C:\\Users\\ry\\skill\\skills\\current\\skills\\movement_scoring.py"
+          },
+          "client_exception_identity": true,
+          "manager_patch_exercised": true,
+          "allocator_global_patch": true,
+          "source_file_count": 15,
+          "namespace": "_smacv2_portable_jev_skills"
+        },
+        "baseline_v2_70pct": {
+          "module_paths": {
+            "client": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\client.py",
+            "skill_manager": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skill_manager.py",
+            "skill_policy": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skill_policy.py",
+            "skills": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\__init__.py",
+            "skills.adaptive_focus_fire": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\adaptive_focus_fire.py",
+            "skills.combat_timing": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\combat_timing.py",
+            "skills.cover_retreat": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\cover_retreat.py",
+            "skills.focus_fire": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\focus_fire.py",
+            "skills.heal_assign": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\heal_assign.py",
+            "skills.movement_scoring": "C:\\Users\\ry\\skill\\skills\\baseline_v2_70pct\\skills\\movement_scoring.py"
+          },
+          "client_exception_identity": true,
+          "manager_patch_exercised": true,
+          "allocator_global_patch": true,
+          "source_file_count": 11,
+          "namespace": "_smacv2_portable_jev_skills_baseline_v2_70pct"
+        }
+      },
+      "sys_path_unchanged": true,
+      "pysc2_origin": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\.venv\\lib\\site-packages\\pysc2\\__init__.py",
+      "environment_modules_loaded": []
+    },
+    "legacy": {
+      "probe": "legacy",
+      "module_paths": {
+        "client": "C:\\Users\\ry\\skill\\skills\\current\\client.py",
+        "skill_manager": "C:\\Users\\ry\\skill\\skills\\current\\skill_manager.py",
+        "skill_policy": "C:\\Users\\ry\\skill\\skills\\current\\skill_policy.py",
+        "unit_value": "C:\\Users\\ry\\skill\\skills\\current\\unit_value.py",
+        "skills": "C:\\Users\\ry\\skill\\skills\\current\\skills\\__init__.py",
+        "skills.adaptive_focus_fire": "C:\\Users\\ry\\skill\\skills\\current\\skills\\adaptive_focus_fire.py",
+        "skills.combat_timing": "C:\\Users\\ry\\skill\\skills\\current\\skills\\combat_timing.py",
+        "skills.coordinated_approach": "C:\\Users\\ry\\skill\\skills\\current\\skills\\coordinated_approach.py",
+        "skills.cover_retreat": "C:\\Users\\ry\\skill\\skills\\current\\skills\\cover_retreat.py",
+        "skills.damage_model": "C:\\Users\\ry\\skill\\skills\\current\\skills\\damage_model.py",
+        "skills.engagement_control": "C:\\Users\\ry\\skill\\skills\\current\\skills\\engagement_control.py",
+        "skills.focus_fire": "C:\\Users\\ry\\skill\\skills\\current\\skills\\focus_fire.py",
+        "skills.heal_assign": "C:\\Users\\ry\\skill\\skills\\current\\skills\\heal_assign.py",
+        "skills.movement_scoring": "C:\\Users\\ry\\skill\\skills\\current\\skills\\movement_scoring.py"
+      },
+      "client_exception_identity": true,
+      "manager_patch_exercised": true,
+      "allocator_global_patch": true,
+      "legacy_package_paths": [
+        "C:\\Users\\ry\\skill\\skills\\current",
+        "C:\\Users\\ry\\skill\\game_skill\\micro\\jev_micro"
+      ],
+      "environment_modules_loaded": []
+    }
+  },
+  "replays": [
+    {
+      "version": "current",
+      "run": "native-5v5-v6-skill-n20-seed150",
+      "episodes": 20,
+      "frames": 1193,
+      "action_matches": 1193,
+      "telemetry_matches": 1193,
+      "telemetry_keys": [
+        "roles",
+        "attack_assignments",
+        "predicted_damage",
+        "all_in",
+        "retreat_reasons"
+      ],
+      "input_payload_unchanged": true,
+      "decision_digest_sha256": "e240b97748dbc635ec27c8b819ed21b35708b8acb42b5eb26f44013d4ee57526",
+      "events_sha256": "492b57664a6e1b41dea5d5a2861d7286ae7b345584c7f24822aedaa0fd0332ce"
+    },
+    {
+      "version": "current",
+      "run": "native-10v10-v6-skill-n20-seed150",
+      "episodes": 20,
+      "frames": 1474,
+      "action_matches": 1474,
+      "telemetry_matches": 1474,
+      "telemetry_keys": [
+        "roles",
+        "attack_assignments",
+        "predicted_damage",
+        "all_in",
+        "retreat_reasons"
+      ],
+      "input_payload_unchanged": true,
+      "decision_digest_sha256": "d74d05cf904f173289e7df857d8f5a6f9ec07a1f7c89b10e88c17fff22805391",
+      "events_sha256": "48a3023ddd35fbf9653c9b47a02e5025ed7972d8811a209983b123a2b830140c"
+    },
+    {
+      "version": "baseline_v2_70pct",
+      "run": "native-10v10-v2-jev-astra-skill-n10-seed100/adaptive-skill",
+      "episodes": 10,
+      "frames": 749,
+      "action_matches": 749,
+      "telemetry_matches": 749,
+      "telemetry_keys": [
+        "roles",
+        "attack_assignments",
+        "predicted_damage",
+        "all_in",
+        "retreat_reasons"
+      ],
+      "input_payload_unchanged": true,
+      "decision_digest_sha256": "797007a42d8a8dd216ed622282fd5283a82fac6f4ef39add5791462f21dbd61c",
+      "events_sha256": "c7742f246471fde9cf0f6c84afb0dfa8504fb1ef9764470a16d0f15f783edba0"
+    },
+    {
+      "version": "baseline_v2_70pct",
+      "run": "native-10v10-v2-skill-n20-seed110",
+      "episodes": 20,
+      "frames": 1375,
+      "action_matches": 1375,
+      "telemetry_matches": 1375,
+      "telemetry_keys": [
+        "roles",
+        "attack_assignments",
+        "predicted_damage",
+        "all_in",
+        "retreat_reasons"
+      ],
+      "input_payload_unchanged": true,
+      "decision_digest_sha256": "038d37e70ce76c59255ffb1e8db201a804cd763f11a62bbf744a5b66ef680d61",
+      "events_sha256": "e65bfb39c85a19758cdf17162105165d483b12350ed5567ac2d971e0d8575d56"
+    }
+  ],
+  "total_frames": 4791,
+  "status": "passed"
+}

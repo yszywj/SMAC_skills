@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "package": "baseline_v2_70pct",
+  "exported_at_utc": "2026-10-23T15:53:02.792549+00:00",
+  "scope": "exact historical skill modules, with original protocol dependency; environment/model configuration not bundled",
+  "runtime_transformations": [],
+  "recovery_spec_path": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\analysis\\skill_v2_v6_comparison_20261023\\CONFIG_COMPARISON.json",
+  "recovery_spec_sha256": "3be55950233ea1ee7b3ba0a5083423b8307092683fac5d84e7e0db044b9edf69",
+  "original_run": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill",
+  "historical_result": {
+    "wins": 7,
+    "episodes": 10,
+    "win_rate": 0.7,
+    "seeds": [
+      100,
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109
+    ],
+    "mean_enemy_elimination": 0.91,
+    "mean_decision_steps": 74.9,
+    "guaranteed_win_rate": false,
+    "jev_requests": 0
+  },
+  "skill_parameters": {
+    "posture": "balanced",
+    "max_steps": 4,
+    "window_fire": true,
+    "range_preserving_move": true,
+    "target_scoring": true
+  },
+  "recorded_core_file_count": 10,
+  "sources": [
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skill_manager.py",
+      "exported_path": "skill_manager.py",
+      "git_commit": "7c2ca64b2a54b2119fa6c84e5f2affd5e9e26fca",
+      "git_path": "micro/jev_micro/skill_manager.py",
+      "conversion": "git_LF_to_recorded_CRLF",
+      "sha256": "fe2bfb311328922dc32cbe7c7c08ec15d02211b65d2a04bbfa42aacce8948757",
+      "hash_verified": true,
+      "exported_sha256": "fe2bfb311328922dc32cbe7c7c08ec15d02211b65d2a04bbfa42aacce8948757"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skill_policy.py",
+      "exported_path": "skill_policy.py",
+      "git_commit": "952d9d80467fa389f06da2d91cff879cd5c7e5b3",
+      "git_path": "micro/jev_micro/skill_policy.py",
+      "conversion": "raw",
+      "sha256": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2",
+      "hash_verified": true,
+      "exported_sha256": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\client.py",
+      "exported_path": "client.py",
+      "git_commit": "ff8553b30385291c660b95910cde2961c7ae4eca",
+      "git_path": "micro/jev_micro/client.py",
+      "conversion": "raw",
+      "sha256": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+      "hash_verified": true,
+      "exported_sha256": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\__init__.py",
+      "exported_path": "skills/__init__.py",
+      "git_commit": "0e1473a386bfd278cfaa03e7de097d2686357a66",
+      "git_path": "micro/jev_micro/skills/__init__.py",
+      "conversion": "raw",
+      "sha256": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+      "hash_verified": true,
+      "exported_sha256": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\adaptive_focus_fire.py",
+      "exported_path": "skills/adaptive_focus_fire.py",
+      "git_commit": "7c2ca64b2a54b2119fa6c84e5f2affd5e9e26fca",
+      "git_path": "micro/jev_micro/skills/adaptive_focus_fire.py",
+      "conversion": "git_LF_to_recorded_CRLF",
+      "sha256": "600df9fed8b9d2c15eb368fbeb3d3e4664e89c8b7c63df1989d04b6b09ed1eee",
+      "hash_verified": true,
+      "exported_sha256": "600df9fed8b9d2c15eb368fbeb3d3e4664e89c8b7c63df1989d04b6b09ed1eee"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\combat_timing.py",
+      "exported_path": "skills/combat_timing.py",
+      "git_commit": "0e1473a386bfd278cfaa03e7de097d2686357a66",
+      "git_path": "micro/jev_micro/skills/combat_timing.py",
+      "conversion": "raw",
+      "sha256": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+      "hash_verified": true,
+      "exported_sha256": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\cover_retreat.py",
+      "exported_path": "skills/cover_retreat.py",
+      "git_commit": "7c2ca64b2a54b2119fa6c84e5f2affd5e9e26fca",
+      "git_path": "micro/jev_micro/skills/cover_retreat.py",
+      "conversion": "git_LF_to_recorded_CRLF",
+      "sha256": "877b74ecffe4aca7c1e9076df0d6cdaa1f9cbadc45d2362b8ce6a8e281b1e449",
+      "hash_verified": true,
+      "exported_sha256": "877b74ecffe4aca7c1e9076df0d6cdaa1f9cbadc45d2362b8ce6a8e281b1e449"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\focus_fire.py",
+      "exported_path": "skills/focus_fire.py",
+      "git_commit": "7c2ca64b2a54b2119fa6c84e5f2affd5e9e26fca",
+      "git_path": "micro/jev_micro/skills/focus_fire.py",
+      "conversion": "git_LF_to_recorded_CRLF",
+      "sha256": "939ff95eb71a170abba6f251bcdfc0482c4de211964fe1d4d9626a1c570d5a33",
+      "hash_verified": true,
+      "exported_sha256": "939ff95eb71a170abba6f251bcdfc0482c4de211964fe1d4d9626a1c570d5a33"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\heal_assign.py",
+      "exported_path": "skills/heal_assign.py",
+      "git_commit": "545de329d1b2b3715a619d4ac9d395c7a45501f2",
+      "git_path": "micro/jev_micro/skills/heal_assign.py",
+      "conversion": "raw",
+      "sha256": "980792dffc199195b874cac4cc4d0beca0f0d213b0e2b86f43f1e882c83c21f5",
+      "hash_verified": true,
+      "exported_sha256": "980792dffc199195b874cac4cc4d0beca0f0d213b0e2b86f43f1e882c83c21f5"
+    },
+    {
+      "original_source": "game_skill\\micro\\jev_micro\\skills\\movement_scoring.py",
+      "exported_path": "skills/movement_scoring.py",
+      "git_commit": "7c2ca64b2a54b2119fa6c84e5f2affd5e9e26fca",
+      "git_path": "micro/jev_micro/skills/movement_scoring.py",
+      "conversion": "git_LF_to_recorded_CRLF",
+      "sha256": "55e053cfa0d4743d3fcaa8190ee111afd0a88ba9d843bf8e7e2150fac6063eb5",
+      "hash_verified": true,
+      "exported_sha256": "55e053cfa0d4743d3fcaa8190ee111afd0a88ba9d843bf8e7e2150fac6063eb5"
+    }
+  ],
+  "artifacts": [
+    {
+      "source": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\run.json",
+      "exported_path": "provenance/v2_seed100/run.json",
+      "sha256": "161ef7a78d8fd0f287d1715c84cb83b379cc4416ec4d45a218ba839576e2fd91"
+    },
+    {
+      "source": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\manifest.json",
+      "exported_path": "provenance/v2_seed100/manifest.json",
+      "sha256": "06552ba48d62e7e04051595e231c30d2fe7c9bdbd7ff9a22e8994ca4b71aab07"
+    },
+    {
+      "source": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\summary.json",
+      "exported_path": "provenance/v2_seed100/summary.json",
+      "sha256": "32401add21a364424f296f4aa4e6ef1dd4ac43aa9301a2bc523204c6ab9ae611"
+    },
+    {
+      "source": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\episodes.json",
+      "exported_path": "provenance/v2_seed100/episodes.json",
+      "sha256": "907f51fcfac154325452ae7daf2580e1080cef55424b1c46000c09517640a1eb"
+    }
+  ],
+  "new_files": {
+    "__init__.py": "package marker only; no runtime import or algorithm changes",
+    "README.md": "scope and historical usage",
+    "provenance.json": "export evidence"
+  },
+  "protocol_dependency": {
+    "path": "client.py",
+    "reason": "skill_policy imports validate_response from original client module",
+    "contains_credentials": false,
+    "pure_skill_calls_client": false
+  },
+  "secrets": "No config.md read or copied; artifact JSON has no API-key/password/auth-token fields."
+}

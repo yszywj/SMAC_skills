@@ -1,0 +1,172 @@
+[
+  {
+    "episode": 1,
+    "scenario_sha256": "4db9cfd599ba7da61feb3a9a16636cfee6bb3332b5ae2571a046a0642f6e9868",
+    "initial_state_sha256": "4c7287f876018813b543eae0571fb44385d1139f4a7c06ef129af326872042d4",
+    "outcome": "win",
+    "steps": 83,
+    "reward": 20.0,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.30000000000000004,
+    "wall_seconds": 15.734999999869615,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0001.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 7,
+      "dead_enemies": 10
+    }
+  },
+  {
+    "episode": 2,
+    "scenario_sha256": "e65ebb2bcf472725332d096bdfc655a8c5c8f69145cae20e33a343f91cf7233f",
+    "initial_state_sha256": "3f81c1a6b80ef65fdd32759177107fc41a4f532e5ddf9164c927919895ac181a",
+    "outcome": "win",
+    "steps": 88,
+    "reward": 19.999999999999996,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.30000000000000004,
+    "wall_seconds": 11.858999999938533,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0002.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 7,
+      "dead_enemies": 10
+    }
+  },
+  {
+    "episode": 3,
+    "scenario_sha256": "c2ed2c81beb31ec0929ad282c2a39602f408c514f3c83f96ae332b8354df2570",
+    "initial_state_sha256": "c1237df4083887d5d7d6952b2e0311c40999a6939118b4080437e929cab2ef97",
+    "outcome": "win",
+    "steps": 77,
+    "reward": 20.0,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.30000000000000004,
+    "wall_seconds": 11.297000000020489,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0003.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 7,
+      "dead_enemies": 10
+    }
+  },
+  {
+    "episode": 4,
+    "scenario_sha256": "77c40ac0efee045c623e87a7daffe4d84b5642c2b32ed046794ac47c36aba7db",
+    "initial_state_sha256": "36f029c1ca347c8e62febbe43c000a7f29b664beb4e3f0912047f85c3f6f89aa",
+    "outcome": "loss",
+    "steps": 83,
+    "reward": 16.041871921182274,
+    "enemy_elimination_fraction": 0.8,
+    "allied_survival_fraction": 0.0,
+    "wall_seconds": 11.375,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0004.SC2Replay",
+    "info": {
+      "battle_won": false,
+      "dead_allies": 10,
+      "dead_enemies": 8
+    }
+  },
+  {
+    "episode": 5,
+    "scenario_sha256": "862aa59b086ab565a446cad9a713178a1cf032b17f51733df064783366ea9b3a",
+    "initial_state_sha256": "a54fa8613c8bf053b3dc57b5e646ca3acf1d17c3e8f2b5be2fb99a2a2a120421",
+    "outcome": "win",
+    "steps": 68,
+    "reward": 20.0,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.4,
+    "wall_seconds": 11.437999999849126,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0005.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 6,
+      "dead_enemies": 10
+    }
+  },
+  {
+    "episode": 6,
+    "scenario_sha256": "ee7e99ccc281c4c77d3e77c39922d561f245f969041f1accaf25fe287b88b9fe",
+    "initial_state_sha256": "a06a247acd0c1f33e4679772d0c14de6d05687b349d51d6c3e7fdeb718793564",
+    "outcome": "loss",
+    "steps": 70,
+    "reward": 15.031111111111114,
+    "enemy_elimination_fraction": 0.6,
+    "allied_survival_fraction": 0.0,
+    "wall_seconds": 11.5,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0006.SC2Replay",
+    "info": {
+      "battle_won": false,
+      "dead_allies": 10,
+      "dead_enemies": 6
+    }
+  },
+  {
+    "episode": 7,
+    "scenario_sha256": "33a18ced54b388a571561f487417ae7581b33db02651feb24c2be6a2b247d65f",
+    "initial_state_sha256": "8a11719984c86a17122af86e17b4eb296b0e7e2ab3f0031775de37718b02afa0",
+    "outcome": "win",
+    "steps": 60,
+    "reward": 20.000000000000007,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.5,
+    "wall_seconds": 10.530999999959022,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0007.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 5,
+      "dead_enemies": 10
+    }
+  },
+  {
+    "episode": 8,
+    "scenario_sha256": "d4a677f20f3171133909520840c66f28e38f5e0f8eecf5a86be699f2b715de82",
+    "initial_state_sha256": "b4be389ca46dedf3468b0606e88d27b41f0356ebfdde8e9e6b86c9c0b6cf93e4",
+    "outcome": "loss",
+    "steps": 73,
+    "reward": 13.848118279569896,
+    "enemy_elimination_fraction": 0.7,
+    "allied_survival_fraction": 0.0,
+    "wall_seconds": 12.25,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0008.SC2Replay",
+    "info": {
+      "battle_won": false,
+      "dead_allies": 10,
+      "dead_enemies": 7
+    }
+  },
+  {
+    "episode": 9,
+    "scenario_sha256": "8109d582e86e7551f10958d7d4192c91354ed4859cca49f5716c52dd21ef4b94",
+    "initial_state_sha256": "9efd075b1cbe85e11342e78a2ea3680726a77d94518cfeeaa55a41dab0d0936a",
+    "outcome": "win",
+    "steps": 72,
+    "reward": 20.00000000000001,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.19999999999999996,
+    "wall_seconds": 11.436999999918044,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0009.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 8,
+      "dead_enemies": 10
+    }
+  },
+  {
+    "episode": 10,
+    "scenario_sha256": "a5d40fb6a2348dee5844ac1f3027ea9711dd5022aa27b6fb8cdd2b67d8b4a2f6",
+    "initial_state_sha256": "b07bd3f76140383862234ed04c91b6946b2dd9c5a415722ebb4ead0446c7a93b",
+    "outcome": "win",
+    "steps": 75,
+    "reward": 20.000000000000004,
+    "enemy_elimination_fraction": 1.0,
+    "allied_survival_fraction": 0.19999999999999996,
+    "wall_seconds": 11.530999999959022,
+    "replay": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill\\replays\\episode-0010.SC2Replay",
+    "info": {
+      "battle_won": true,
+      "dead_allies": 8,
+      "dead_enemies": 10
+    }
+  }
+]

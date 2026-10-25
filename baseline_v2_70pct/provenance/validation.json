@@ -1,0 +1,83 @@
+{
+  "scope": "Exact byte recovery and isolated-import smoke test only; full historical replay is performed separately by the review agent.",
+  "recorded_files_verified": 10,
+  "files": [
+    {
+      "path": "skill_manager.py",
+      "sha256": "fe2bfb311328922dc32cbe7c7c08ec15d02211b65d2a04bbfa42aacce8948757",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skill_policy.py",
+      "sha256": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2",
+      "matches_historical_run": true
+    },
+    {
+      "path": "client.py",
+      "sha256": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/__init__.py",
+      "sha256": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/adaptive_focus_fire.py",
+      "sha256": "600df9fed8b9d2c15eb368fbeb3d3e4664e89c8b7c63df1989d04b6b09ed1eee",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/combat_timing.py",
+      "sha256": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/cover_retreat.py",
+      "sha256": "877b74ecffe4aca7c1e9076df0d6cdaa1f9cbadc45d2362b8ce6a8e281b1e449",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/focus_fire.py",
+      "sha256": "939ff95eb71a170abba6f251bcdfc0482c4de211964fe1d4d9626a1c570d5a33",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/heal_assign.py",
+      "sha256": "980792dffc199195b874cac4cc4d0beca0f0d213b0e2b86f43f1e882c83c21f5",
+      "matches_historical_run": true
+    },
+    {
+      "path": "skills/movement_scoring.py",
+      "sha256": "55e053cfa0d4743d3fcaa8190ee111afd0a88ba9d843bf8e7e2150fac6063eb5",
+      "matches_historical_run": true
+    }
+  ],
+  "independent_namespaces": true,
+  "baseline_module": "_smacv2_portable_jev_skills_baseline_v2_70pct.skill_manager",
+  "current_module": "_smacv2_portable_jev_skills.skill_manager",
+  "sys_path_unchanged_by_load_manager": true,
+  "smoke": {
+    "run": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\runs\\native-10v10-v2-jev-astra-skill-n10-seed100\\adaptive-skill",
+    "episode": 1,
+    "zero_based_observation_step": 0,
+    "actions": [
+      2,
+      2,
+      2,
+      5,
+      2,
+      5,
+      3,
+      4,
+      2,
+      3
+    ],
+    "matches_recorded": true,
+    "all_actions_legal": true,
+    "payload_unchanged": true,
+    "finite_telemetry": true
+  },
+  "new_sc2_games": 0,
+  "model_requests": 0
+}

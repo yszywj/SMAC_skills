@@ -1,0 +1,55 @@
+{
+  "method": "adaptive-skill",
+  "status": "complete",
+  "error": null,
+  "manifest_sha256": "2e75c249dd5d217af62080c701f10e5431921bcd94aa932783e61d98fcadd73a",
+  "completed_episodes": 10,
+  "expected_episodes": 10,
+  "outcomes": {
+    "win": 7,
+    "loss": 3,
+    "draw": 0,
+    "timeout": 0
+  },
+  "win_rate": 0.7,
+  "mean_enemy_elimination": 0.91,
+  "wall_seconds": 120.18699999991804,
+  "jev_requests": 0,
+  "jev_usage": {},
+  "median_team_wait_ms": null,
+  "planner": null,
+  "skill": {
+    "activations": 190,
+    "steps": 749,
+    "terminations": {
+      "max_steps": 184
+    },
+    "reassignments": 0,
+    "estimated_overkill": 973.12,
+    "predicted_damage": 17346.0,
+    "selections": {
+      "adaptive_focus_fire": 190
+    },
+    "fallback_steps": 0,
+    "role_reassignments": 0,
+    "safe_streak_exits": 0,
+    "retreat_unit_steps": 0,
+    "heal_assignments_created": 0,
+    "heal_target_switches": 0,
+    "heal_self_preserves": 0,
+    "heal_no_target_steps": 0,
+    "adaptive_engage_steps": 499,
+    "adaptive_retreat_steps": 238,
+    "adaptive_all_in_steps": 12,
+    "adaptive_retreat_unit_steps": 270,
+    "adaptive_reengagements": 121,
+    "adaptive_all_in_triggers": 1,
+    "immediate_damage": 4170.0,
+    "window_only_damage": 13176.0,
+    "movement_evaluations": 893,
+    "kept_attack_positions": 246,
+    "adaptive_recovery_unit_steps": 34
+  },
+  "monetary_cost": null,
+  "cost_note": "Usage recorded; price not assumed."
+}

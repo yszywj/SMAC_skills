@@ -1,0 +1,31 @@
+{
+  "version": "baseline_v6_20261024",
+  "source_snapshot": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\analysis\\skill_v2_v6_paired_20261024\\SOURCE_SNAPSHOT.json",
+  "source_hashes": {
+    "__init__.py": "6a9b2fbb7a9a2db671dc16917068861086cdaa833dc399c20c0ad0a1733e8436",
+    "client.py": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+    "skill_manager.py": "0ea30b642e601c57920f31d575f802039ff587b814f88b046984e141df1570a6",
+    "skill_policy.py": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2",
+    "unit_value.py": "29906321e9191393213d5ca85977656e7f486b1061e63095d41eefee74fce854",
+    "skills\\__init__.py": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+    "skills\\adaptive_focus_fire.py": "738a421e99b1db2a23670725322a71a89043cc1c10fbbe499cba7b6f3f0a35d2",
+    "skills\\combat_timing.py": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+    "skills\\coordinated_approach.py": "65b7d1ace0df2fa83a8294b498e002221b9590d885f17f8f895ce26449db9297",
+    "skills\\cover_retreat.py": "99f203139cec50f9ad1c40a1acedd0e3a222235737e6eeb29c8229c2f0e571bd",
+    "skills\\damage_model.py": "45a93ac8f3d1ff090d52cd77bd54ea7e85d50f89c4c03a8449daa8ba3630903d",
+    "skills\\engagement_control.py": "9f11477589ab2f7dd04380f6925721df54ad5edb87cb9a2702edb40d1943a7a5",
+    "skills\\focus_fire.py": "e54414e6471fc0963f891dfbef2a431b7e67bac5d3e7ee3abe5a269c98baa8a1",
+    "skills\\heal_assign.py": "5601f43e4641a932321042fcab083cb2b47ccb8532703a8f3847838564db28a6",
+    "skills\\movement_scoring.py": "c53cd09cc5ca4e3a613b0bdea5abf6a4c0a0da6854875d69816da8150c6c5a2f"
+  },
+  "historical_results": {
+    "seed_range": [
+      170,
+      189
+    ],
+    "5v5_wins": 15,
+    "10v10_wins": 15,
+    "episodes_per_size": 20
+  },
+  "note": "Frozen before v7; future edits belong only in skills/current."
+}
