@@ -1,0 +1,303 @@
+"""Run reproducible, resumable SMAC-Hard map sweeps."""
+
+import argparse
+import json
+import os
+import statistics
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from .catalog import SUPPORTED_MAPS, DEVELOPMENT_MAPS, inventory, map_param_registry
+from .run import (REPO, positive, write_json, add_unit_value_arguments, combat_parameters,
+                  unit_value_parameters, unit_value_cli_arguments, unit_value_metadata)
+from .unit_value import validate_parameters
+from .planner import add_planner_arguments
+
+
+def result_row(map_name, policy, output, returncode):
+    summary_file = output / "summary.json"
+    summary = json.loads(summary_file.read_text(encoding="utf-8")) if summary_file.is_file() else {}
+    episodes = [e for e in summary.get("episodes", []) if e["status"] in {"win", "loss", "draw", "timeout"}]
+    def mean(fn):
+        return round(statistics.mean(fn(e) for e in episodes), 2) if episodes else None
+    return {
+        "map": map_name, "policy": policy, "returncode": returncode,
+        "failure": summary.get("failure") or ("process_failed" if returncode else None),
+        "summary_file": str(summary_file), "completed_episodes": len(episodes),
+        "wins": sum(e["status"] == "win" for e in episodes),
+        "statuses": [e["status"] for e in summary.get("episodes", [])],
+        "mean_enemy_kills": mean(lambda e: e["initial"]["enemies_alive"] - e["final"]["enemies_alive"]),
+        "mean_allies_alive": mean(lambda e: e["final"]["allies_alive"]),
+        "mean_enemy_health_and_shield": mean(lambda e: e["final"]["enemy_health"] + e["final"]["enemy_shield"]),
+        "mean_allied_health_and_shield": mean(lambda e: e["final"]["allied_health"] + e["final"]["allied_shield"]),
+        "mean_steps": mean(lambda e: e["steps"]),
+        "requests": summary.get("requests", 0),
+        "latency_median_ms": summary.get("latency_median_ms"),
+        "api_errors": summary.get("api_errors", 0),
+        "sc2_action_errors": summary.get("sc2_action_errors", 0),
+        "fixed_step_checks": summary.get("fixed_step_checks", 0),
+        "input_tokens": summary.get("input_tokens", 0),
+        "output_tokens": summary.get("output_tokens", 0),
+        "estimated_api_cost_usd": summary.get("estimated_api_cost_usd", 0),
+        "development_map": map_name in DEVELOPMENT_MAPS,
+        "planner_result": summary.get("planner_result"),
+        "planner_fixed_step_checks": summary.get("planner_fixed_step_checks", 0),
+        "skill_mode": summary.get("skill_mode", "off"),
+        "skill_activations": (summary.get("skill") or {}).get("activations", 0),
+        "skill_steps": (summary.get("skill") or {}).get("steps", 0),
+        "skill_terminations": (summary.get("skill") or {}).get("terminations", {}),
+        **unit_value_metadata(validate_parameters(summary.get("unit_value_parameters",
+                                                              {"mode": summary.get("unit_value_mode", "off")}))),
+        "unit_value_version": summary.get("unit_value_version"),
+        "unit_value_evaluations": (summary.get("skill") or {}).get("unit_value_evaluations", 0),
+        "unit_value_evaluation_ms": (summary.get("skill") or {}).get("unit_value_evaluation_ms", 0),
+        "unit_value_influenced_decisions": (summary.get("skill") or {}).get("unit_value_influenced_decisions", 0),
+        "target_switches": (summary.get("skill") or {}).get("target_switches", 0),
+        "retreat_unit_steps": (summary.get("skill") or {}).get("retreat_unit_steps", 0),
+        "adaptive_retreat_unit_steps": (summary.get("skill") or {}).get("adaptive_retreat_unit_steps", 0),
+        "adaptive_reengagements": (summary.get("skill") or {}).get("adaptive_reengagements", 0),
+        "heal_target_switches": (summary.get("skill") or {}).get("heal_target_switches", 0),
+        "estimated_overkill": (summary.get("skill") or {}).get("estimated_overkill", 0),
+    }
+
+
+def save_report(output, settings, results, startup_failed=False):
+    invalid_file = output / "invalidated-runs.json"
+    invalidated = json.loads(invalid_file.read_text(encoding="utf-8")) if invalid_file.exists() else {}
+    excluded_cost = sum(json.loads(Path(row["summary_file"]).read_text(encoding="utf-8")).get("estimated_api_cost_usd", 0)
+                        for row in invalidated.get("invalidated_runs", []))
+    summary = {**settings, "results": results, "stopped_after_startup_error": startup_failed,
+               "planner_requests": sum((r.get("planner_result") or {}).get("requests", 0) for r in results),
+               "planner_successful_plans": sum((r.get("planner_result") or {}).get("successful_responses", 0) for r in results),
+               "completed_episodes": sum(r["completed_episodes"] for r in results),
+               "wins": sum(r["wins"] for r in results),
+               "estimated_api_cost_usd": round(sum(r["estimated_api_cost_usd"] for r in results), 9),
+               "excluded_attempt_cost_usd": round(excluded_cost, 9),
+               "total_cost_including_excluded_usd": round(sum(r["estimated_api_cost_usd"] for r in results) + excluded_cost, 9),
+               "skill_activations": sum(r.get("skill_activations", 0) for r in results),
+               "skill_steps": sum(r.get("skill_steps", 0) for r in results)}
+    for key in ("unit_value_evaluations", "unit_value_evaluation_ms", "unit_value_influenced_decisions",
+                "target_switches", "retreat_unit_steps", "adaptive_retreat_unit_steps",
+                "adaptive_reengagements", "heal_target_switches", "estimated_overkill"):
+        summary[key] = sum(row.get(key, 0) for row in results)
+    write_json(output / "summary.json", summary)
+    lines = ["# SMAC-Hard map smoke tests", "",
+             "Base opponent, shared team vision, fixed-step simulation, abilities disabled. Three episodes per map are exploratory results, not reliable win-rate estimates.", "",
+             "Maps marked dev are developer scenarios. Archived maps and dev scenarios use explicit attack-move extensions where the upstream base script has no implementation.", "",
+             "| Map | Policy | Wins/completed | Results | Mean kills | Mean survivors | JEV USD | Astra plans |",
+             "| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |"]
+    for row in results:
+        link = Path(row["summary_file"]).relative_to(output).as_posix()
+        label = row["map"] + (" (dev)" if row["development_map"] else "")
+        lines.append(f"| {label} | [{row['policy']}]({link}) | {row['wins']}/{row['completed_episodes']} "
+                     f"| {', '.join(row['statuses'])} | {row['mean_enemy_kills']} | {row['mean_allies_alive']} "
+                     f"| {row['estimated_api_cost_usd']:.5f} | {(row.get('planner_result') or {}).get('successful_responses', 0)} |")
+    if settings.get("planner") == "codex":
+        lines.append("\nOne Astra map plan is reused in every JEV request across all episodes. "
+                     "JEV cost estimates exclude Codex account usage; Astra token counts are in each planner_result.")
+    for row in results:
+        if row["failure"]:
+            lines.append(f"\nRun error ({row['map']}/{row['policy']}): {row['failure']}")
+    if startup_failed:
+        lines.append("\nRemaining runs were not attempted because SC2 could not start. Resume after resolving the startup error.")
+    (output / "comparison.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--maps", nargs="+", choices=SUPPORTED_MAPS, default=["8m", "3s_vs_3z", "2s3z"])
+    parser.add_argument("--all-maps", action="store_true")
+    parser.add_argument("--policies", nargs="+", choices=["jev", "nearest"], default=["nearest", "jev"])
+    parser.add_argument("--episodes", type=int, default=3)
+    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--step-mul", type=int, default=8)
+    parser.add_argument("--model", default="jev-1.13.0")
+    parser.add_argument("--request-timeout", type=positive, default=10.0)
+    parser.add_argument("--max-requests", type=int, help="Per-map limit; otherwise derived from map step limit and maximum unit batches")
+    parser.add_argument("--batch-concurrency", type=int, default=4)
+    parser.add_argument("--api-retries", type=int, default=2)
+    parser.add_argument("--skill-mode", choices=["off", "always", "jev"], default="off")
+    parser.add_argument("--skill-max-steps", type=int, default=4)
+    parser.add_argument("--skill-name", choices=["focus_fire_budget", "cover_retreat",
+                                                 "heal_assign", "adaptive_focus_fire"],
+                        default="focus_fire_budget")
+    parser.add_argument("--adaptive-posture", choices=["aggressive", "balanced", "defensive"],
+                        default="balanced")
+    parser.add_argument("--adaptive-max-retreat-steps", type=int, default=2)
+    parser.add_argument("--adaptive-stall-steps", type=int, default=6)
+    parser.add_argument("--adaptive-disable-retreat", action="store_true")
+    parser.add_argument("--adaptive-disable-all-in", action="store_true")
+    parser.add_argument("--adaptive-window-fire", action="store_true")
+    parser.add_argument("--adaptive-range-preserving-move", action="store_true")
+    parser.add_argument("--adaptive-target-scoring", action="store_true")
+    parser.add_argument("--adaptive-coordinated-approach", action="store_true")
+    parser.add_argument("--adaptive-safe-reentry", action="store_true")
+    parser.add_argument("--adaptive-accurate-damage", action="store_true")
+    parser.add_argument("--adaptive-critical-escape", action="store_true")
+    parser.add_argument("--adaptive-planned-reentry", action="store_true")
+    parser.add_argument("--adaptive-engagement-commitment", action="store_true")
+    parser.add_argument("--adaptive-approach-progress-guard", action="store_true")
+    parser.add_argument("--heal-switch-margin", type=float, default=0.15)
+    parser.add_argument("--cover-risk-threshold", type=float, default=0.35)
+    parser.add_argument("--cover-safe-streak", type=int, default=2)
+    add_unit_value_arguments(parser)
+    parser.add_argument("--sc2-path", type=Path, default=Path(os.environ.get("SC2PATH", r"C:\game\StarCraft II")))
+    parser.add_argument("--config-file", type=Path, default=REPO.parent / "config.md")
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--resume", action="store_true", help="Keep completed cases, preserve failed attempts and retry them")
+    add_planner_arguments(parser)
+    args = parser.parse_args()
+    if args.all_maps:
+        args.maps = list(SUPPORTED_MAPS)
+    if min(args.episodes, args.step_mul, args.batch_concurrency) < 1 or args.api_retries < 0 or (args.max_requests is not None and args.max_requests < 1):
+        parser.error("episodes, step-mul, concurrency and max-requests must be positive; retries cannot be negative")
+    if len(set(args.maps)) != len(args.maps):
+        parser.error("maps must be unique")
+    if len(set(args.policies)) != len(args.policies):
+        parser.error("policies must be unique")
+    if args.resume and args.output_dir is None:
+        parser.error("--resume requires --output-dir")
+    output = (args.output_dir or REPO / "jev_runs" / datetime.now().strftime("maps-%Y%m%d-%H%M%S-%f")).resolve()
+    output.mkdir(parents=True, exist_ok=args.resume)
+    settings = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items() if k != "config_file"}
+    settings.update(output_dir=str(output), opponent="base", realtime=False, use_ability=False,
+                    **unit_value_metadata(unit_value_parameters(args)),
+                    combat_parameters=combat_parameters(args),
+                    planned_runs=len(args.policies) * len(args.maps),
+                    planned_episodes=len(args.policies) * len(args.maps) * args.episodes)
+    suite_file = output / "suite.json"
+    if args.resume and suite_file.exists():
+        previous = json.loads(suite_file.read_text(encoding="utf-8"))
+        previous_unit_value = validate_parameters(previous.get("unit_value_parameters",
+                                                               {"mode": previous.get("unit_value_mode", "off")}))
+        if previous_unit_value != unit_value_parameters(args):
+            parser.error("Resume settings differ: unit_value_parameters")
+        for key in ("adaptive_coordinated_approach", "adaptive_safe_reentry",
+                    "adaptive_accurate_damage", "adaptive_critical_escape", "adaptive_planned_reentry",
+                    "adaptive_engagement_commitment", "adaptive_approach_progress_guard"):
+            if previous.get(key, False) != settings[key]:
+                parser.error(f"Resume settings differ: {key}")
+        for key in ("maps", "policies", "episodes", "seed", "step_mul", "model", "opponent",
+                    "skill_mode", "skill_max_steps", "skill_name",
+                    "cover_risk_threshold", "cover_safe_streak", "heal_switch_margin",
+                    "adaptive_posture", "adaptive_max_retreat_steps", "adaptive_stall_steps",
+                    "adaptive_disable_retreat", "adaptive_disable_all_in",
+                    "adaptive_window_fire", "adaptive_range_preserving_move",
+                    "adaptive_target_scoring"):
+            if previous.get(key) != settings.get(key):
+                parser.error(f"Resume settings differ: {key}")
+        if previous.get("planner", "none") != settings["planner"]:
+            parser.error("Resume settings differ: planner")
+        if settings["planner"] == "codex":
+            for key in ("planner_model", "planner_effort"):
+                if previous.get(key) != settings[key]:
+                    parser.error(f"Resume settings differ: {key}")
+    else:
+        write_json(suite_file, settings)
+        write_json(output / "inventory.json", inventory())
+    results = []
+    invalid_file = output / "invalidated-runs.json"
+    invalidated = json.loads(invalid_file.read_text(encoding="utf-8")) if invalid_file.exists() else {}
+    invalid_paths = {row["summary_file"] for row in invalidated.get("invalidated_runs", [])}
+    startup_failed = False
+    print(f"Suite output: {output}", flush=True)
+    for map_name in args.maps:
+        for policy in args.policies:
+            case_output = output / map_name / policy
+            if args.resume:
+                completed_attempts = [case_output, *sorted(case_output.parent.glob(policy + "-retry-*"))]
+                reusable = None
+                for attempt_output in completed_attempts:
+                    if (attempt_output / "summary.json").exists() and str(attempt_output / "summary.json") not in invalid_paths:
+                        row = result_row(map_name, policy, attempt_output, 0)
+                        if not row["failure"] and row["completed_episodes"] == args.episodes:
+                            reusable = row
+                if reusable:
+                    results.append(reusable)
+                    save_report(output, settings, results)
+                    print(f"Keeping completed {map_name} / {policy}", flush=True)
+                    continue
+                if case_output.exists():
+                    case_output = case_output.parent / (policy + "-retry-" + datetime.now().strftime("%Y%m%d-%H%M%S-%f"))
+            params = map_param_registry[map_name]
+            max_requests = args.max_requests or args.episodes * params["limit"] * params["n_agents"] * (args.api_retries + 1)
+            command = [sys.executable, "-X", "utf8", "-B", "-m", "jev_micro.run",
+                       "--map", map_name, "--policy", policy, "--opponent", "base",
+                       "--episodes", str(args.episodes), "--seed", str(args.seed),
+                       "--step-mul", str(args.step_mul), "--model", args.model,
+                       "--request-timeout", str(args.request_timeout),
+                       "--max-requests", str(max_requests), "--sc2-path", str(args.sc2_path),
+                       "--batch-concurrency", str(args.batch_concurrency), "--api-retries", str(args.api_retries),
+                       "--config-file", str(args.config_file.resolve()), "--output-dir", str(case_output),
+                       "--skill-mode", args.skill_mode, "--skill-max-steps", str(args.skill_max_steps),
+                       "--skill-name", args.skill_name,
+                       "--cover-risk-threshold", str(args.cover_risk_threshold),
+                       "--cover-safe-streak", str(args.cover_safe_streak),
+                       "--heal-switch-margin", str(args.heal_switch_margin),
+                       "--adaptive-posture", args.adaptive_posture,
+                       "--adaptive-max-retreat-steps", str(args.adaptive_max_retreat_steps),
+                       "--adaptive-stall-steps", str(args.adaptive_stall_steps)]
+            command.extend(unit_value_cli_arguments(args))
+            if args.adaptive_disable_retreat:
+                command.append("--adaptive-disable-retreat")
+            if args.adaptive_disable_all_in:
+                command.append("--adaptive-disable-all-in")
+            if args.adaptive_window_fire:
+                command.append("--adaptive-window-fire")
+            if args.adaptive_range_preserving_move:
+                command.append("--adaptive-range-preserving-move")
+            if args.adaptive_target_scoring:
+                command.append("--adaptive-target-scoring")
+            if args.adaptive_coordinated_approach:
+                command.append("--adaptive-coordinated-approach")
+            if args.adaptive_safe_reentry:
+                command.append("--adaptive-safe-reentry")
+            if args.adaptive_accurate_damage:
+                command.append("--adaptive-accurate-damage")
+            if args.adaptive_critical_escape:
+                command.append("--adaptive-critical-escape")
+            if args.adaptive_planned_reentry:
+                command.append("--adaptive-planned-reentry")
+            if args.adaptive_engagement_commitment:
+                command.append("--adaptive-engagement-commitment")
+            if args.adaptive_approach_progress_guard:
+                command.append("--adaptive-approach-progress-guard")
+            if args.planner == "codex" and policy == "jev":
+                command.extend(["--planner", "codex", "--planner-model", args.planner_model,
+                                "--planner-effort", args.planner_effort,
+                                "--planner-timeout", str(args.planner_timeout)])
+                if args.codex_path:
+                    command.extend(["--codex-path", str(args.codex_path.resolve())])
+            print(f"Starting {map_name} / {policy}", flush=True)
+            with (output / f"{map_name}-{case_output.name}.log").open("w", encoding="utf-8") as log:
+                with subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      text=True, encoding="utf-8", errors="replace") as process:
+                    for line in process.stdout:
+                        log.write(line)
+                        log.flush()
+                        if line.startswith(("SMAC-Hard ", "Output:", "Client branch:", "Episode ", "Summary:", "Run stopped:", "Planning ", "Plan accepted ")):
+                            print(line, end="", flush=True)
+                    returncode = process.wait()
+            row = result_row(map_name, policy, case_output, returncode)
+            results.append(row)
+            startup_failed = (row["failure"] in {"ConnectError", "SC2LaunchError"}
+                              and row["completed_episodes"] == 0 and row["requests"] == 0)
+            save_report(output, settings, results, startup_failed)
+            print(f"Finished {map_name} / {policy}: {row['wins']}/{row['completed_episodes']} wins, failure={row['failure']}", flush=True)
+            if startup_failed:
+                print("SC2 could not start; stopping the suite before launching other maps.", flush=True)
+                break
+        if startup_failed:
+            break
+    save_report(output, settings, results, startup_failed)
+    print(f"Comparison: {output / 'comparison.md'}", flush=True)
+    if any(row["returncode"] for row in results):
+        parser.exit(1, "Some runs failed; see each run's log and summary.\n")
+
+
+if __name__ == "__main__":
+    from .windows_session import active_display
+    with active_display():
+        main()

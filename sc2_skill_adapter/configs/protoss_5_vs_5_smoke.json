@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "seed": 1,
+  "env_args": {
+    "continuing_episode": false,
+    "difficulty": "7",
+    "game_version": null,
+    "map_name": "10gen_protoss",
+    "move_amount": 2,
+    "obs_all_health": true,
+    "obs_instead_of_state": false,
+    "obs_last_action": false,
+    "obs_own_health": true,
+    "obs_pathing_grid": false,
+    "obs_terrain_height": false,
+    "obs_timestep_number": false,
+    "reward_death_value": 10,
+    "reward_defeat": 0,
+    "reward_negative_scale": 0.5,
+    "reward_only_positive": true,
+    "reward_scale": true,
+    "reward_scale_rate": 20,
+    "reward_sparse": false,
+    "reward_win": 200,
+    "replay_dir": "",
+    "replay_prefix": "",
+    "conic_fov": false,
+    "use_unit_ranges": true,
+    "min_attack_range": 2,
+    "obs_own_pos": true,
+    "num_fov_actions": 12,
+    "capability_config": {
+      "n_units": 5,
+      "n_enemies": 5,
+      "team_gen": {
+        "dist_type": "weighted_teams",
+        "unit_types": [
+          "stalker",
+          "zealot",
+          "colossus"
+        ],
+        "weights": [
+          0.45,
+          0.45,
+          0.1
+        ],
+        "observe": true
+      },
+      "start_positions": {
+        "dist_type": "surrounded_and_reflect",
+        "p": 0.5,
+        "map_x": 32,
+        "map_y": 32
+      }
+    },
+    "state_last_action": true,
+    "state_timestep_number": false,
+    "step_mul": 8,
+    "heuristic_ai": false,
+    "debug": false,
+    "prob_obs_enemy": 1.0,
+    "action_mask": true
+  },
+  "episodes": [
+    {
+      "index": 0,
+      "sc2_seed": 1,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "stalker",
+            "stalker",
+            "colossus",
+            "zealot",
+            "zealot"
+          ],
+          "enemy_team": [
+            "stalker",
+            "stalker",
+            "colossus",
+            "zealot",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              8.747546015667986,
+              10.712546764011925
+            ],
+            [
+              3.709037420709136,
+              5.450399727070522
+            ],
+            [
+              6.873013361807078,
+              22.182731844929375
+            ],
+            [
+              4.030287321823643,
+              24.058662177627664
+            ],
+            [
+              4.08622705907056,
+              12.989320654423729
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              23.252453984332014,
+              10.712546764011925
+            ],
+            [
+              28.290962579290863,
+              5.450399727070522
+            ],
+            [
+              25.12698663819292,
+              22.182731844929375
+            ],
+            [
+              27.969712678176357,
+              24.058662177627664
+            ],
+            [
+              27.91377294092944,
+              12.989320654423729
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "e5175bfcd7c62cd29de170fb812c8f2f05937587407419d3ddc00509b3308fff"
+    }
+  ],
+  "sha256": "93f761bb850e2c5e519e15ad1b673df70c5061d18112ebaf9bb5d538d1d078ef"
+}

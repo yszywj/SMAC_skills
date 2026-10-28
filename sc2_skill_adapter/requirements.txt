@@ -1,0 +1,5 @@
+pysc2==4.0.0
+numpy==1.26.4
+protobuf==3.20.3
+httpx==0.28.1
+PyYAML==6.0.2

@@ -1,0 +1,18 @@
+{
+  "client.py": {
+    "source": "game_skill\\micro\\jev_micro\\client.py",
+    "source_sha256": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e"
+  },
+  "feedback.py": {
+    "source": "game_skill\\micro\\jev_micro\\feedback.py",
+    "source_sha256": "0e11c3bf70b9e64302687dac41b70225b3d7d08094186e94401b10354068e609"
+  },
+  "policy.py": {
+    "source": "game_skill\\micro\\jev_micro\\policy.py",
+    "source_sha256": "1a6a66e7160327ff49fc81902bf87ffab82e4f3b6f4ca03d7e3fc0210f8f6301"
+  },
+  "planner.py": {
+    "source": "game_skill\\micro\\jev_micro\\planner.py",
+    "source_sha256": "4cc038577c27e1d538923ddd0c0c40ec9a91596dfce704c6e35e7ebd13056c66"
+  }
+}

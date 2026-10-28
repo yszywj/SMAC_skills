@@ -1,0 +1,808 @@
+{
+  "version": 1,
+  "seed": 100,
+  "env_args": {
+    "continuing_episode": false,
+    "difficulty": "7",
+    "game_version": null,
+    "map_name": "10gen_protoss",
+    "move_amount": 2,
+    "obs_all_health": true,
+    "obs_instead_of_state": false,
+    "obs_last_action": false,
+    "obs_own_health": true,
+    "obs_pathing_grid": false,
+    "obs_terrain_height": false,
+    "obs_timestep_number": false,
+    "reward_death_value": 10,
+    "reward_defeat": 0,
+    "reward_negative_scale": 0.5,
+    "reward_only_positive": true,
+    "reward_scale": true,
+    "reward_scale_rate": 20,
+    "reward_sparse": false,
+    "reward_win": 200,
+    "replay_dir": "",
+    "replay_prefix": "",
+    "conic_fov": false,
+    "use_unit_ranges": true,
+    "min_attack_range": 2,
+    "obs_own_pos": true,
+    "num_fov_actions": 12,
+    "capability_config": {
+      "n_units": 5,
+      "n_enemies": 5,
+      "team_gen": {
+        "dist_type": "weighted_teams",
+        "unit_types": [
+          "stalker",
+          "zealot",
+          "colossus"
+        ],
+        "weights": [
+          0.45,
+          0.45,
+          0.1
+        ],
+        "observe": true
+      },
+      "start_positions": {
+        "dist_type": "surrounded_and_reflect",
+        "p": 0.5,
+        "map_x": 32,
+        "map_y": 32
+      }
+    },
+    "state_last_action": true,
+    "state_timestep_number": false,
+    "step_mul": 8,
+    "heuristic_ai": false,
+    "debug": false,
+    "prob_obs_enemy": 1.0,
+    "action_mask": true,
+    "unit_balance": "native"
+  },
+  "episodes": [
+    {
+      "index": 0,
+      "sc2_seed": 100,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "zealot",
+            "zealot",
+            "stalker",
+            "zealot",
+            "zealot"
+          ],
+          "enemy_team": [
+            "zealot",
+            "zealot",
+            "stalker",
+            "zealot",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              0.10195568973913938,
+              31.89804431026086
+            ],
+            [
+              0.10195568973913938,
+              31.89804431026086
+            ],
+            [
+              0.10195568973913938,
+              31.89804431026086
+            ],
+            [
+              0.10195568973913938,
+              31.89804431026086
+            ],
+            [
+              0.10195568973913938,
+              31.89804431026086
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "94f73e17a4b4c97f24e74e101c007dec5cf8e991c2587154668df99a2c148f7d"
+    },
+    {
+      "index": 1,
+      "sc2_seed": 101,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "stalker",
+            "stalker",
+            "zealot",
+            "stalker",
+            "zealot"
+          ],
+          "enemy_team": [
+            "stalker",
+            "stalker",
+            "zealot",
+            "stalker",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              6.1992643652182515,
+              25.80073563478175
+            ],
+            [
+              6.1992643652182515,
+              25.80073563478175
+            ],
+            [
+              4.826923331257011,
+              4.826923331257011
+            ],
+            [
+              4.826923331257011,
+              4.826923331257011
+            ],
+            [
+              4.826923331257011,
+              4.826923331257011
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "e28445300781508e91c1cd65c15db7126c5c726d79ce0213277d69a9a65f07bd"
+    },
+    {
+      "index": 2,
+      "sc2_seed": 102,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "zealot",
+            "stalker",
+            "stalker",
+            "zealot",
+            "stalker"
+          ],
+          "enemy_team": [
+            "zealot",
+            "stalker",
+            "stalker",
+            "zealot",
+            "stalker"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              1.7427459603301858,
+              15.969653619938892
+            ],
+            [
+              1.9694737999998968,
+              2.9443796032512317
+            ],
+            [
+              13.41063843063278,
+              15.4275302032888
+            ],
+            [
+              2.3053575152978274,
+              19.674081429975445
+            ],
+            [
+              6.884077795837493,
+              7.6406067930826715
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              30.257254039669814,
+              15.969653619938892
+            ],
+            [
+              30.030526200000104,
+              2.9443796032512317
+            ],
+            [
+              18.58936156936722,
+              15.4275302032888
+            ],
+            [
+              29.69464248470217,
+              19.674081429975445
+            ],
+            [
+              25.11592220416251,
+              7.6406067930826715
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "9d08620411c160b27b6cc8b4fc9ba2fdd119427da6ef1c7da1885ad1446466d0"
+    },
+    {
+      "index": 3,
+      "sc2_seed": 103,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "zealot",
+            "zealot",
+            "stalker",
+            "zealot",
+            "zealot"
+          ],
+          "enemy_team": [
+            "zealot",
+            "zealot",
+            "stalker",
+            "zealot",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              8.146563501921104,
+              13.897307522287417
+            ],
+            [
+              13.700753772535613,
+              7.803572865345508
+            ],
+            [
+              2.5938625262950046,
+              18.20354952399555
+            ],
+            [
+              0.20350961642271403,
+              14.466008789954387
+            ],
+            [
+              0.558210193124864,
+              16.572718333984728
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              23.853436498078896,
+              13.897307522287417
+            ],
+            [
+              18.299246227464387,
+              7.803572865345508
+            ],
+            [
+              29.406137473704995,
+              18.20354952399555
+            ],
+            [
+              31.796490383577286,
+              14.466008789954387
+            ],
+            [
+              31.441789806875136,
+              16.572718333984728
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "255afa66ebf16009562c34acb95c6f18cbd3f5e7a67921a2de691908420b7ed4"
+    },
+    {
+      "index": 4,
+      "sc2_seed": 104,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "zealot",
+            "stalker",
+            "colossus",
+            "zealot",
+            "stalker"
+          ],
+          "enemy_team": [
+            "zealot",
+            "stalker",
+            "colossus",
+            "zealot",
+            "stalker"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              22.233336748534633,
+              22.233336748534633
+            ],
+            [
+              22.233336748534633,
+              22.233336748534633
+            ],
+            [
+              9.027598816645863,
+              9.027598816645863
+            ],
+            [
+              8.678620933986853,
+              23.321379066013147
+            ],
+            [
+              8.678620933986853,
+              23.321379066013147
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "f64008c9a9982b83a83890b98d9f9dd0f70438b2e7eb741347b9507e71708942"
+    },
+    {
+      "index": 5,
+      "sc2_seed": 105,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "stalker",
+            "stalker",
+            "stalker",
+            "zealot",
+            "stalker"
+          ],
+          "enemy_team": [
+            "stalker",
+            "stalker",
+            "stalker",
+            "zealot",
+            "stalker"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              12.158627338799898,
+              15.824868210228924
+            ],
+            [
+              1.458392681769685,
+              5.116828115503111
+            ],
+            [
+              0.5190183508463919,
+              12.762563953961788
+            ],
+            [
+              10.38148538166423,
+              7.456856967043699
+            ],
+            [
+              4.168536415411495,
+              26.332307537369537
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              19.841372661200104,
+              15.824868210228924
+            ],
+            [
+              30.541607318230316,
+              5.116828115503111
+            ],
+            [
+              31.48098164915361,
+              12.762563953961788
+            ],
+            [
+              21.61851461833577,
+              7.456856967043699
+            ],
+            [
+              27.831463584588505,
+              26.332307537369537
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "bae208c6dcb269ee5fdeef4613bf89524a297221d62e2653c9babf31c2d9c5b9"
+    },
+    {
+      "index": 6,
+      "sc2_seed": 106,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "stalker",
+            "zealot",
+            "colossus",
+            "zealot",
+            "zealot"
+          ],
+          "enemy_team": [
+            "stalker",
+            "zealot",
+            "colossus",
+            "zealot",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              20.277607928611257,
+              20.277607928611257
+            ],
+            [
+              20.277607928611257,
+              20.277607928611257
+            ],
+            [
+              20.277607928611257,
+              20.277607928611257
+            ],
+            [
+              28.087423344547005,
+              3.912576655452993
+            ],
+            [
+              28.087423344547005,
+              3.912576655452993
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "c5c3ab5829f9e94be1040799fcea3e82979d729a1c5570ab2314f519d52379ca"
+    },
+    {
+      "index": 7,
+      "sc2_seed": 107,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "zealot",
+            "stalker",
+            "zealot",
+            "stalker",
+            "zealot"
+          ],
+          "enemy_team": [
+            "zealot",
+            "stalker",
+            "zealot",
+            "stalker",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              5.349994780081909,
+              2.8755609051669957
+            ],
+            [
+              6.518626877739546,
+              7.804498935874186
+            ],
+            [
+              5.462037917076405,
+              28.55595696001447
+            ],
+            [
+              3.9649157974379117,
+              13.940954642164055
+            ],
+            [
+              7.551872033368082,
+              24.042413285726596
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              26.650005219918093,
+              2.8755609051669957
+            ],
+            [
+              25.481373122260454,
+              7.804498935874186
+            ],
+            [
+              26.537962082923595,
+              28.55595696001447
+            ],
+            [
+              28.03508420256209,
+              13.940954642164055
+            ],
+            [
+              24.44812796663192,
+              24.042413285726596
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "090ce3fab04532f1ecf718ae6815fa745aedf972417415f0118a8b4d818982ba"
+    },
+    {
+      "index": 8,
+      "sc2_seed": 108,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "stalker",
+            "zealot",
+            "stalker",
+            "colossus",
+            "stalker"
+          ],
+          "enemy_team": [
+            "stalker",
+            "zealot",
+            "stalker",
+            "colossus",
+            "stalker"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              18.051684915851283,
+              13.948315084148717
+            ],
+            [
+              18.051684915851283,
+              13.948315084148717
+            ],
+            [
+              18.051684915851283,
+              13.948315084148717
+            ],
+            [
+              10.758846711351822,
+              21.241153288648178
+            ],
+            [
+              26.27450894551168,
+              26.27450894551168
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "6ed680d560f0aeac9a048ac74840b6326d0dfe491ff7ce788147a4a89db5abbc"
+    },
+    {
+      "index": 9,
+      "sc2_seed": 109,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "zealot",
+            "stalker",
+            "zealot",
+            "zealot",
+            "zealot"
+          ],
+          "enemy_team": [
+            "zealot",
+            "stalker",
+            "zealot",
+            "zealot",
+            "zealot"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ],
+            [
+              16.0,
+              16.0
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              21.23621042746483,
+              10.76378957253517
+            ],
+            [
+              21.23621042746483,
+              10.76378957253517
+            ],
+            [
+              18.223586415106073,
+              18.223586415106073
+            ],
+            [
+              18.223586415106073,
+              18.223586415106073
+            ],
+            [
+              18.223586415106073,
+              18.223586415106073
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "3e3fe9de000eae511e7238218bb943ded08a3e4a8741ae8f10de4d1b5145aa25"
+    }
+  ],
+  "sha256": "1888bc11aa6b8bab76ae5764223f952fd5009a743ecba0e3dee87fc6651d3279"
+}

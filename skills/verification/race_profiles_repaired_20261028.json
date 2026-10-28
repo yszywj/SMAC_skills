@@ -1,0 +1,44 @@
+{
+  "kind": "offline_recorded_observation_replay_not_new_win_rate",
+  "results": [
+    {
+      "race": "terran",
+      "episodes": 40,
+      "observations": 2026,
+      "changed_actions_vs_generic": 1062,
+      "actions_per_policy": 20260
+    },
+    {
+      "race": "zerg",
+      "episodes": 40,
+      "observations": 1171,
+      "changed_actions_vs_generic": 457,
+      "actions_per_policy": 11710
+    }
+  ],
+  "source_hashes": {
+    "skills\\current\\__init__.py": "6a9b2fbb7a9a2db671dc16917068861086cdaa833dc399c20c0ad0a1733e8436",
+    "skills\\current\\client.py": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+    "skills\\current\\skill_manager.py": "71464d9b191594e9791aced88e9d55e55d7831be398c98018ee63f62b9dd8429",
+    "skills\\current\\skill_policy.py": "90c56af8ff4bc7c6e435b7bf57815d0457499cfa97fb2ab109cabd2cd9543f55",
+    "skills\\current\\unit_value.py": "29906321e9191393213d5ca85977656e7f486b1061e63095d41eefee74fce854",
+    "skills\\current\\skills\\__init__.py": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+    "skills\\current\\skills\\adaptive_focus_fire.py": "26d39cfaa538d7435dfee2eea121b3a0da3969360902a29246e3b8dc93b6f620",
+    "skills\\current\\skills\\approach_progress.py": "2bdb8a3c535edb258c0fd13370287ef66c579db3ec48a7a2be311df023eeb0ff",
+    "skills\\current\\skills\\cohesive_search.py": "6b14be35a4b1371bd5bf9d4cb3185b506f0242d9009d0ff2fb17821235096d03",
+    "skills\\current\\skills\\combat_positioning.py": "d8283e3eb09d8bd18d04f7e810516d8edab658508b300fe63b5a7e87e2e62222",
+    "skills\\current\\skills\\combat_timing.py": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+    "skills\\current\\skills\\coordinated_approach.py": "e575f139085d0b78b00a9bcccf5703e3b6568759edd35ff0c46cb0f1371757e2",
+    "skills\\current\\skills\\cover_retreat.py": "99f203139cec50f9ad1c40a1acedd0e3a222235737e6eeb29c8229c2f0e571bd",
+    "skills\\current\\skills\\damage_model.py": "45a93ac8f3d1ff090d52cd77bd54ea7e85d50f89c4c03a8449daa8ba3630903d",
+    "skills\\current\\skills\\engagement_control.py": "9f11477589ab2f7dd04380f6925721df54ad5edb87cb9a2702edb40d1943a7a5",
+    "skills\\current\\skills\\focus_fire.py": "e54414e6471fc0963f891dfbef2a431b7e67bac5d3e7ee3abe5a269c98baa8a1",
+    "skills\\current\\skills\\group_geometry.py": "1ec0f46b90f60ea895d64350dd6750fa0dccea7117697c8febc23a5465b0c3e1",
+    "skills\\current\\skills\\heal_assign.py": "5601f43e4641a932321042fcab083cb2b47ccb8532703a8f3847838564db28a6",
+    "skills\\current\\skills\\movement_scoring.py": "c53cd09cc5ca4e3a613b0bdea5abf6a4c0a0da6854875d69816da8150c6c5a2f",
+    "skills\\current\\skills\\race_movement_guard.py": "7bcde08f926af04b961ebafd304b59ce283b7269aeadd2c39187e913ba874b80",
+    "skills\\current\\skills\\regroup.py": "c20de6e29b98378ac21457dafeb53f9311135c2b42b1a92ba9c6fc3cb5cb1525",
+    "skills\\current\\skills\\terran_combat.py": "0b6a0ff731c4bd38687f6ed0b2ceba48139e2a8ff15bbcfa9c074576e9968f5a",
+    "skills\\current\\skills\\zerg_combat.py": "cd8291e471e305bc6c9b0b8668af15436b759a32dc9e5ae599221763bb96349a"
+  }
+}

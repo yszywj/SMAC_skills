@@ -1,8 +1,16 @@
+# Python environments and generated caches
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
+.venvs/
 venv/
+
+# Local credentials
 .env
 .env.*
 !.env.example
+
+# Local experiment outputs and historical runtime snapshots
+/sc2_skill_adapter/runs/
+/sc2_skill_adapter/analysis/
