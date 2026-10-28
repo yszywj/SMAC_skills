@@ -1,0 +1,10 @@
+# langchain_agent only: venv, caches, runs, local config. Keep fixtures/examples.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+runs/
+.codex_requests/
+.codex_smoke/
+configs/local.toml
+.env

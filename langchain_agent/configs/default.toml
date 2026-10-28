@@ -1,0 +1,45 @@
+# smac-langchain default configuration (learning defaults, not tuned optima).
+# Paths are resolved relative to the SMAC_agent workspace root unless absolute.
+
+[paths]
+# Relative paths resolve against the SMAC_agent workspace root.
+skills_current = "skills/current"
+smac_root = "../smacv2"
+sc2_root = 'C:\Program Files (x86)\StarCraft II'
+run_output = "langchain_agent/runs"
+
+[codex]
+# Never hardcode an account-specific model; override in local.toml.
+model = "default"
+reasoning_effort = "medium"
+timeout_seconds = 180
+max_retries = 1
+max_output_bytes = 2000000
+# codex_path = ""                         # optional explicit path to codex.exe
+
+[agent]
+max_model_calls_per_episode = 40
+max_codex_starts_per_episode = 40
+max_tool_calls_per_episode = 120
+max_read_tool_calls_per_episode = 60
+max_execute_commands_per_episode = 40
+max_steps_per_execution = 24              # local steps inside one execute command
+wall_clock_timeout_seconds = 3600
+max_recursion = 40
+
+[skills]
+enabled = ["adaptive_aggressive", "adaptive_balanced", "adaptive_defensive",
+           "focus_fire_budget", "cover_retreat"]
+# spatial/heal candidates are opt-in and additionally gated by the backend:
+enable_regroup = false
+enable_cohesive_search = false
+skill_max_steps = 4
+default_posture = "balanced"
+
+[scenario]
+size = 5
+race = "protoss"
+episodes = 1
+
+[telemetry]
+langsmith = false

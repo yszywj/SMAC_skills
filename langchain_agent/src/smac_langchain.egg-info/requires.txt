@@ -1,0 +1,6 @@
+langchain<2,>=1.4
+langchain-core<2,>=1.7
+pydantic<3,>=2.7
+
+[test]
+pytest>=8

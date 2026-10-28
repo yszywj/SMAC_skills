@@ -1,0 +1,10 @@
+# Example local override. Copy to configs/local.toml (git-ignored) and edit.
+# Values here replace/merge into configs/default.toml (shallow per-section merge).
+
+[codex]
+model = "default"
+reasoning_effort = "low"
+timeout_seconds = 240
+
+[paths]
+# sc2_root = 'D:\Games\StarCraft II'

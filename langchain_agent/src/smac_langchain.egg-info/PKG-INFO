@@ -1,0 +1,10 @@
+Metadata-Version: 2.4
+Name: smac-langchain
+Version: 0.1.0
+Summary: LangChain + Codex CLI high-level tactical agent over the existing SMAC skill stack
+Requires-Python: >=3.11
+Requires-Dist: langchain<2,>=1.4
+Requires-Dist: langchain-core<2,>=1.7
+Requires-Dist: pydantic<3,>=2.7
+Provides-Extra: test
+Requires-Dist: pytest>=8; extra == "test"
