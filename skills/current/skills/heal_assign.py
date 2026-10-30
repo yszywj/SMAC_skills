@@ -16,9 +16,10 @@ Model assumptions and scope (first version):
   Future damage, heal rates and arrival times are not predicted; urgency is
   an estimate, never a claim about future health.
 - Assignment is a deterministic maximum-weight one-to-one matching between
-  healers and legal targets (exact for up to 8 healers, greedy+swap beyond).
-  Several healers may heal the same target in the game engine; one-to-one is
-  our scheduling policy to avoid pointless duplication, not an engine rule.
+  healers and legal targets. The Terran composition additionally reserves
+  targets occupied by observed heal orders until a later observation confirms
+  release: this project's native feedback rejects conflicting orders with
+  AlreadyTargeted. Do not infer simultaneous healing from candidate legality.
 - Planned healing is never counted as restored health. Observed health
   changes are net of enemy damage; this module records assignments only.
 - An endangered healer self-preserves: it is removed from the matching, its

@@ -32,6 +32,7 @@ PARAMS = {
     "melee_range": 1.5,            # own native range below this counts as melee
     "approach_weight": 1.2,        # melee/shorter-range: closing distance is valuable
     "movement_improvement_min": 0.0,  # ties keep the attack; smaller scores are better
+    "known_compatible_threats": False,  # opt in by Terran v6; legacy profiles remain reproducible
 }
 
 
@@ -67,14 +68,31 @@ def engagement_reach(state, actor, target_id):
     return min(reach, mask_range) if mask_range is not None else reach
 
 
+def _confirmed_non_threat(state, actor, enemy_id, enemy, profile, weapon):
+    """Exclude known incompatibility, not every empty SC2 API weapon list.
+
+    Some effect-based weapons are absent from the catalog. A supplied explicit
+    compatibility relation, a known nonempty incompatible list, or the native
+    Medivac's non-attacking role is required; otherwise retain the fallback.
+    """
+    relation = state.get("relations", {}).get(actor, {}).get(enemy_id, {})
+    if relation.get("enemy_weapon_range_status") == "no_compatible_weapon":
+        return True
+    return bool(profile.get("known") and weapon is None
+                and (profile.get("weapons") or enemy.get("unit_type_id") == 54))
+
+
 def threat_count(state, actor, position, parameters=None):
     """Visible enemy weapon envelopes, with a heuristic fallback if unknown."""
     params = {**PARAMS, **(parameters or {})}
     unit = state["allies"][actor]
     count = 0
-    for enemy in state["visible_enemies"].values():
+    for enemy_id, enemy in state["visible_enemies"].items():
         profile = state.get("unit_type_profiles", {}).get(str(enemy["unit_type_id"]), {})
         weapon = _compatible_weapon(profile, unit)
+        if params["known_compatible_threats"] and _confirmed_non_threat(
+                state, actor, enemy_id, enemy, profile, weapon):
+            continue
         reach = (weapon["range"] + unit["radius"] + enemy["radius"]
                  if weapon and weapon.get("range") is not None else params["danger_radius"])
         count += math.dist(position, enemy["position"]) <= reach
@@ -97,9 +115,12 @@ def visible_volley_pressure(state, actor, position, parameters=None):
     params = {**PARAMS, **(parameters or {})}
     unit = state['allies'][actor]
     pressure = 0.0
-    for enemy in state['visible_enemies'].values():
+    for enemy_id, enemy in state['visible_enemies'].items():
         profile = state.get('unit_type_profiles', {}).get(str(enemy['unit_type_id']), {})
         weapon = _compatible_weapon(profile, unit)
+        if params['known_compatible_threats'] and _confirmed_non_threat(
+                state, actor, enemy_id, enemy, profile, weapon):
+            continue
         native_range = _finite_number(weapon.get('range'), None) if weapon else None
         reach = (native_range + unit['radius'] + enemy['radius']
                  if native_range is not None else params['danger_radius'])

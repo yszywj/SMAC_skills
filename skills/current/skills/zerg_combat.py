@@ -176,33 +176,35 @@ def allocate_zerg_combat(state, n_agents, race_memory=None, **kwargs):
         reservations[actor] = _moves(state, actor).get(action, list(allies[actor]['position']))
         details.setdefault(actor, {}).update(reason=reason, selected_action=action)
 
-    # Jumpers keep melee contact rather than copying ranged cooldown kiting.
+    # Keep the shared focus-fire allocation and its role commitments. A nearby
+    # target is not sufficient reason to split the team's existing fire plan.
     for actor in (a for a in living if _kind(allies[a]) == 'zergling'):
         unit = allies[actor]
         legal = _legal_targets(state, actor)
-        history = _history(memory, state, actor)
-        max_health = unit.get('max_health', 1) or 1
-        preserve_emergency = (result['roles'].get(actor) == 'retreat'
-                              and unit.get('health', 0) / max_health < .2)
-        if legal and not preserve_emergency:
-            target = min(legal, key=lambda e: (dist(unit['position'], state['visible_enemies'][e]['position'])
-                          + PARAMS['melee_target_load_weight'] * melee_load[e], e))
-            melee_load[target] += 1
-            blocked = (history.get('loop') == state.get('game_loop', 0) - state.get('step_mul', 8)
-                       and history.get('target') == target and history.get('action', 0) >= 6
+        history = fresh_history(state, actor, _history(memory, state, actor))
+        original = result['actions'][int(actor[1:])]
+        target = f'e{original - 6}' if original >= 6 else None
+        if target in legal:
+            blocked = (history.get('target') == target and history.get('action', 0) >= 6
                        and history.get('position') is not None
                        and dist(unit['position'], history['position']) < .15
                        and state['relations'][actor][target].get('in_weapon_range') is False)
             blocked_steps = history.get('blocked_steps', 0) + 1 if blocked else 0
-            action = 6 + int(target[1:])
-            role, reason = 'attack', 'melee_local_target_allocation'
-            if blocked_steps >= 2 and _moves(state, actor):
-                action = _approach(state, actor, state['visible_enemies'][target]['position'], reservations, stalled=True)
-                role, reason = 'reposition', 'observed_melee_blockage_lateral_retry'
-            replace(actor, action, role, reason)
-            details[actor].update(target=target, blocked_steps=blocked_steps)
+            details[actor] = dict(reason='inherit_team_focus_target', target=target, blocked_steps=blocked_steps)
+            if blocked_steps >= 2:
+                alternatives = [e for e in legal if e != target and state['relations'][actor][e].get('in_weapon_range') is True]
+                if alternatives:
+                    target = min(alternatives, key=lambda e: (
+                        dist(unit['position'], state['visible_enemies'][e]['position'])
+                        + PARAMS['melee_target_load_weight'] * melee_load[e], e))
+                    replace(actor, 6 + int(target[1:]), 'attack', 'blocked_team_target_local_retry')
+                    details[actor].update(target=target, blocked_steps=0)
+                elif _moves(state, actor):
+                    action = _approach(state, actor, state['visible_enemies'][target]['position'], reservations, stalled=True)
+                    replace(actor, action, 'reposition', 'observed_melee_blockage_lateral_retry')
+            melee_load[target] += 1
         else:
-            details.setdefault(actor, {}).update(reason='preserve_emergency' if preserve_emergency else 'generic_coordinated_approach')
+            details.setdefault(actor, {}).update(reason='preserve_generic_role', baseline_role=result['roles'].get(actor))
 
     # Hydralisk retreats prefer a non-worse threat envelope near the melee
     # screen. No hold is introduced when the generic allocator can fire.
@@ -319,7 +321,8 @@ def allocate_zerg_combat(state, n_agents, race_memory=None, **kwargs):
             raise ValueError(f'Illegal specialized action for {actor}: {action}')
         if result['roles'][actor] == 'retreat':
             result['retreat_actions'][actor] = action
-            result['retreat_reasons'][actor] = details.get(actor, {}).get('reason', 'generic_retreat')
+            if actor in overrides:
+                result['retreat_reasons'][actor] = details.get(actor, {}).get('reason', 'generic_retreat')
         target = burst_targets.get(actor) or assignments.get(actor)
         prior = _history(memory, state, actor)
         next_actors[actor] = {'tag': allies[actor].get('tag'), 'loop': state.get('game_loop', 0),
@@ -339,7 +342,8 @@ def allocate_zerg_combat(state, n_agents, race_memory=None, **kwargs):
     _refresh_damage(state, result, params)
     result['race_memory'] = {'actors': next_actors}
     result['race_telemetry'] = {
-        'race': 'zerg', 'version': 'zerg-specialization-v2', 'actors': details,
+        'race': 'zerg', 'version': 'zerg-specialization-v4', 'actors': details,
+        'ablation': 'v2 avoidance and interception + v3 inherited team focus',
         'reset_actor_histories': sorted(overrides), 'baneling_targets': burst_targets,
         'baneling_damage_model': 'unknown; excluded from ordinary single-target budget',
         'geometry_proxy_parameters': dict(PARAMS),

@@ -1,4 +1,4 @@
-"""Initial Terran composition: existing combat plus joint Medivac support.
+"""Terran composition: v4 combat/healing plus local retreat/therapy coordination.
 
 Only public observations and supplied legal candidates are used. Position
 scores are geometric heuristics, not pathing or guaranteed healing. This
@@ -11,9 +11,26 @@ import math
 from .adaptive_focus_fire import allocate_adaptive_focus_fire
 from .focus_fire import _compatible_weapon, _countable, expected_damage, fallback_action
 from .group_geometry import legal_actions, main_group, centroid
-from .heal_assign import assign_healing, is_healer, healer_endangered, HEAL_ORDER_ABILITY
+from .heal_assign import (assign_healing, is_healer, healer_endangered,
+                          HEAL_ORDER_ABILITY, health_ratio, score_heal_need)
 from .movement_scoring import predicted_move
 from .race_movement_guard import retreat_override_allowed
+from .heal_escort import (PARAMS as ESCORT_PARAMS, select_heal_escort,
+                          observe_heal_continuity, V6_PARAMS, V6_LIMITS, V7_PARAMS, keep_action,
+                          select_keep_orders, coordinate_v6)
+from .race_movement_guard import evaluate_retreat_override
+from . import terran_motion
+
+
+PARAMS = {
+    'stable_patient_ratio': .55,
+    'stable_recent_loss_ratio': .10,
+    'critical_patient_ratio': .25,
+    'rapid_loss_ratio': .20,
+    'rapid_loss_patient_ratio': .50,
+    'rescue_urgency_margin': .25,
+    'rescue_switch_cooldown_windows': 3,
+}
 
 
 def _legal(state, actor):
@@ -24,6 +41,8 @@ def _legal(state, actor):
     explicit = (state.get('legal_actions') or {}).get(actor)
     if is_healer(unit):
         candidates = {int(a) for a in state.get('heal_candidates', {}).get(actor, {})}
+        keep = keep_action(state, actor)
+        if keep is not None:candidates.add(keep)
     else:
         candidates = {6 + int(e[1:]) for e, relation in state.get('relations', {}).get(actor, {}).items()
                       if relation.get('smac_attack_available')}
@@ -119,13 +138,25 @@ def _support_retreat(state, actor, baseline_action, assignments=None, parameters
     return min(candidates)[1] if candidates else baseline_action
 
 
-def _reserve_observed_heal_orders(state):
+def _reserve_observed_heal_orders(state, memory=None):
     """No simultaneous swaps: release occupied targets only after observation.
 
     Even an order being cancelled this step reserves its target until the next
     snapshot. A plan in race_memory is not evidence that an order took effect.
     """
-    observed, owners, locked = {}, {}, {}
+    observed, owners, locked, rescue_options, order_states, confirmations = {}, {}, {}, {}, {}, {}
+    loop = state.get('game_loop', 0)
+    step = state.get('step_mul', 8)
+    for actor, unit in state['allies'].items():
+        if not unit['alive'] or not is_healer(unit):
+            continue
+        prior = (memory or {}).get('heal_order_state', {}).get(actor, {})
+        if prior.get('tag') != unit.get('tag') or prior.get('loop') not in (loop, loop - step):
+            prior = {}
+        order_states[actor] = {'tag': unit.get('tag'), 'loop': loop,
+                               'last_rescue_request_loop': prior.get('last_rescue_request_loop')}
+        if prior.get('pending_target'):
+            confirmations[actor] = {'requested_target': prior['pending_target'], 'status': 'not_observed'}
     for actor, unit in sorted(state['allies'].items()):
         if not unit['alive'] or not is_healer(unit):
             continue
@@ -135,17 +166,47 @@ def _reserve_observed_heal_orders(state):
             if target in state['allies'] and state['allies'][target]['alive']:
                 observed[actor] = target
                 owners.setdefault(target, actor)
+                if actor in confirmations:
+                    confirmations[actor]['status'] = ('observed' if confirmations[actor]['requested_target'] == target
+                                                       else 'different_order_observed')
+        order_states[actor]['observed_target'] = observed.get(actor)
     for actor, candidates in state.get('heal_candidates', {}).items():
         own = observed.get(actor)
         valid_own = (own is not None and owners.get(own) == actor
                      and not healer_endangered(state, actor)
                      and any(c['target'] == own for c in candidates.values()))
+        permitted = {own} if valid_own else None
+        if valid_own:
+            patient = state['allies'][own]
+            prior_request = order_states[actor]['last_rescue_request_loop']
+            cooldown_ready = (prior_request is None or loop - prior_request >= step * PARAMS['rescue_switch_cooldown_windows'])
+            stable = (health_ratio(patient) >= PARAMS['stable_patient_ratio']
+                      and patient.get('health_lost_since_previous_decision', 0) / (patient['max_health'] or 1)
+                          < PARAMS['stable_recent_loss_ratio'])
+            urgent = []
+            if stable and cooldown_ready:
+                current_need = score_heal_need(state, own)
+                for entry in candidates.values():
+                    target = entry['target']
+                    if target == own or target in owners:
+                        continue
+                    ally = state['allies'][target]
+                    ratio = health_ratio(ally)
+                    recent_loss = ally.get('health_lost_since_previous_decision', 0) / (ally['max_health'] or 1)
+                    critical = (ratio <= PARAMS['critical_patient_ratio'] or (
+                        ratio <= PARAMS['rapid_loss_patient_ratio'] and recent_loss >= PARAMS['rapid_loss_ratio']))
+                    if critical and score_heal_need(state, target) >= current_need + PARAMS['rescue_urgency_margin']:
+                        urgent.append(target)
+            if urgent:
+                permitted.update(urgent)
+                rescue_options[actor] = {'current_target': own, 'candidates': sorted(urgent),
+                                         'reason': 'stable_patient_and_more_urgent_unoccupied_legal_target'}
         state['heal_candidates'][actor] = {
             a: c for a, c in candidates.items()
-            if owners.get(c['target'], actor) == actor and (not valid_own or c['target'] == own)}
-        if valid_own:
+            if owners.get(c['target'], actor) == actor and (permitted is None or c['target'] in permitted)}
+        if valid_own and actor not in rescue_options:
             locked[actor] = own
-    return observed, locked
+    return observed, locked, rescue_options, order_states, confirmations
 
 
 def _clear_actor(result, actor):
@@ -177,6 +238,8 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
     local = copy.deepcopy(state)
     options = copy.deepcopy(kwargs)
     memory = copy.deepcopy(race_memory or {})
+    if V6_PARAMS['enabled'] and V6_PARAMS['known_threats']:
+        options['parameters']={**(options.get('parameters') or {}),'known_compatible_threats':True}
     filtered = []
     for actor, row in local.get('relations', {}).items():
         for enemy, relation in row.items():
@@ -214,18 +277,41 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
         healing_state.setdefault('heal_candidates', {})[actor] = {
             a:c for a,c in local.get('heal_candidates', {}).get(actor, {}).items()
             if int(a) in allowed and not (isinstance(energy, (int,float)) and energy < 1)}
-    observed_orders, locked_orders = _reserve_observed_heal_orders(healing_state)
+    observed_orders, locked_orders, rescue_options, order_states, confirmations = _reserve_observed_heal_orders(healing_state, memory)
     healing = assign_healing(healing_state, n_agents,
                              previous_assignments=observed_orders,
                              unit_values=options.get('unit_values'))
+    healing['observed_orders']=observed_orders
+    keep_decisions={};keep_memory={};keep_outcomes={}
+    if V6_PARAMS['enabled'] and V6_PARAMS['keep_order']:
+        def safe_keep(healer,action,target):
+            prediction=terran_motion.estimate(local,healer,action,memory.get('v6_motion',{}).get(healer),
+                                              'keep',target,V6_PARAMS['motion'])
+            threats=healer_threats[healer]
+            current=_pressure(threats,local['allies'][healer]['position'])
+            possible=terran_motion.possible_exposure(threats,local['allies'][healer]['position'],prediction)
+            return {'allowed':bool(prediction.get('known') and prediction.get('reliable') and possible<=current),
+                    'current_compatible_threats':current,'possible_compatible_threats':possible,
+                    'prediction':prediction,'meaning':'uncertainty envelope checked; automatic following is conditional'}
+        keep_decisions,keep_memory,keep_outcomes=select_keep_orders(local,healing,memory.get('v6_keep_order',{}),safe_keep,PARAMS)
+    rescue_requests = {}
+    for healer, target in healing['assignments'].items():
+        if healer in rescue_options and target != observed_orders[healer]:
+            rescue_requests[healer] = {'from': observed_orders[healer], 'to': target}
+            order_states[healer].update(last_rescue_request_loop=local.get('game_loop', 0), pending_target=target)
     healing.update(observed_orders=observed_orders, locked_orders=locked_orders,
+                   rescue_options=rescue_options, rescue_requests=rescue_requests, rescue_confirmations=confirmations,
                    handoff_policy='reserve observed target until a later snapshot confirms release')
     changes = {};reset = set();retreat_uses = memory.get('support_retreat_uses', {})
+    # Restore v2 support positioning and approach behavior; old coverage memory
+    # deliberately has no action-producing path in this rescue-only variant.
     for actor in healing.get('healers', []):
         index = int(actor[1:])
         if index >= n_agents:continue
         before = result['actions'][index]
-        if actor in healing['assignments']:
+        if keep_decisions.get(actor,{}).get('selected'):
+            action=keep_decisions[actor]['action'];reason='preserve_observed_heal_order'
+        elif actor in healing['assignments']:
             action = healing['healer_actions'][actor];reason = 'joint_heal_assignment'
         else:
             action = _support_action(local, actor, healer_threats[actor])
@@ -246,16 +332,94 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
         result['retreat_actions'].pop(actor, None);result['retreat_reasons'].pop(actor, None)
         _clear_actor(result, actor);reset.add(actor)
         if before != action:changes[actor] = {'before':before,'after':action,'reason':reason}
+    escort_decisions = {};v6_result={};reversal_used=dict(memory.get('v6_reversal_used',{}))
+    if V6_PARAMS['enabled']:
+        legacy_actions={}
+        for actor in result['retreat_units']:
+            if actor in healer_threats:continue
+            before=result['actions'][int(actor[1:])]
+            legacy_actions[actor]=(_support_retreat(local,actor,before,healing['assignments'],options.get('parameters'),
+                                                  memory.get('actors',{}).get(actor))
+                                   if retreat_uses.get(actor,0)<2 else before)
+        def patient_guard(actor,before,baseline,proposal,healer):
+            primary=result.get('engagement_state_updates',{}).get(actor,{}).get('engagement',{}).get('target')
+            context={'healer':healer,'primary_target':primary,
+                     'allow_reentry_delay':bool(V6_PARAMS['reentry_slack']),
+                     'allow_blocked_reversal':bool(V6_PARAMS['blocked_reversal']),
+                     'reversal_used':bool(reversal_used.get(actor))}
+            reports=[evaluate_retreat_override(local,actor,a,proposal,options.get('parameters'),
+                        memory.get('actors',{}).get(actor),coordination=context) for a in sorted({before,baseline})]
+            threats=_threats(local,actor)
+            proposed=predicted_move(local,actor,proposal)['destination']
+            pressure_ok=_pressure(threats,proposed)<=min(_pressure(threats,local['allies'][actor]['position']),
+                *[_pressure(threats,predicted_move(local,actor,a)['destination']) for a in {before,baseline}])
+            return {'allowed':pressure_ok and all(r['allowed'] for r in reports),'reports':reports,
+                    'compatible_pressure_guard':pressure_ok,
+                    'exceptions':sorted({e for r in reports for e in r['exceptions']})}
+        def healer_guard(healer,baseline,proposal,target):
+            if proposal not in _legal(local,healer):return False
+            threats=healer_threats[healer];origin=local['allies'][healer]['position']
+            old=predicted_move(local,healer,baseline)['destination'] if str(baseline) in local['movement_candidates'].get(healer,{}) else origin
+            new=predicted_move(local,healer,proposal)['destination']
+            estimate=terran_motion.estimate(local,healer,proposal,memory.get('v6_motion',{}).get(healer),
+                                           'move',target,V6_PARAMS['motion'])
+            possible=terran_motion.possible_exposure(threats,origin,estimate)
+            return (estimate.get('known') and estimate.get('reliable')
+                    and possible<=min(_pressure(threats,origin),_pressure(threats,old))
+                    and _pressure(threats,new)<=min(_pressure(threats,origin),_pressure(threats,old)))
+        v6_result=coordinate_v6(local,result['actions'],result['roles'],healing,legacy_actions,memory,
+                                 patient_guard,healer_guard,keep_decisions)
+        for actor,unit in local['allies'].items():
+            index=int(actor[1:]);before=result['actions'][index];action=v6_result['actions'][index]
+            if before==action:continue
+            result['actions'][index]=action
+            if actor in healer_threats:
+                reason='bounded_approach_intent';result['roles'][actor]='support'
+            else:
+                decision=v6_result['decisions'].get(actor,{})
+                assert result['roles'][actor]=='retreat' and retreat_uses.get(actor,0)<2
+                reason='bounded_terran_coordination' if decision.get('applied') else 'bounded_support_retreat'
+                result['retreat_actions'][actor]=action;result['retreat_reasons'][actor]=reason
+                retreat_uses[actor]=retreat_uses.get(actor,0)+1
+                if 'critical_heal_blocked_reversal' in decision.get('selected_guard',{}).get('exceptions',[]):
+                    reversal_used[actor]=True
+            changes[actor]={'before':before,'after':action,'reason':reason}
+            _clear_actor(result,actor);reset.add(actor)
     for actor in list(result['retreat_units']):
-        if actor in healer_threats or retreat_uses.get(actor, 0) >= 2:continue
+        if V6_PARAMS['enabled']:break
+        if actor in healer_threats:continue
         index = int(actor[1:]);before = result['actions'][index]
+        if retreat_uses.get(actor, 0) >= 2:
+            if ESCORT_PARAMS['enabled']:
+                escort_decisions[actor] = {'actor':actor, 'baseline_action':before,
+                    'selected_action':before, 'applied':False, 'reason':'existing_support_retreat_budget_exhausted'}
+            continue
         action = _support_retreat(local, actor, before, healing['assignments'], options.get('parameters'),
                                   memory.get('actors', {}).get(actor))
+        legacy_action = action
+        if ESCORT_PARAMS['enabled']:
+            threats = _threats(local, actor)
+            origin = local['allies'][actor]['position']
+            def pressure_guard(proposal):
+                proposed_pos = predicted_move(local, actor, proposal)['destination']
+                original_pos = predicted_move(local, actor, before)['destination']
+                baseline_pos = predicted_move(local, actor, legacy_action)['destination']
+                return _pressure(threats, proposed_pos) <= min(_pressure(threats, origin),
+                    _pressure(threats, original_pos), _pressure(threats, baseline_pos))
+            decision = select_heal_escort(local, actor, legacy_action, result['roles'][actor],
+                healing, result['actions'], options.get('parameters'), memory.get('actors', {}), pressure_guard,
+                combat_baseline=before)
+            decision['combat_baseline_action'] = before
+            escort_decisions[actor] = decision
+            action = decision['selected_action']
         if action != before:
             result['actions'][index] = action;result['retreat_actions'][actor] = action
-            result['retreat_reasons'][actor] = 'bounded_move_toward_healing_support'
+            escort_applied = escort_decisions.get(actor, {}).get('applied', False)
+            result['retreat_reasons'][actor] = ('bounded_heal_escort' if escort_applied
+                                              else 'bounded_move_toward_healing_support')
             retreat_uses[actor] = retreat_uses.get(actor, 0) + 1
-            changes[actor] = {'before':before,'after':action,'reason':'bounded_support_retreat'}
+            changes[actor] = {'before':before,'after':action,
+                             'reason':'bounded_heal_escort' if escort_applied else 'bounded_support_retreat'}
             _clear_actor(result, actor);reset.add(actor)
     for actor, unit in local['allies'].items():
         index = int(actor[1:])
@@ -277,13 +441,33 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
     if reset:
         # Generic value-attribution witnesses describe the pre-overlay plan.
         result['unit_value_diagnostics'] = healing.get('unit_value_diagnostics', {})
+    continuity, escort_pairs = observe_heal_continuity(local, healing, result['actions'],
+        memory.get('heal_escort_pairs', {})) if ESCORT_PARAMS['enabled'] else ({}, {})
     result['race_memory'] = {'heal_assignments':dict(healing.get('assignments', {})),
                              'observed_heal_orders':observed_orders,
+                             'heal_order_state':order_states,
                              'support_retreat_uses':dict(retreat_uses),
+                             'heal_escort_pairs':escort_pairs,
                              'actors':{a:dict(tag=u.get('tag'),loop=local.get('game_loop',0),
                                               action=result['actions'][int(a[1:])],position=list(u['position']))
                                        for a,u in local['allies'].items() if u['alive'] and int(a[1:]) < n_agents}}
-    result['race_telemetry'] = {'profile':'terran','version':'terran-specialization-v2','healing':healing,'changes':changes,
+    if V6_PARAMS['enabled']:
+        result['race_memory'].update(v6_motion=v6_result.get('motion_memory',{}),
+            v6_approach_intents=v6_result.get('approach_intents',{}),v6_keep_order=keep_memory,
+            v6_reversal_used=reversal_used)
+    result['race_telemetry'] = {'profile':'terran','version':('terran-specialization-v7' if V7_PARAMS['enabled'] else 'terran-specialization-v6') if V6_PARAMS['enabled'] else 'terran-specialization-v5','healing':healing,'changes':changes,
+        'terran_coordination':{'enabled':bool(V6_PARAMS['enabled']),'parameters':dict(V6_PARAMS),'limits':dict(V6_LIMITS),
+            'motion_parameters':dict(terran_motion.PARAMS),'v7_parameters':dict(V7_PARAMS),'v7_motion_parameters':dict(terran_motion.V7_PARAMS),
+            'decisions':v6_result.get('decisions',{}),'pair_monitor':v6_result.get('pair_monitor',{}),
+            'approach_intents':v6_result.get('approach_intents',{}),
+            'approach_decisions':v6_result.get('approach_decisions',{}),
+            'approach_outcomes':v6_result.get('approach_outcomes',{}),'keep_order':keep_decisions,'keep_outcomes':keep_outcomes,
+            'meaning':'conditional movement estimates and observed orders; approach/keep are not heal assignments'},
+        'heal_escort':{'enabled':bool(ESCORT_PARAMS['enabled']), 'decisions':escort_decisions,
+                       'continuity':continuity, 'planned_pairs':escort_pairs,
+                       'parameters':dict(ESCORT_PARAMS),
+                       'meaning':'candidate-range geometry and observed orders only; no healing-amount or saved-unit claim'},
+        'coverage':{}, 'coverage_policy':'disabled; v2 friendly support and wounded approach', 'parameters':dict(PARAMS),
         'filtered_incompatible_attacks':filtered,'air_threats':{a:sorted(t) for a,t in healer_threats.items()},
         'reset_actor_histories':sorted(reset),'damage_budget':'recomputed_from_final_attack_assignments',
         'support_retreat_limit':'at most two redirected retreat moves per actor per episode',

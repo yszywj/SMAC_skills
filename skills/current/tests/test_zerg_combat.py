@@ -53,6 +53,71 @@ def scene(own=('Hydralisk',), enemies=('Hydralisk',), own_positions=None, enemy_
 
 
 class ZergCombatTests(unittest.TestCase):
+    def test_melee_keeps_team_finishing_target_instead_of_nearest_full_health_unit(self):
+        state=scene(('Zergling',),('Zergling','Hydralisk'),enemy_positions=[(.69,0),(.8,0)])
+        state['visible_enemies']['e1']['health']=1
+        result=allocate_zerg_combat(state,1)
+        self.assertEqual(result['actions'],[7])
+        self.assertEqual(result['race_telemetry']['actors']['u0']['reason'],'inherit_team_focus_target')
+        self.assertEqual(result['race_telemetry']['reset_actor_histories'],[])
+
+    def test_melee_preserves_base_retreat_and_diagnostic_reason(self):
+        state=scene(('Zergling',),enemy_positions=[(2,0)])
+        state['allies']['u0'].update(health=9,weapon_ready=False,weapon_cooldown_loops=20)
+        base=allocate_adaptive_focus_fire(state,1)
+        self.assertEqual(base['roles']['u0'],'retreat')
+        result=allocate_zerg_combat(state,1)
+        self.assertEqual(result['actions'],base['actions'])
+        self.assertEqual(result['retreat_reasons'],base['retreat_reasons'])
+
+    def test_v2_ready_shot_distance_boundary_is_preserved(self):
+        # This ablation deliberately restores v2's fixed threshold, including
+        # its limitations; observed enemy velocity must not change that policy.
+        for distance, expected_attack in ((1.5, False), (1.501, True)):
+            with self.subTest(distance=distance):
+                state=scene(enemies=('Baneling',),enemy_positions=[(distance,0)])
+                result=allocate_zerg_combat(state,1)
+                self.assertEqual(result['actions'][0] >= 6,expected_attack)
+        state=scene(('Zergling',),('Zergling','Baneling'),enemy_positions=[(.69,0),(1.667,0)])
+        memory={'visible_banelings':dict(loop=72,units={'e1':dict(tag='enemy-1',position=[2.6,0])})}
+        result=allocate_zerg_combat(state,1,race_memory=memory)
+        self.assertEqual(result['actions'],[6])
+        self.assertEqual(result['race_telemetry']['actors']['u0']['avoidance_skipped'],'preserve_fire_window')
+
+    def test_v2_reverse_move_restriction_only_relaxes_at_contact(self):
+        memory={'actors':{'u0':dict(tag='ally-0',loop=72,action=4,position=[-1.25,0])}}
+        for distance, expected_action in ((1.4,2),(.8,5)):
+            with self.subTest(distance=distance):
+                state=scene(enemies=('Baneling',),enemy_positions=[(distance,0)])
+                state['allies']['u0'].update(weapon_ready=False,weapon_cooldown_loops=20)
+                result=allocate_zerg_combat(state,1,race_memory=memory)
+                self.assertEqual(result['actions'],[expected_action])
+                self.assertEqual(result['race_telemetry']['actors']['u0']['contact_emergency'],distance < 1.)
+
+    def test_v3_enemy_motion_memory_is_unused_and_not_retained(self):
+        for distance in (.8,1.4,1.667,2.929):
+            for streak in (0,2):
+                for cooldown in (0,20):
+                    with self.subTest(distance=distance,streak=streak,cooldown=cooldown):
+                        state=scene(enemies=('Baneling',),enemy_positions=[(distance,0)])
+                        state['allies']['u0'].update(weapon_ready=cooldown == 0,weapon_cooldown_loops=cooldown)
+                        memory={'actors':{'u0':dict(tag='ally-0',loop=72,action=5,escape_streak=streak)}}
+                        baseline=allocate_zerg_combat(state,1,race_memory=memory)
+                        memory['visible_banelings']=dict(loop=72,units={'e0':dict(tag='enemy-0',position=[100,0])})
+                        saved=copy.deepcopy((state,memory))
+                        result=allocate_zerg_combat(state,1,race_memory=memory)
+                        self.assertEqual(result,baseline)
+                        self.assertEqual((state,memory),saved)
+                        self.assertNotIn('visible_banelings',result['race_memory'])
+                        self.assertNotIn('baneling_contact_risk',result['race_telemetry']['actors'].get('u0',{}))
+
+    def test_safe_window_returns_to_team_attack_even_with_long_escape_history(self):
+        state=scene(('Zergling',),('Zergling','Baneling'),enemy_positions=[(.69,0),(3.07,0)])
+        memory={'actors':{'u0':dict(tag='ally-0',loop=72,action=5,escape_streak=8)}}
+        result=allocate_zerg_combat(state,1,race_memory=memory)
+        self.assertEqual(result['actions'],[6])
+        self.assertEqual(result['race_memory']['actors']['u0']['escape_streak'],0)
+
     def test_distant_baneling_does_not_cancel_in_range_melee_shot(self):
         state=scene(('Zergling',),('Zergling','Baneling'),enemy_positions=[(.69,0),(3.07,0)])
         r=allocate_zerg_combat(state,1)
@@ -162,7 +227,7 @@ class ZergCombatTests(unittest.TestCase):
         baseline = allocate_adaptive_focus_fire(state, 1)
         result = allocate_zerg_combat(state, 1)
         self.assertEqual(result['actions'], baseline['actions'])
-        self.assertEqual(result['predicted_damage'], baseline['predicted_damage'])
+        self.assertEqual(result['predicted_damage'], {e:d for e,d in baseline['predicted_damage'].items() if d})
         self.assertGreater(result['predicted_damage']['e0'], 0)
         self.assertEqual(result['race_telemetry']['reset_actor_histories'], [])
         self.assertEqual(state, before)
@@ -203,12 +268,13 @@ class ZergCombatTests(unittest.TestCase):
         state['movement_candidates']['u0'] = {}
         self.assertEqual(allocate_zerg_combat(state, 1)['actions'], [1])
 
-    def test_melee_targets_are_distributed_without_inventing_hits(self):
+    def test_melee_targets_keep_shared_damage_allocation_without_inventing_hits(self):
         state = scene(('Zergling', 'Zergling'), ('Hydralisk', 'Hydralisk'),
                       enemy_positions=[(.8, 0.), (.8, .1)])
         result = allocate_zerg_combat(state, 2)
-        self.assertEqual(set(result['attack_assignments'].values()), {'e0', 'e1'})
-        self.assertEqual(set(result['predicted_damage']), {'e0', 'e1'})
+        baseline = allocate_adaptive_focus_fire(state,2)
+        self.assertEqual(result['attack_assignments'], baseline['attack_assignments'])
+        self.assertEqual(result['predicted_damage'], {e:d for e,d in baseline['predicted_damage'].items() if d})
         self.assert_legal(state, result)
 
     def test_observed_melee_blockage_moves_and_invalidates_old_attack_prediction(self):

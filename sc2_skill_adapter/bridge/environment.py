@@ -7,6 +7,7 @@ import numpy as np
 
 from .config import MAP_FILE, RACE_UNITS, race_for_map, source_path, validate_config
 from .scenarios import reset_config
+from .keep_order import raw_keep_heal_target
 
 source_path()
 from smacv2.env.starcraft2.starcraft2 import StarCraft2Env
@@ -55,10 +56,32 @@ class RecordingController:
 class RecordedEnv(StarCraft2Env):
     def __init__(self, **kwargs):
         self.unit_balance = kwargs.pop("unit_balance", "original")
+        self.terran_keep_heal_order = kwargs.pop("terran_keep_heal_order", False)
+        if self.terran_keep_heal_order and (self.unit_balance != 'native'
+                or kwargs.get('map_name') != '10gen_terran' or kwargs.get('heuristic_ai', False)
+                or kwargs.get('conic_fov', False)):
+            raise ValueError('KeepHealOrder requires native standard Terran control')
         self.collecting = False
         self.last_submissions = []
         self.last_action_results = []
         super().__init__(**kwargs)
+        if self.terran_keep_heal_order:
+            self.keep_heal_order_action_id = self.n_actions
+            self.n_actions += 1
+            # Upstream reset/step and dimension methods use self.n_actions.
+            # Refresh the two arrays/names created during the base constructor.
+            self.last_action = np.zeros((self.n_agents, self.n_actions))
+            self.state_feature_names = self.build_state_feature_names()
+            self.obs_feature_names = self.build_obs_feature_names()
+
+    def keep_heal_order_target(self, agent_id):
+        return raw_keep_heal_target(self.agents, agent_id) if self.terran_keep_heal_order else None
+
+    def get_avail_agent_actions(self, agent_id):
+        available = super().get_avail_agent_actions(agent_id)
+        if getattr(self, 'terran_keep_heal_order', False):
+            available[self.keep_heal_order_action_id] = int(self.keep_heal_order_target(agent_id) is not None)
+        return available
 
     def _init_ally_unit_types(self, min_unit_type):
         super()._init_ally_unit_types(min_unit_type)
@@ -78,6 +101,15 @@ class RecordedEnv(StarCraft2Env):
         self._controller = RecordingController(self._controller, self)
 
     def get_agent_action(self, a_id, action):
+        if (getattr(self, 'terran_keep_heal_order', False)
+                and action == self.keep_heal_order_action_id):
+            if not self.get_avail_agent_actions(a_id)[action]:
+                raise ValueError(f'u{a_id}: no eligible observed healing order to retain')
+            if self.collecting:
+                self.last_submissions.append({
+                    'actor': f'u{a_id}', 'action_id': action, 'command': None,
+                    'submission': 'retained_order'})
+            return None
         command = super().get_agent_action(a_id, action)
         if self.collecting:
             self.last_submissions.append({
@@ -140,13 +172,13 @@ def audit_unit_balance(env, static_data):
 
 
 class ReplayableEnv(StarCraftCapabilityEnvWrapper):
-    def __init__(self, args):
+    def __init__(self, args, *, terran_keep_heal_order=False):
         validate_config(args)
         kwargs = copy.deepcopy(args)
         self.distribution_config = kwargs["capability_config"]
         self.env_key_to_distribution_map = {}
         self._parse_distribution_config()
-        self.env = RecordedEnv(**kwargs)
+        self.env = RecordedEnv(**kwargs, **({'terran_keep_heal_order': True} if terran_keep_heal_order else {}))
 
     def reset_record(self, record):
         # Sampled once by the manifest builder. Do not resample on failed resets.

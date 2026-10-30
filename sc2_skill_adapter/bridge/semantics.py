@@ -1,6 +1,10 @@
 """Public SMACv2 semantics and distribution-only Astra input."""
 import copy
 
+KEEP_HEAL_ORDER_DESCRIPTION = (
+    'Keep the actually observed heal order: submit no native SC2 command for this unit. '
+    'The existing target may be outside the new-heal candidate range; this does not prove healing or following.')
+
 ACTION_CONTRACT = {
     "attack_candidate_rule": "Use supplied legal criteria from SMACv2 masks and team visibility.",
     "candidate_center_distance_by_type": {"zealot": 2, "stalker": 6, "colossus": 7},

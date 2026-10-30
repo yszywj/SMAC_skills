@@ -123,6 +123,7 @@ async def evaluate(args, manifest, method, output):
     from .policy import build_request, batch_requests, decode_actions, nearest_actions
     from .skill_runtime import (load_manager, source_files as skill_source_files,
                                manager_configuration)
+    from .keep_order import validate_keep_heal_order
 
     is_skill = method == "adaptive-skill"
     skill_config = manager_configuration(args) if is_skill else None
@@ -134,6 +135,7 @@ async def evaluate(args, manifest, method, output):
     skill_version = skill_config["version"] if is_skill else None
     value_metadata = skill_config["value_metadata"] if is_skill else {}
     combat_params = skill_config["manager_kwargs"]["combat_params"] if is_skill else {}
+    action_extensions = validate_keep_heal_order(args, method, manifest['env_args'])
 
     output.mkdir(parents=True, exist_ok=False)
     os.environ["SC2PATH"] = str(args.sc2_path.resolve())
@@ -184,6 +186,7 @@ async def evaluate(args, manifest, method, output):
                           for p in sources},
         "versions": {n: importlib.metadata.version(n)
                      for n in ("pysc2", "numpy", "protobuf", "s2clientprotocol", "httpx")},
+        **({'action_extensions': action_extensions} if action_extensions else {}),
     }
     write_json(output / "run.json", metadata)
     write_json(output / "manifest.json", manifest)
@@ -191,6 +194,8 @@ async def evaluate(args, manifest, method, output):
         emit("skill_configuration", skill_source=metadata["skill_source"],
              skill_source_hashes=skill_hashes, skill_parameters=metadata["skill_parameters"])
         emit("unit_value_configuration", **value_metadata)
+    if action_extensions:
+        emit('action_extension_configuration', action_extensions=action_extensions)
     failure = None
     try:
         if is_skill:
@@ -213,7 +218,9 @@ async def evaluate(args, manifest, method, output):
             import numpy as np
             np.random.seed(scenario["sc2_seed"])
             rng = random.Random(scenario["sc2_seed"])
-            env = ReplayableEnv(config)
+            env = ReplayableEnv(config, **({'terran_keep_heal_order': True} if action_extensions else {}))
+            if action_extensions and env.keep_heal_order_action_id != action_extensions['terran_keep_heal_order']['action_id']:
+                raise RuntimeError('KeepHealOrder action ID differs from recorded extension contract')
             env.reset_record(scenario)
             env.env.scenario_brief = public_brief(config)
             data = env._controller.data()
@@ -329,7 +336,8 @@ async def evaluate(args, manifest, method, output):
                 if not isinstance(actions, list) or len(actions) != env.n_agents:
                     raise RuntimeError("Final actions must be a complete per-unit list.")
                 for i, action in enumerate(actions):
-                    if not env.get_avail_agent_actions(i)[action]:
+                    mask = env.get_avail_agent_actions(i)
+                    if not isinstance(action, int) or isinstance(action, bool) or not 0 <= action < len(mask) or not mask[action]:
                         raise RuntimeError(f"Illegal action for u{i}: {action}")
                 if skill_manager is not None and hasattr(skill_manager, "commit_final_actions"):
                     skill_manager.commit_final_actions(actions)
@@ -396,6 +404,7 @@ async def evaluate(args, manifest, method, output):
             "planner": planner.stats if planner else None,
             "skill": skill_manager.stats if skill_manager else None,
             "monetary_cost": None, "cost_note": "Usage recorded; price not assumed.",
+            **({'action_extensions': action_extensions} if action_extensions else {}),
         }
         write_json(output / "summary.json", summary)
         events.close()
@@ -442,6 +451,8 @@ def parser():
                              help="Skill implementation; baseline_v2_70pct requires its original fixed preset")
         command.add_argument("--race-profile", choices=("off", "terran", "zerg"), default="off",
                              help="Opt-in race-specific adaptive combat; current skills only")
+        command.add_argument('--terran-keep-heal-order', action='store_true',
+                             help='Native current Terran only: append an action that submits no command for an eligible observed heal order')
         command.add_argument("--skill-max-steps", type=positive, default=4)
         command.add_argument("--adaptive-posture", choices=("aggressive", "balanced", "defensive"), default="balanced")
         command.add_argument("--adaptive-window-fire", action="store_true")

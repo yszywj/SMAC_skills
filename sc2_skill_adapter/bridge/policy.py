@@ -10,6 +10,7 @@ from .environment import is_medivac, visible_enemies
 from .config import race_for_map, RACE_RANGES
 from .feedback import order_record
 from .semantics import ACTION_CONTRACT, compact_brief
+from .keep_order import extend_keep_heal_order_request
 
 
 SCHEMA_VERSION = 6
@@ -239,7 +240,15 @@ def build_request(env, static_data, model, episode, previous_health=None, previo
         questions[actor]["instructions"] += f" Current weapon cooldown: {allies[actor]['weapon_cooldown_loops']} loops."
         if healer:
             questions[actor]["instructions"] += " This unit is a Medivac: it heals allies and has no attack weapon."
-    return {"model": model, "state": state, "questions": questions}
+    payload = {"model": model, "state": state, "questions": questions}
+    if getattr(env, 'terran_keep_heal_order', False):
+        action_id = env.keep_heal_order_action_id
+        candidates = {
+            f'u{i}': {'action_id': action_id, 'target': f'u{target}'}
+            for i in env.agents
+            if (target := env.keep_heal_order_target(i)) is not None}
+        return extend_keep_heal_order_request(payload, action_id, candidates)
+    return payload
 
 
 TEAM_CORE_FIELDS = ("unit_type_id", "position", "radius", "is_flying",
