@@ -191,13 +191,104 @@ def healer_idle_action(state, healer, target_pool, urgency, parameters=None):
     return healer_safe_move(state, healer, params)
 
 
+def _forced_matching(healers, edges):
+    """Deterministic maximum-weight matching where every healer MUST be
+    assigned exactly one target (no idle column, negative edges allowed).
+
+    Only used by the optional injected pair-scorer channel; the default
+    path never calls this. Exhaustive search with the same option ordering
+    as ``_exact_matching`` (score desc, then target id), strict-improvement
+    updates, so identical input resolves ties identistically.
+    """
+    if len(healers) > _EXACT_FALLBACK_HEALERS:
+        raise ValueError("forced matching is only defined for up to "
+                         f"{_EXACT_FALLBACK_HEALERS} participating healers")
+    best = {"score": None, "assign": None}
+
+    def recurse(index, used, total, assign):
+        if index == len(healers):
+            if best["score"] is None or total > best["score"]:
+                best["score"], best["assign"] = total, dict(assign)
+            return
+        for score, target in edges[healers[index]]:
+            if target in used:
+                continue
+            assign[healers[index]] = target
+            recurse(index + 1, used | {target}, total + score, assign)
+            del assign[healers[index]]
+
+    recurse(0, frozenset(), 0.0, {})
+    return best["assign"]
+
+
+def _apply_pair_scorer(state, assignments, edges, target_pool, urgency,
+                       previous_assignments, pair_scorer, active):
+    """Optional injected re-scoring of the joint heal matching.
+
+    Contract (tree_skills medivac channel, v1):
+    - Participation set H is FIXED to the healers the original logic already
+      assigned this step; healers the original logic left idle, endangered or
+      keep-locked are never added or freed here.
+    - Legal pairs are exactly the original ``edges`` rows (environment-gated
+      candidates after order reservation) — no filtered target is reopened.
+    - Scores come entirely from ``pair_scorer(healer, target_id, context)``;
+      negative scores are meaningful (participation is fixed), so no constant
+      shift, abs or clipping may be applied by either side.
+    - ``active=False`` is shadow mode: only record the proposed matching.
+
+    Returns (assignments, diagnostics). On any infeasibility (a participating
+    healer with no legal edge, non-finite score, scorer exception) the
+    original matching is kept and the failure is recorded per-healer.
+    """
+    healers = sorted(assignments, key=lambda h: int(h[1:]))
+    context = {"state": state, "urgency": urgency, "target_pool": target_pool,
+               "previous_assignments": previous_assignments or {},
+               "original_edges": edges}
+    new_edges, failures = {}, {}
+    for healer in healers:
+        rows = []
+        for _, target in edges.get(healer, []):
+            try:
+                score = float(pair_scorer(healer, target, context))
+            except Exception as exc:  # diagnostics only; never crash the step
+                failures[healer] = f"scorer_error:{type(exc).__name__}"
+                rows = None
+                break
+            if score != score or score in (float("inf"), float("-inf")):
+                failures[healer] = f"non_finite_score_for:{target}"
+                rows = None
+                break
+            rows.append((score, target))
+        if rows is None:
+            continue
+        new_edges[healer] = sorted(rows, key=lambda r: (-r[0], r[1]))
+    proposed, kept = dict(assignments), dict(assignments)
+    if not failures and healers:
+        proposed = _forced_matching(healers, new_edges) or dict(assignments)
+    changed = {h: {"from": assignments[h], "to": proposed[h]}
+               for h in healers if proposed[h] != assignments[h]}
+    diag = {"participating_healers": healers,
+            "proposed_assignments": proposed,
+            "changed": changed,
+            "model_influence_rate": (len(changed) / len(healers)) if healers else 0.0,
+            "failures": failures,
+            "mode": "active" if active else "shadow"}
+    return (proposed if (active and not failures) else kept), diag
+
+
 def assign_healing(state, n_agents, previous_assignments=None, parameters=None,
-                   unit_values=None):
+                   unit_values=None, pair_scorer=None, pair_scoring="off"):
     """One HealAssign decision step on a fresh snapshot.
 
     Returns a partial action map (healer slots only), full-length filler is
     the caller's responsibility, plus diagnostics. Non-healer allies are
     never assigned here.
+
+    ``pair_scorer``/``pair_scoring`` are an optional, default-off injection
+    point for the tree_skills medivac preference channel: ``"off"`` keeps the
+    original behaviour bit-for-bit; ``"shadow"`` records a proposed
+    re-matching without changing it; ``"on"`` re-ranks targets for the
+    already-decided participating healers only (see ``_apply_pair_scorer``).
     """
     params = {**PARAMS, **(parameters or {})}
     use_values = enabled_values(unit_values)
@@ -270,6 +361,12 @@ def assign_healing(state, n_agents, previous_assignments=None, parameters=None,
     assignments = _best_matching([h for h in healers if not endangered[h]], edges) \
         if any(not endangered[h] for h in healers) else {}
 
+    pair_scoring_diag = None
+    if pair_scorer is not None and pair_scoring in ("on", "shadow"):
+        assignments, pair_scoring_diag = _apply_pair_scorer(
+            state, assignments, edges, target_pool, urgency,
+            previous_assignments, pair_scorer, active=pair_scoring == "on")
+
     healer_actions, retained_orders, released = {}, {}, {}
     for healer in healers:
         if endangered[healer]:
@@ -329,6 +426,8 @@ def assign_healing(state, n_agents, previous_assignments=None, parameters=None,
         "terminated": reason is not None,
         "termination_reason": reason,
     }
+    if pair_scoring_diag is not None:
+        result["pair_scoring"] = pair_scoring_diag
     if use_values:
         occupied = set(assignments.values())
         witnesses = []

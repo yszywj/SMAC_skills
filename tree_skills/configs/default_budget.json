@@ -1,0 +1,37 @@
+{
+  "comment": "默认资源预算上限；长任务必须显式引用本文件（或更严格的副本）才允许运行，且不覆盖已有输出。",
+  "sc2": {
+    "max_instances": 1,
+    "max_episodes_per_run": 40,
+    "max_env_steps_per_episode": 150,
+    "concurrent_instances_requires_preflight": true
+  },
+  "downloads": {
+    "max_bytes_total": 2000000000,
+    "auto_start": false
+  },
+  "teacher_training": {
+    "auto_start": false,
+    "max_steps": 10000000,
+    "max_processes": 2
+  },
+  "distillation": {
+    "rounds_dagger": 2,
+    "max_episodes_per_round": 100
+  },
+  "disk": {
+    "max_artifact_bytes": 50000000000
+  },
+  "evaluation": {
+    "max_teacher_candidates": 3,
+    "sets": {
+      "smoke": 10,
+      "teacher_screen": 40,
+      "teacher_qualification": 200,
+      "tree_train": 400,
+      "tree_valid": 100,
+      "final_test": 200
+    },
+    "seed_range_start": 210
+  }
+}

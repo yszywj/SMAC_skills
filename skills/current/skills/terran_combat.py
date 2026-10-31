@@ -236,6 +236,10 @@ def _refresh_budget(state, result, parameters):
 def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
     """Same combat kwargs/result contract, with joint healing and race telemetry."""
     local = copy.deepcopy(state)
+    # Optional default-off pair-scorer injection (tree_skills medivac channel):
+    # strip it before deepcopy so the base planner contract is unchanged.
+    pair_scorer = kwargs.pop('pair_scorer', None)
+    pair_scoring = kwargs.pop('pair_scoring', 'off')
     options = copy.deepcopy(kwargs)
     memory = copy.deepcopy(race_memory or {})
     if V6_PARAMS['enabled'] and V6_PARAMS['known_threats']:
@@ -280,7 +284,9 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
     observed_orders, locked_orders, rescue_options, order_states, confirmations = _reserve_observed_heal_orders(healing_state, memory)
     healing = assign_healing(healing_state, n_agents,
                              previous_assignments=observed_orders,
-                             unit_values=options.get('unit_values'))
+                             unit_values=options.get('unit_values'),
+                             pair_scorer=pair_scorer,
+                             pair_scoring=pair_scoring)
     healing['observed_orders']=observed_orders
     keep_decisions={};keep_memory={};keep_outcomes={}
     if V6_PARAMS['enabled'] and V6_PARAMS['keep_order']:

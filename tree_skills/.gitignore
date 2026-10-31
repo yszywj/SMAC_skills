@@ -1,0 +1,9 @@
+artifacts/
+external/
+__pycache__/
+*.pyc
+.venv*/
+teacher/checkpoints/
+*.pt
+runs/
+shards/

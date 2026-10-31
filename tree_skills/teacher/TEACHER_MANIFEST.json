@@ -1,0 +1,37 @@
+{
+  "teacher_id": "marlgpt_terran10_native_teacher_v1",
+  "state": "absent",
+  "note": "planned local teacher identifier, not a confirmed usable model",
+  "source_repo": "https://github.com/Cognitive-AI-Systems/marl-gpt",
+  "weight_entrypoint": "https://huggingface.co/nortem/marl-gpt-model",
+  "weight_entrypoint_verified": {
+    "date": "2026-10-30",
+    "method": "HF API listing",
+    "files": ["marl-gpt-main.pt", "marl-gpt-wo-last-token.pt"],
+    "repo_bytes": 347441540,
+    "license": "MIT",
+    "disclaimer": "existence of files is NOT evidence of a terran-10v10-compatible teacher; structural audit still required after download"
+  },
+  "checkpoints": {},
+  "audit_checklist": {
+    "param_count": null,
+    "layers": null,
+    "history_length": null,
+    "context_capacity": null,
+    "action_head_dim": null,
+    "token_attribute_encoding": null,
+    "trained_tasks": null,
+    "load_strict": null,
+    "finite_smoke_outputs": null
+  },
+  "protocol": {
+    "map": "10gen_terran",
+    "n_units": 10,
+    "n_enemies": 10,
+    "unit_balance": "native",
+    "step_mul": 8,
+    "difficulty": "7",
+    "note": "matches local baseline runs terran-{heal-escort-v5,coordination-v6,lifecycle-v7}-20261030-n40-seed170"
+  },
+  "blocked_reason": "checkpoints not downloaded/audited; BLOCKED_TEACHER_WEIGHTS until state=ready"
+}
