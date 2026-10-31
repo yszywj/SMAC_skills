@@ -41,9 +41,10 @@ def pair_labels(teacher_logits, heal_slot_of):
     logits = teacher_logits[healer]
     used = {}
     for target_id, action_id in heal_slot_of.items():
-        if action_id not in logits:
+        key = action_id if action_id in logits else str(action_id)
+        if key not in logits:
             raise KeyError(f"missing teacher slot {action_id} for {target_id}")
-        value = float(logits[action_id])
+        value = float(logits[key])
         if not math.isfinite(value):
             raise ValueError(f"non-finite teacher logit for {target_id}")
         used[target_id] = value

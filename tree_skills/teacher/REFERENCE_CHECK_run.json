@@ -1,0 +1,10 @@
+{
+ "on": {
+  "collect": "tree_skills/artifacts/g35_collect/collect-terran-g35-Bmain3-n4-seed310.jsonl",
+  "last_token": "on",
+  "comparisons": 24,
+  "mismatches": 0,
+  "limitation": "slicing replicated from decomposer.decompose_obs; history/positions/race/padding run official code",
+  "details": []
+ }
+}

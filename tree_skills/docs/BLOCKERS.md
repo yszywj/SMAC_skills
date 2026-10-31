@@ -23,18 +23,20 @@ A-plug/影子模式的合成验证已完成；真游戏 A/B/C/D 对照依赖教�
 
 ---
 
-## 2026-10-31 更新：原 BLOCKED_TEACHER_WEIGHTS 已解除
+## 2026-10-31 更新：状态总览
 
-- G1（权重审计）、G2 管道级（映射+常驻服务）、G3（真实对局 A/A-plug 91 步动作等价；teacher-score 真实跑通）全部通过，见 RESULTS.md。
-- 当前唯一门槛：**G4 教师资格评测**（40 局 A/B 筛选 → 200 局资格验证）。未阻塞于技术，而是预算约束（每 40 局真实对局约数十分钟 SC2 时间），须按 `configs/default_budget.json` 显式启动。可直接运行的命令：
+- **G1 已完成**：两检查点结构审计通过（CHECKPOINT_AUDIT.md）。
+- **G2 真实快照比对**：管道级已过（INFERENCE_VALIDATION.md）；真实轨迹上的官方参考逐字段对照见 teacher/REFERENCE_CHECK_run.json（随 G3.5 采集运行产出）。
+- **G3 已完成**：真实对局 A/A-plug 逐步动作+订单+初始哈希等价（compare_g3_runs.py）。
+- **G4 资格未完成**：唯一待办。非技术阻塞，而是预算（40 局筛选 + 200 局资格的 SC2 时间）。命令见 docs/G4_COMMANDS.md（PowerShell 可直接复制）。
+- `ready` 在真实输入比对与动作映射验收全部通过后授予；`qualified` 只在 G4 资格成立后授予（当前均未授予）。
 
-```powershell
-# 40 局筛选清单（新种子，避开 170–209/300+）
-cd sc2_skill_adapter
-.venv\Scripts\python.exe run.py scenarios --race terran --size 10 --episodes 40 --seed 400 --unit-balance native --output configs	erran_g4_screen_n40_seed400.json
-# A 基线
-.venv\Scripts\python.exe run.py run --method adaptive-skill --manifest configs	erran_g4_screen_n40_seed400.json --output-dir runs	erran-g4-A-n40 --sc2-path "C:\Program Files (x86)\StarCraft II" --race-profile terran --terran-keep-heal-order --unit-value-mode contextual --adaptive-window-fire --adaptive-range-preserving-move --adaptive-target-scoring --adaptive-coordinated-approach --adaptive-safe-reentry --adaptive-accurate-damage --adaptive-critical-escape --adaptive-planned-reentry --adaptive-engagement-commitment --adaptive-approach-progress-guard
-# B 教师评分（同参数追加）: ... --pair-mode teacher-score --pair-failure strict
-```
 
-- 附带待办（`ready` 授予前的 G2 收尾）：真实轨迹采集时产出 10 条医疗机决策快照人工核对表（字段已在 DATA_PROTOCOL 列明）。
+## 2026-10-31 G4 筛选结果后的状态
+
+- G4 筛选已完成（G4_REPORT.md）：B-main 与 A 胜率完全相同、零胜负改变 → 未通过预注册门槛，200 局资格验证不启动，G5/G6 性能提升路线停止。
+- 当前阻塞性质：**研究协议层**。第一版问题（"已决定治疗时治疗谁"）在原规则锁定语义下可影响空间≈0（多候选机会 6.4%，推荐改配 20 次/40 局，且 7/7 冒烟推荐被 keep 层覆盖）。
+- 可选后续（需用户决策后重新预注册，不得自行变更）：
+  1. 放宽 keep/救援锁定对教师建议的覆盖（改变原语义，需新增对照）；
+  2. 使用多医疗机占比更高的阵容分布（偏离 native 0.10 权重）；
+  3. 用已保存的 962 组真实标签做"仅测试蒸馏机制"的研究性训练（明确不宣传胜率）。

@@ -91,11 +91,10 @@ def audit_one(path):
 
         model.eval()
         x = synthetic_input(config)
+        from tree_skills.teacher.service import actor_raw_logits
         with torch.no_grad():
-            # call the Critic_GPT forward directly: CriticWithLoss.forward
-            # returns a 4-tuple with loss info; we need raw (act, val) logits
-            act_logits, val_logits = type(model).__mro__[1].forward(model, x)
-            act_logits_2, _ = type(model).__mro__[1].forward(model, x)
+            act_logits, val_logits = actor_raw_logits(model, x)
+            act_logits_2, _ = actor_raw_logits(model, x)
         details["actor_head_dim"] = config.action_size
         details["act_logits_shape"] = list(act_logits.shape)
         details["val_logits_shape"] = list(val_logits.shape)

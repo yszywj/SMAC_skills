@@ -22,8 +22,10 @@ original-looking scores.
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 
 from .action_mapping import ActionMappingError, SmacActionMap
 
@@ -38,9 +40,46 @@ class TeacherServiceError(RuntimeError):
     pass
 
 
+class _LineReader(threading.Thread):
+    """Background stdout reader.
+
+    Windows pipes don't support select()-based timeouts, so a daemon thread
+    pushes complete lines into a queue; _read(timeout) blocks on the queue
+    only. Process death surfaces as an EOF sentinel carrying stderr tail.
+    """
+
+    EOF = object()
+
+    def __init__(self, stream, stderr):
+        super().__init__(daemon=True)
+        self.stream = stream
+        self.stderr = stderr
+        self.lines = queue.Queue()
+
+    def run(self):
+        for line in self.stream:
+            self.lines.put(line.rstrip("\n"))
+        self.lines.put(self.EOF)
+
+    def read(self, timeout):
+        try:
+            item = self.lines.get(timeout=timeout)
+        except queue.Empty:
+            raise TeacherServiceError(
+                f"teacher service timeout after {timeout}s") from None
+        if item is self.EOF:
+            tail = ""
+            try:
+                tail = self.stderr.read()[-2000:]
+            except Exception:
+                pass
+            raise TeacherServiceError(f"teacher service died: {tail}")
+        return item
+
+
 class TeacherServiceClient:
     def __init__(self, checkpoint, last_token="off", python=TEACHER_PYTHON,
-                 startup_timeout=180.0):
+                 startup_timeout=300.0, request_timeout=120.0):
         if not os.path.isfile(python):
             raise TeacherServiceError(
                 f"teacher python not found at {python}; create "
@@ -51,25 +90,43 @@ class TeacherServiceClient:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8",
             cwd=REPO)
-        hello = self._read(startup_timeout)
+        self._request_id = 0
+        self.request_timeout = request_timeout
+        self._reader = _LineReader(self.proc.stdout, self.proc.stderr)
+        self._reader.start()
+        hello = self._read_json(startup_timeout)
         if "model_sha256" not in hello:
             raise TeacherServiceError(f"bad service hello: {hello}")
         self.model_sha256 = hello["model_sha256"]
         self.model_args = hello["model_args"]
         self.history_len = hello["history_len"]
 
+    def _read_json(self, timeout):
+        line = self._reader.read(timeout)
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise TeacherServiceError(
+                f"teacher service sent invalid JSON: {line[:200]}") from exc
+
     def _read(self, timeout=None):
-        # line-based read; a dead service surfaces as EOF
-        line = self.proc.stdout.readline()
-        if not line:
-            err = self.proc.stderr.read()
-            raise TeacherServiceError(f"teacher service died: {err[-2000:]}")
-        return json.loads(line)
+        return self._read_json(timeout if timeout is not None
+                               else self.request_timeout)
 
     def _request(self, payload):
-        self.proc.stdin.write(json.dumps(payload) + "\n")
-        self.proc.stdin.flush()
+        self._request_id += 1
+        payload = {"request_id": self._request_id, **payload}
+        try:
+            self.proc.stdin.write(json.dumps(payload) + "\n")
+            self.proc.stdin.flush()
+        except (BrokenPipeError, ValueError) as exc:
+            raise TeacherServiceError(
+                f"teacher service pipe broken: {exc}") from exc
         reply = self._read()
+        if reply.pop("request_id", None) != self._request_id:
+            raise TeacherServiceError(
+                f"teacher service reply out of order: {reply.get('request_id')}"
+                f" expected {self._request_id}")
         if "error" in reply:
             raise TeacherServiceError(
                 f"{reply['error']['kind']}: {reply['error']['detail']}")

@@ -1,6 +1,6 @@
 {
  "teacher_id": "marlgpt_terran10_native_teacher_v1",
- "state": "audited",
+ "state": "ready",
  "note": "planned local teacher identifier, not a confirmed usable model",
  "source_repo": "https://github.com/Cognitive-AI-Systems/marl-gpt",
  "weight_entrypoint": "https://huggingface.co/nortem/marl-gpt-model",
@@ -22,7 +22,6 @@
    "sha256": "c3deaeb67f679657b27e9d3373e42e4104cc9370be6dba60ab5fd0efe7b1ce5a",
    "url": "https://huggingface.co/nortem/marl-gpt-model/resolve/main/marl-gpt-main.pt",
    "license": "MIT",
-   "reject_reason": "audit_exception:ValueError",
    "audit": {
     "file": "marl-gpt-main.pt",
     "weights_only_load": true,
@@ -99,7 +98,8 @@
     ],
     "last_token_attr_index": 128,
     "last_token_supported": true,
-    "notes": "structural audit only; ready requires G2 obs/action mapping validation on real snapshots"
+    "notes": "structural audit only; ready requires G2 obs/action mapping validation on real snapshots",
+    "ok": true
    }
   },
   "marl-gpt-wo-last-token.pt": {
@@ -108,7 +108,6 @@
    "sha256": "a1864b541c51619722f514bfbd6f8572b6b17992514c285097cace3e2b8deaf4",
    "url": "https://huggingface.co/nortem/marl-gpt-model/resolve/main/marl-gpt-wo-last-token.pt",
    "license": "MIT",
-   "reject_reason": "audit_exception:ValueError",
    "audit": {
     "file": "marl-gpt-wo-last-token.pt",
     "weights_only_load": true,
@@ -185,20 +184,27 @@
     ],
     "last_token_attr_index": 128,
     "last_token_supported": true,
-    "notes": "structural audit only; ready requires G2 obs/action mapping validation on real snapshots"
+    "notes": "structural audit only; ready requires G2 obs/action mapping validation on real snapshots",
+    "ok": true
    }
   }
  },
  "audit_checklist": {
-  "param_count": null,
-  "layers": null,
-  "history_length": null,
-  "context_capacity": null,
-  "action_head_dim": null,
-  "token_attribute_encoding": null,
-  "trained_tasks": null,
-  "load_strict": null,
-  "finite_smoke_outputs": null
+  "param_count": 7232256,
+  "layers": 8,
+  "heads": 8,
+  "hidden": 256,
+  "block_size": 700,
+  "history_embedding_capacity": 10,
+  "effective_history_len_for_10v10": 4,
+  "n_attr": 129,
+  "vocab_size": 400,
+  "action_head_dim": 20,
+  "token_attribute_encoding": "per-scalar tokens; terran attr ids own[0,1,2,3,11,9,10,13,14,15] ally[5,6,7,8,11,13,14,15] enemy[4,6,7,8,11,13,14,15] + race token attr16",
+  "trained_tasks": "not identifiable from checkpoint files; multi-env vocab/attr/action layout; qualification decided by G4 in-project only",
+  "load_strict": true,
+  "finite_smoke_outputs": true,
+  "source": "AUDIT_marl-gpt-main.json / AUDIT_marl-gpt-wo-last-token.json (2026-10-31)"
  },
  "protocol": {
   "map": "10gen_terran",
@@ -209,5 +215,17 @@
   "difficulty": "7",
   "note": "matches local baseline runs terran-{heal-escort-v5,coordination-v6,lifecycle-v7}-20261030-n40-seed170"
  },
- "blocked_reason": "checkpoints not downloaded/audited; BLOCKED_TEACHER_WEIGHTS until state=ready"
+ "last_token_convention": {
+  "official_terran_eval_config": "eval_configs/smac/terran_v2.yaml: last_token=True, history_len=6, obs_with_race=True",
+  "capacity_calc": "terran 10v10 = 162 tokens/frame + 1 race token; H frames need H*162+1 <= block_size 700 -> H <= 4 (official 6 would need 973)",
+  "decision": "use H=4 for both checkpoints; last_token=on for marl-gpt-main.pt, off for marl-gpt-wo-last-token.pt (final G4 candidates; verified runnable in INFERENCE_VALIDATION_run.json)"
+ },
+ "state_progress": {
+  "G1_weights_audited": true,
+  "G2_real_snapshot_parity": "passed 2026-10-31 (REFERENCE_CHECK_run.json: 24/24 exact on real observations; REAL_SNAPSHOT_TABLE.json: 10/10 multi-candidate moments, heal-slot + native-mask verified)",
+  "G4_qualification": "screen completed 2026-10-31: B-main vs A = 17/40 vs 17/40, paired diff 0 [0,0], 0 outcome changes; NOT qualified (see docs/G4_REPORT.md)",
+  "ready": true,
+  "qualified": false,
+  "ready_scope": "interface-level: inputs/mapping/inference validated; NOT a claim of teacher strength"
+ }
 }

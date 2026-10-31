@@ -1,6 +1,6 @@
 # TEACHER_CARD：marlgpt_terran10_native_teacher_v1
 
-状态：**audited**（2026-10-31：两检查点通过 G1 结构审计；`ready` 待 G2 真实快照核对 + G4 资格验证；`qualified` 未授予）。
+状态：**ready（接口级，2026-10-31）**——G1 结构审计 + G2 真实快照逐字段对照（24/24）+ 动作映射真实校验（10/10）全部通过；`qualified` 未授予，待 G4。接口级 ready 不代表教师强度。
 
 权重已下载并核验：`tree_skills/teacher/checkpoints/`（86,860,385 B ×2，SHA-256 与登记一致）。结构：7,232,256 参数、8 层/8 头/256、block_size 700、动作头 20、n_attr 129（多环境基础模型；SMAC 是否在训练分布内无法从权重确认，资格完全依据本项目 G4 实测）。详见 `teacher/CHECKPOINT_AUDIT.md`。
 

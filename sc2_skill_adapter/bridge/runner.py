@@ -210,12 +210,17 @@ async def evaluate(args, manifest, method, output):
                 mode=args.pair_mode, model_dir=args.pair_model_dir,
                 checkpoint=args.pair_teacher_checkpoint,
                 last_token=args.pair_last_token, failure=args.pair_failure,
-                shadow_of=args.pair_shadow_of)
+                shadow_of=args.pair_shadow_of, collect_dir=args.pair_collect,
+                run_label=os.path.basename(output))
             skill_config["manager_kwargs"].update(
                 pair_scorer=pair_runtime.scorer,
                 pair_scoring=("shadow" if args.pair_mode == "shadow" else "on"),
                 pair_histories=pair_runtime.histories,
                 pair_strict=(args.pair_failure == "strict"))
+            pair_metadata = pair_runtime.describe(
+                checkpoint=args.pair_teacher_checkpoint,
+                model_dir=args.pair_model_dir, last_token=args.pair_last_token)
+            emit("pair_configuration", **pair_metadata)
         if is_skill:
             skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
         if method in ("jev", "astra-jev"):
@@ -303,6 +308,9 @@ async def evaluate(args, manifest, method, output):
                     else:
                         actions, telemetry = step_result
                     emit("skill_step", episode=episode, step=steps, game_loop=loop, **telemetry)
+                    if pair_runtime is not None:
+                        pair_runtime.collect_step(episode, steps, int(loop),
+                                                  telemetry, actions)
                     if telemetry.get("termination_reason"):
                         emit("skill_terminated", episode=episode, step=steps,
                              reason=telemetry["termination_reason"])
@@ -403,6 +411,8 @@ async def evaluate(args, manifest, method, output):
     finally:
         if pair_runtime is not None:
             pair_runtime.close()
+            if pair_runtime.collector is not None:
+                pair_runtime.collector.close()
         if env is not None:
             env.close()
         if client is not None:
@@ -413,6 +423,11 @@ async def evaluate(args, manifest, method, output):
             "method": method, "status": "failed" if failure else "complete", "error": failure,
             "pair_mode": getattr(args, "pair_mode", "off"),
             "pair_failure_policy": getattr(args, "pair_failure", "strict"),
+            "pair_metadata": (pair_runtime.describe(
+                checkpoint=getattr(args, "pair_teacher_checkpoint", None),
+                model_dir=getattr(args, "pair_model_dir", None),
+                last_token=getattr(args, "pair_last_token", "off"))
+                if pair_runtime is not None else None),
             "skill_version": skill_version,
             "skill_source": metadata["skill_source"],
             "skill_source_hashes": skill_hashes,
@@ -490,6 +505,8 @@ def parser():
                              help='strict: scorer failure marks the episode invalid; tolerant: fall back with per-step accounting')
         command.add_argument('--pair-shadow-of', choices=('teacher-score','tree-score'), default=None,
                              help='Which model to shadow when --pair-mode shadow')
+        command.add_argument('--pair-collect', default=None,
+                             help='Optional directory for real per-step pair collection JSONL (never overwrites)')
         command.add_argument("--skill-max-steps", type=positive, default=4)
         command.add_argument("--adaptive-posture", choices=("aggressive", "balanced", "defensive"), default="balanced")
         command.add_argument("--adaptive-window-fire", action="store_true")

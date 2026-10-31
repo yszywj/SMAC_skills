@@ -39,6 +39,18 @@ for p in (MARL_GPT, REPO):
         sys.path.insert(0, p)
 
 
+def actor_raw_logits(model, obs_dict):
+    """Official Actor raw-logits interface.
+
+    Calls Critic_GPT.forward directly (the base GPT forward returns
+    (act_logits, val_logits) for the FULL action head); CriticWithLoss's
+    own forward returns a 4-tuple with loss bookkeeping instead. Sampling
+    helpers (act_actor) are NOT used: we need raw logits, never a sample.
+    """
+    from gpt.model_ac import Critic_GPT
+    return Critic_GPT.forward(model, obs_dict)
+
+
 def load_model(checkpoint_path, device):
     import torch
     from gpt.model_ac import CriticGPTConfig, CriticWithLoss
@@ -97,6 +109,7 @@ def main():
         line = line.strip()
         if not line:
             continue
+        request = {}
         try:
             request = json.loads(line)
             if request.get("op") == "ping":
@@ -111,15 +124,32 @@ def main():
             elif request.get("op") == "logits":
                 started = time.perf_counter()
                 episode, loop = request["episode"], request["game_loop"]
+                n_native = 6 + max(builder.n_agents, builder.n_enemies)
                 rows = []
                 for entry in request["agents"]:
+                    avail = entry.get("avail") or []
+                    # the project's RecordedEnv appends ONE keep-heal-order
+                    # extension slot after the 16 native actions; that slot is
+                    # never a teacher action and is ignored here
+                    if len(avail) not in (n_native, n_native + 1):
+                        raise ValueError(
+                            f"agent {entry['agent']}: mask length {len(avail)} "
+                            f"not in (native {n_native}, native+keep {n_native + 1})")
+                    if any(v not in (0, 1) for v in avail):
+                        raise ValueError(
+                            f"agent {entry['agent']}: non-binary mask values")
+                    record = builder._history.get((episode, entry["agent"]))
+                    if record is not None and record["loop"] is not None                             and loop < record["loop"]:
+                        raise ValueError(
+                            f"agent {entry['agent']}: game_loop regressed "
+                            f"{record['loop']} -> {loop}")
                     builder.observe(episode, entry["agent"], loop, entry["obs"])
                 for entry in request["agents"]:
                     rows.append((entry["agent"], builder.build_input(episode, entry["agent"])))
                 batched = {k: torch.cat([x[k] for _, x in rows]).to(device)
                            for k in rows[0][1]}
                 with torch.no_grad():
-                    act_logits, _ = type(model).__mro__[1].forward(model, batched)
+                    act_logits, _ = actor_raw_logits(model, batched)
                 if not torch.isfinite(act_logits).all():
                     raise ValueError("non-finite teacher logits")
                 n_native = 6 + max(builder.n_agents, builder.n_enemies)
@@ -134,7 +164,8 @@ def main():
                                    "detail": request.get("op")}}
         except Exception as exc:
             reply = {"error": {"kind": type(exc).__name__, "detail": str(exc)}}
-        sys.stdout.write(json.dumps(reply) + "\n")
+        sys.stdout.write(json.dumps(
+            {"request_id": request.get("request_id"), **reply}) + "\n")
         sys.stdout.flush()
 
 
