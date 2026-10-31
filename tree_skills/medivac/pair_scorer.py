@@ -84,15 +84,17 @@ class TreePairScorer:
         return value
 
 
-def make_pair_scorer(mode, model_dir=None):
+def make_pair_scorer(mode, model_dir=None, teacher_client=None,
+                     last_token="off", n_agents=10, n_enemies=10):
     """Build the scorer for an integration mode.
 
     off            -> None (original behaviour)
-    shadow         -> OriginalPairScorer plus recording is handled by the
-                      injection layer; pass the real scorer to observe its
-                      proposals without acting on them.
-    teacher-score  -> requires the teacher inference server (blocked until
-                      weights pass audit); raises with BLOCKED_TEACHER_WEIGHTS.
+    a-plug         -> OriginalPairScorer (channel equivalence proof)
+    teacher-score  -> TeacherPairScorer on a resident teacher service.
+                      Pass an existing `teacher_client` (shared service) or
+                      let one be started from the manifest checkpoint; the
+                      checkpoint must have passed structural audit (state
+                      audited/ready) — otherwise BLOCKED_TEACHER_WEIGHTS.
     tree-score     -> TreePairScorer on an exported/native model dir.
     """
     if mode == "off":
@@ -102,12 +104,21 @@ def make_pair_scorer(mode, model_dir=None):
     if mode == "teacher-score":
         from ..teacher.preflight import teacher_status
         status = teacher_status()
-        if status.get("state") != "ready":
+        audited = [name for name, rec in (status.get("checkpoints") or {}).items()
+                   if rec.get("status") == "audited"]
+        if teacher_client is None and not audited:
             raise RuntimeError(
-                "BLOCKED_TEACHER_WEIGHTS: teacher inference unavailable "
-                f"({status.get('state')}); see teacher/TEACHER_MANIFEST.json")
-        from ..teacher.inference import TeacherPairScorer  # heavy import guard
-        return TeacherPairScorer()
+                "BLOCKED_TEACHER_WEIGHTS: no checkpoint has passed the "
+                "structural audit; see teacher/TEACHER_MANIFEST.json")
+        from ..teacher.inference import TeacherPairScorer, TeacherServiceClient
+        if teacher_client is None:
+            import os
+            name = sorted(audited)[0]
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
+                __file__))), "teacher", "checkpoints", name)
+            teacher_client = TeacherServiceClient(path, last_token=last_token)
+        return TeacherPairScorer(teacher_client, n_agents=n_agents,
+                                 n_enemies=n_enemies)
     if mode == "tree-score":
         if not model_dir:
             raise ValueError("tree-score requires --model-dir")

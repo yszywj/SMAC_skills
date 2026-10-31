@@ -1,0 +1,81 @@
+{
+ "ok": true,
+ "details": {
+  "file": "marl-gpt-wo-last-token.pt",
+  "weights_only_load": true,
+  "top_level_keys": [
+   "best_val_loss",
+   "config",
+   "iter_num",
+   "model",
+   "model_args",
+   "optimizer"
+  ],
+  "model_args": {
+   "n_layer": 8,
+   "n_head": 8,
+   "n_embd": 256,
+   "block_size": 700,
+   "bias": false,
+   "vocab_size": 400,
+   "dropout": 0.0,
+   "history_len": 10,
+   "n_team": 2,
+   "n_agents": 20,
+   "n_attr": 129,
+   "action_size": 20,
+   "gamma": 0.95,
+   "max_value": 5,
+   "sigma_loss": 0.01,
+   "target_type": "TD",
+   "alpha_cql": 1,
+   "loss_type": "QT",
+   "num_sampled_actions": 4
+  },
+  "n_state_keys_raw": 64,
+  "n_state_keys_stripped": 64,
+  "had_orig_mod_prefix": true,
+  "param_count": 7232256,
+  "strict_load_ok": true,
+  "missing_keys": [],
+  "unexpected_keys": [],
+  "actor_head_dim": 20,
+  "act_logits_shape": [
+   2,
+   20
+  ],
+  "val_logits_shape": [
+   2,
+   20,
+   20
+  ],
+  "act_logits_all_finite": true,
+  "val_logits_all_finite": true,
+  "deterministic_repeated_forward": true,
+  "act_logits_sample": [
+   -4.137395,
+   -0.886078,
+   -0.153216,
+   -2.240522,
+   0.40408,
+   2.486614,
+   0.732476,
+   1.343443,
+   2.651326,
+   -6.504252,
+   -0.153363,
+   -5.001106,
+   -4.952041,
+   -3.509527,
+   -5.413225,
+   -4.696953,
+   -5.799176,
+   -3.229544,
+   -4.449492,
+   -19.953537
+  ],
+  "last_token_attr_index": 128,
+  "last_token_supported": true,
+  "notes": "structural audit only; ready requires G2 obs/action mapping validation on real snapshots"
+ }
+}

@@ -14,3 +14,7 @@ venv/
 # Local experiment outputs and historical runtime snapshots
 /sc2_skill_adapter/runs/
 /sc2_skill_adapter/analysis/
+
+# MARL-GPT teacher checkpoints (large weights, never commit)
+/tree_skills/teacher/checkpoints/
+/tree_skills/.venv-teacher/

@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "seed": 300,
+  "env_args": {
+    "continuing_episode": false,
+    "difficulty": "7",
+    "game_version": null,
+    "map_name": "10gen_terran",
+    "move_amount": 2,
+    "obs_all_health": true,
+    "obs_instead_of_state": false,
+    "obs_last_action": false,
+    "obs_own_health": true,
+    "obs_pathing_grid": false,
+    "obs_terrain_height": false,
+    "obs_timestep_number": false,
+    "reward_death_value": 10,
+    "reward_defeat": 0,
+    "reward_negative_scale": 0.5,
+    "reward_only_positive": true,
+    "reward_scale": true,
+    "reward_scale_rate": 20,
+    "reward_sparse": false,
+    "reward_win": 200,
+    "replay_dir": "",
+    "replay_prefix": "",
+    "conic_fov": false,
+    "obs_own_pos": true,
+    "use_unit_ranges": true,
+    "min_attack_range": 2,
+    "num_fov_actions": 12,
+    "capability_config": {
+      "n_units": 10,
+      "n_enemies": 10,
+      "team_gen": {
+        "dist_type": "weighted_teams",
+        "unit_types": [
+          "marine",
+          "marauder",
+          "medivac"
+        ],
+        "weights": [
+          0.45,
+          0.45,
+          0.1
+        ],
+        "exception_unit_types": [
+          "medivac"
+        ],
+        "observe": true
+      },
+      "start_positions": {
+        "dist_type": "surrounded_and_reflect",
+        "p": 0.5,
+        "map_x": 32,
+        "map_y": 32
+      }
+    },
+    "state_last_action": true,
+    "state_timestep_number": false,
+    "step_mul": 8,
+    "heuristic_ai": false,
+    "debug": false,
+    "prob_obs_enemy": 1.0,
+    "action_mask": true,
+    "unit_balance": "native"
+  },
+  "episodes": [
+    {
+      "index": 0,
+      "sc2_seed": 300,
+      "episode_config": {
+        "team_gen": {
+          "ally_team": [
+            "marauder",
+            "marine",
+            "marauder",
+            "marine",
+            "marine",
+            "marauder",
+            "marine",
+            "marauder",
+            "marine",
+            "medivac"
+          ],
+          "enemy_team": [
+            "marauder",
+            "marine",
+            "marauder",
+            "marine",
+            "marine",
+            "marauder",
+            "marine",
+            "marauder",
+            "marine",
+            "medivac"
+          ],
+          "id": 0
+        },
+        "ally_start_positions": {
+          "item": [
+            [
+              4.315285272948159,
+              15.219573225448087
+            ],
+            [
+              0.2602802348946509,
+              11.52423088431188
+            ],
+            [
+              7.341233621911037,
+              12.105717068237922
+            ],
+            [
+              0.6244228754718789,
+              26.735240361880265
+            ],
+            [
+              10.952269396652733,
+              20.38092316699312
+            ],
+            [
+              5.983271541031105,
+              11.7393026129232
+            ],
+            [
+              6.356703874112343,
+              31.46430213857278
+            ],
+            [
+              0.676273906805957,
+              3.736776020171259
+            ],
+            [
+              9.11031882068818,
+              3.2853730082328028
+            ],
+            [
+              8.223779660130255,
+              25.955827099496222
+            ]
+          ],
+          "id": 0
+        },
+        "enemy_start_positions": {
+          "item": [
+            [
+              27.68471472705184,
+              15.219573225448087
+            ],
+            [
+              31.73971976510535,
+              11.52423088431188
+            ],
+            [
+              24.658766378088963,
+              12.105717068237922
+            ],
+            [
+              31.37557712452812,
+              26.735240361880265
+            ],
+            [
+              21.04773060334727,
+              20.38092316699312
+            ],
+            [
+              26.016728458968895,
+              11.7393026129232
+            ],
+            [
+              25.64329612588766,
+              31.46430213857278
+            ],
+            [
+              31.323726093194043,
+              3.736776020171259
+            ],
+            [
+              22.889681179311822,
+              3.2853730082328028
+            ],
+            [
+              23.776220339869745,
+              25.955827099496222
+            ]
+          ],
+          "id": 0
+        }
+      },
+      "sha256": "4d6f357b0d3d241fd9298fcbf442705f99b631367e610e850f68557ecb2f5a39"
+    }
+  ],
+  "sha256": "5e94a4983152c044b136ff65205fd001e407d01b092178456b2d374b2863733e"
+}

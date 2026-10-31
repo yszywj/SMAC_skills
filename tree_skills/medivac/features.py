@@ -60,16 +60,30 @@ def _ratio(unit):
 
 
 def _threat_flags(state, actor):
-    """(threatened, n_known_compatible, info_missing) from visible relations."""
+    """(threatened, n_known_compatible, info_missing) for one actor.
+
+    Direction matters: "is this unit inside a VISIBLE ENEMY's weapon range".
+    The bridge's relations carry, per enemy e:
+      - in_enemy_weapon_range / enemy_weapon_range_status: THIS actor inside
+        enemy e's range (enemy shoots us) — the threat direction we want;
+      - in_weapon_range / weapon_range_status: OUR weapon vs enemy e —
+        must NOT be read as "enemy cannot threaten us": a medivac has no
+        weapon, so weapon_range_status is 'no_compatible_weapon' for every
+        enemy, which says nothing about the enemy threatening the medivac.
+    Unknown relations are counted as missing, never as "no threat".
+    """
     relations = state.get("relations", {}).get(actor, {})
     threatened, known, missing = 0, 0, 0
     for relation in relations.values():
         if relation.get("in_enemy_weapon_range") is True:
             threatened, known = 1, known + 1
             continue
-        status = relation.get("weapon_range_status")
-        if status == "no_compatible_weapon":
-            known += 1  # enemy exists but cannot hit this unit's class
+        status = relation.get("enemy_weapon_range_status")
+        if status == "in_range":
+            # explicit in-range but flag False: treat as known, not threatened
+            known += 1
+        elif status in ("out_of_range", "no_compatible_weapon"):
+            known += 1
         elif status is None:
             missing += 1
     return threatened, known, 1 if missing else 0
@@ -154,11 +168,10 @@ def build_pair_features(healer, target_id, context, schema=None):
     healers_with_candidates = ({h for info in target_pool.values() for h in info}
                                or {healer})
     n_wounded = max(1, len(target_pool))
-    distance = None
-    for info in target_pool.get(target_id, {}).values():
-        distance = info.get("distance")
-        break
-    distance = float(distance) if distance is not None else 0.0
+    # THIS healer-target pair's distance, not "the first healer that can
+    # reach the target": different healers sit at different ranges.
+    distance_info = target_pool.get(target_id, {}).get(healer)
+    distance = float(distance_info["distance"]) if distance_info else 0.0
 
     type_name = str(target_unit.get("type", "")).lower()
     values = [

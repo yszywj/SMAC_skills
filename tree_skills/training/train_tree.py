@@ -62,14 +62,65 @@ def fit(train_groups, params=None):
     return model
 
 
+def joint_groups(groups):
+    """Merge per-healer groups into joint decision groups keyed by
+    (episode_id, game_loop): all participating healers of one step."""
+    merged = {}
+    for group in groups:
+        key = (group["episode_id"], group["game_loop"])
+        merged.setdefault(key, []).append(group)
+    return merged
+
+
+def joint_assignment_agreement(model, groups):
+    """Deployment-faithful joint matching agreement.
+
+    For every (episode, game_loop) step: build edges from teacher labels and
+    from student predictions, run the SAME forced participation matching the
+    deployment path uses (every participating healer picks exactly one
+    target), and compare final assignments. Top-1-per-healer equality is NOT
+    the same quantity and is reported separately.
+    """
+    from tree_skills.medivac.matching import forced_matching
+    agree = total = 0
+    changed_healers = 0
+    all_healers = 0
+    for key, step_groups in sorted(joint_groups(groups).items()):
+        teacher_edges, student_edges, healers = {}, {}, []
+        for group in step_groups:
+            healer = group["healer_id"]
+            healers.append(healer)
+            teacher_edges[healer] = sorted(
+                ((label, t) for t, label in group["labels"].items()),
+                key=lambda r: (-r[0], r[1]))
+            student_edges[healer] = sorted(
+                ((float(model.predict([group["features"][t]])[0]), t)
+                 for t in group["labels"]),
+                key=lambda r: (-r[0], r[1]))
+        teacher_match = forced_matching(healers, teacher_edges) or {}
+        student_match = forced_matching(healers, student_edges) or {}
+        total += 1
+        if teacher_match == student_match:
+            agree += 1
+        all_healers += len(healers)
+        changed_healers += sum(1 for h in healers
+                               if teacher_match.get(h) != student_match.get(h))
+    return {"n_joint_steps": total,
+            "joint_assignment_agreement": agree / total if total else None,
+            "healer_assignment_agreement": 1 - changed_healers / all_healers if all_healers else None,
+            "single_candidate_step_rate": (sum(1 for gs in joint_groups(groups).values()
+                                               if len(gs) == 1 and len(gs[0]["labels"]) == 1)
+                                           / len(joint_groups(groups))) if groups else None}
+
+
 def evaluate_ranking(model, groups):
     """Group-level behaviour metrics: what actually matters for matching.
 
-    - top1_agreement: argmax of predicted vs teacher label per group,
+    - top1_agreement: argmax of predicted vs teacher label per healer group,
       non-tie groups only.
-    - assignment_agreement: exact joint matching (each group is one healer;
-      here agreement == top-1 over that group's candidates).
-    - mae / mse on rows for reference.
+    - joint_assignment_agreement: deployment-faithful joint matching over
+      all healers of the same decision step (see joint_assignment_agreement).
+    - mae on rows for reference.
     """
     import statistics
     top1 = tie = 0
@@ -86,10 +137,11 @@ def evaluate_ranking(model, groups):
             top1 += 1
         errors.extend(abs(pred[t] - labels[t]) for t in labels)
     decided = len(groups) - tie
-    return {"n_groups": len(groups), "n_tied_groups": tie,
-            "top1_agreement": top1 / decided if decided else None,
-            "assignment_agreement": top1 / decided if decided else None,
-            "mae": statistics.mean(errors) if errors else None}
+    result = {"n_groups": len(groups), "n_tied_groups": tie,
+              "top1_agreement": top1 / decided if decided else None,
+              "mae": statistics.mean(errors) if errors else None}
+    result.update(joint_assignment_agreement(model, groups))
+    return result
 
 
 def main(argv=None):

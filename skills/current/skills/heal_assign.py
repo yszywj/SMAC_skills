@@ -222,7 +222,8 @@ def _forced_matching(healers, edges):
 
 
 def _apply_pair_scorer(state, assignments, edges, target_pool, urgency,
-                       previous_assignments, pair_scorer, active):
+                       previous_assignments, pair_scorer, active,
+                       histories=None, strict=False):
     """Optional injected re-scoring of the joint heal matching.
 
     Contract (tree_skills medivac channel, v1):
@@ -235,26 +236,36 @@ def _apply_pair_scorer(state, assignments, edges, target_pool, urgency,
       negative scores are meaningful (participation is fixed), so no constant
       shift, abs or clipping may be applied by either side.
     - ``active=False`` is shadow mode: only record the proposed matching.
+    - ``strict=True`` (formal experiments): any scorer exception or
+      non-finite score RAISES so the runner marks the episode invalid —
+      a silent fallback to the original matching must never be counted as
+      a scorer's own result. ``strict=False`` (tolerant diagnostics runs)
+      keeps the original matching and records per-healer failures.
 
-    Returns (assignments, diagnostics). On any infeasibility (a participating
-    healer with no legal edge, non-finite score, scorer exception) the
-    original matching is kept and the failure is recorded per-healer.
+    Returns (assignments, diagnostics).
     """
     healers = sorted(assignments, key=lambda h: int(h[1:]))
     context = {"state": state, "urgency": urgency, "target_pool": target_pool,
                "previous_assignments": previous_assignments or {},
-               "original_edges": edges}
+               "original_edges": edges, "histories": histories}
     new_edges, failures = {}, {}
     for healer in healers:
         rows = []
         for _, target in edges.get(healer, []):
             try:
                 score = float(pair_scorer(healer, target, context))
-            except Exception as exc:  # diagnostics only; never crash the step
+            except Exception as exc:
+                if strict:
+                    raise RuntimeError(
+                        f"pair scorer failed for {healer}->{target}: "
+                        f"{type(exc).__name__}: {exc}") from exc
                 failures[healer] = f"scorer_error:{type(exc).__name__}"
                 rows = None
                 break
             if score != score or score in (float("inf"), float("-inf")):
+                if strict:
+                    raise ValueError(
+                        f"non-finite pair score for {healer}->{target}")
                 failures[healer] = f"non_finite_score_for:{target}"
                 rows = None
                 break
@@ -277,7 +288,8 @@ def _apply_pair_scorer(state, assignments, edges, target_pool, urgency,
 
 
 def assign_healing(state, n_agents, previous_assignments=None, parameters=None,
-                   unit_values=None, pair_scorer=None, pair_scoring="off"):
+                   unit_values=None, pair_scorer=None, pair_scoring="off",
+                   pair_histories=None, pair_strict=False):
     """One HealAssign decision step on a fresh snapshot.
 
     Returns a partial action map (healer slots only), full-length filler is
@@ -365,7 +377,8 @@ def assign_healing(state, n_agents, previous_assignments=None, parameters=None,
     if pair_scorer is not None and pair_scoring in ("on", "shadow"):
         assignments, pair_scoring_diag = _apply_pair_scorer(
             state, assignments, edges, target_pool, urgency,
-            previous_assignments, pair_scorer, active=pair_scoring == "on")
+            previous_assignments, pair_scorer, active=pair_scoring == "on",
+            histories=pair_histories, strict=pair_strict)
 
     healer_actions, retained_orders, released = {}, {}, {}
     for healer in healers:

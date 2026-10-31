@@ -16,7 +16,7 @@ import random
 import subprocess
 import sys
 
-sys.path.insert(0, r"C:\Users\ry\skill\SMAC_agent")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from tree_skills.data.labeling import pair_labels, write_sample_group
 from tree_skills.export.exporter import export_gbr

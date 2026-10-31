@@ -84,10 +84,22 @@ class SkillManager:
 
     def __init__(self, max_steps=4, risk_threshold=None, safe_streak_required=2,
                  heal_switch_margin=None, adaptive_params=None, combat_params=None,
-                 unit_value_params=None, spatial_params=None, race_profile="off"):
+                 unit_value_params=None, spatial_params=None, race_profile="off",
+                 pair_scorer=None, pair_scoring="off", pair_histories=None,
+                 pair_strict=False):
         if race_profile not in ("off", "terran", "zerg"):
             raise ValueError("race_profile must be off, terran or zerg")
         self.race_profile = race_profile
+        # Optional, default-off medivac pair-scorer channel (tree_skills).
+        # Only the terran adaptive path consumes it; off == original bits.
+        if pair_scoring not in ("off", "on", "shadow"):
+            raise ValueError("pair_scoring must be off/on/shadow")
+        if pair_scorer is not None and race_profile != "terran":
+            raise ValueError("pair_scorer is only valid with race_profile='terran'")
+        self.pair_scorer = pair_scorer
+        self.pair_scoring = pair_scoring
+        self.pair_histories = pair_histories
+        self.pair_strict = pair_strict
         self.max_steps = max_steps
         self.safe_streak_required = max(1, safe_streak_required)
         # Combat positioning lives inside the combat mode: its switch rides on
@@ -582,6 +594,11 @@ class SkillManager:
             allocator = allocate_zerg_combat
         if self.race_profile != "off":
             race_kwargs["race_memory"] = self._race_memory
+        if self.pair_scorer is not None and self.race_profile == "terran":
+            race_kwargs.update(pair_scorer=self.pair_scorer,
+                               pair_scoring=self.pair_scoring,
+                               pair_histories=self.pair_histories,
+                               pair_strict=self.pair_strict)
         result = allocator(
             state, n_agents, unit_states=self.unit_states, all_in=self.all_in,
             stall=self.stall_steps, contacted=self.contacted, posture=self.posture,

@@ -16,7 +16,7 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, r"C:\Users\ry\skill\SMAC_agent")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from sklearn.ensemble import GradientBoostingRegressor
 

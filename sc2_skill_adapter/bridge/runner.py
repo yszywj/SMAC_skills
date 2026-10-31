@@ -141,6 +141,7 @@ async def evaluate(args, manifest, method, output):
     os.environ["SC2PATH"] = str(args.sc2_path.resolve())
     env, client, planner = None, None, None
     skill_manager = None
+    pair_runtime = None
     records, latencies = [], []
     requests, usage = 0, {}
     started = time.monotonic()
@@ -198,6 +199,23 @@ async def evaluate(args, manifest, method, output):
         emit('action_extension_configuration', action_extensions=action_extensions)
     failure = None
     try:
+        if is_skill and getattr(args, "pair_mode", "off") != "off":
+            import sys as _sys, os as _os
+            _root = _os.path.abspath(_os.path.join(
+                _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".."))
+            if _root not in _sys.path:
+                _sys.path.insert(0, _root)
+            from tree_skills.integration import pair_runtime as _pair_runtime_mod
+            pair_runtime = _pair_runtime_mod.PairRuntime.from_args(
+                mode=args.pair_mode, model_dir=args.pair_model_dir,
+                checkpoint=args.pair_teacher_checkpoint,
+                last_token=args.pair_last_token, failure=args.pair_failure,
+                shadow_of=args.pair_shadow_of)
+            skill_config["manager_kwargs"].update(
+                pair_scorer=pair_runtime.scorer,
+                pair_scoring=("shadow" if args.pair_mode == "shadow" else "on"),
+                pair_histories=pair_runtime.histories,
+                pair_strict=(args.pair_failure == "strict"))
         if is_skill:
             skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
         if method in ("jev", "astra-jev"):
@@ -243,6 +261,9 @@ async def evaluate(args, manifest, method, output):
                     active = await planner.get_plan(payload, env)
                     assert_clock(env, loop)
                     payload = attach_plan(payload, active)
+                if pair_runtime is not None:
+                    pair_runtime.begin_step(f"ep{episode:04d}", int(loop), env,
+                                            reset=(steps == 0))
                 if skill_manager is not None:
                     emit("skill_observation", episode=episode, step=steps, payload=payload)
                     spatial_choice = None
@@ -380,6 +401,8 @@ async def evaluate(args, manifest, method, output):
         emit("run_failed", error=failure, completed_episodes=len(records))
         raise
     finally:
+        if pair_runtime is not None:
+            pair_runtime.close()
         if env is not None:
             env.close()
         if client is not None:
@@ -388,6 +411,8 @@ async def evaluate(args, manifest, method, output):
             await planner.close()
         summary = {
             "method": method, "status": "failed" if failure else "complete", "error": failure,
+            "pair_mode": getattr(args, "pair_mode", "off"),
+            "pair_failure_policy": getattr(args, "pair_failure", "strict"),
             "skill_version": skill_version,
             "skill_source": metadata["skill_source"],
             "skill_source_hashes": skill_hashes,
@@ -453,6 +478,18 @@ def parser():
                              help="Opt-in race-specific adaptive combat; current skills only")
         command.add_argument('--terran-keep-heal-order', action='store_true',
                              help='Native current Terran only: append an action that submits no command for an eligible observed heal order')
+        command.add_argument('--pair-mode', choices=('off','a-plug','shadow','teacher-score','tree-score'), default='off',
+                             help='Default-off medivac pair-preference channel (tree_skills); current+terran adaptive only')
+        command.add_argument('--pair-model-dir', default=None,
+                             help='Exported/native tree model dir for --pair-mode tree-score/shadow')
+        command.add_argument('--pair-teacher-checkpoint', default=None,
+                             help='Teacher .pt for --pair-mode teacher-score/shadow (default: first audited checkpoint)')
+        command.add_argument('--pair-last-token', choices=('on','off'), default='off',
+                             help='Teacher input variant; must match the chosen checkpoint convention')
+        command.add_argument('--pair-failure', choices=('strict','tolerant'), default='strict',
+                             help='strict: scorer failure marks the episode invalid; tolerant: fall back with per-step accounting')
+        command.add_argument('--pair-shadow-of', choices=('teacher-score','tree-score'), default=None,
+                             help='Which model to shadow when --pair-mode shadow')
         command.add_argument("--skill-max-steps", type=positive, default=4)
         command.add_argument("--adaptive-posture", choices=("aggressive", "balanced", "defensive"), default="balanced")
         command.add_argument("--adaptive-window-fire", action="store_true")

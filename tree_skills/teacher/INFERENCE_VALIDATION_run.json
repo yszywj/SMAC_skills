@@ -1,0 +1,62 @@
+{
+ "off": {
+  "synthetic_only": true,
+  "last_token": "off",
+  "obs_dim": 162,
+  "dims": {
+   "n_agents": 10,
+   "n_enemies": 10,
+   "move_feats": 4,
+   "own_feats": 6,
+   "obs_nf_en": 8,
+   "obs_nf_al": 8
+  },
+  "model_sha256": "c3deaeb67f679657b27e9d3373e42e4104cc9370be6dba60ab5fd0efe7b1ce5a",
+  "model_args_subset": {
+   "block_size": 700,
+   "history_len": 10,
+   "action_size": 20,
+   "n_attr": 129,
+   "vocab_size": 400,
+   "n_agents": 20
+  },
+  "per_frame_tokens": 163,
+  "steps": 3,
+  "logits_length": 20,
+  "logits_all_finite": true,
+  "deterministic_across_service_restarts": true,
+  "duplicate_step_guard": "TeacherServiceError",
+  "scorer_heal_slot_u4_u0": 4.450936317443848,
+  "out_of_range_ally_guard": "ActionMappingError"
+ },
+ "on": {
+  "synthetic_only": true,
+  "last_token": "on",
+  "obs_dim": 162,
+  "dims": {
+   "n_agents": 10,
+   "n_enemies": 10,
+   "move_feats": 4,
+   "own_feats": 6,
+   "obs_nf_en": 8,
+   "obs_nf_al": 8
+  },
+  "model_sha256": "c3deaeb67f679657b27e9d3373e42e4104cc9370be6dba60ab5fd0efe7b1ce5a",
+  "model_args_subset": {
+   "block_size": 700,
+   "history_len": 10,
+   "action_size": 20,
+   "n_attr": 129,
+   "vocab_size": 400,
+   "n_agents": 20
+  },
+  "per_frame_tokens": 163,
+  "steps": 3,
+  "logits_length": 20,
+  "logits_all_finite": true,
+  "deterministic_across_service_restarts": true,
+  "duplicate_step_guard": "TeacherServiceError",
+  "scorer_heal_slot_u4_u0": -6.791884422302246,
+  "out_of_range_ally_guard": "ActionMappingError"
+ }
+}

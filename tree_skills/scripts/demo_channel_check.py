@@ -8,9 +8,10 @@ import argparse
 import copy
 import math
 import random
+import os
 import sys
 
-sys.path.insert(0, r"C:\Users\ry\skill\SMAC_agent")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from skills.current.skills import heal_assign
 from tree_skills.medivac.pair_scorer import TreePairScorer

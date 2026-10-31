@@ -160,8 +160,18 @@ def manager_configuration(args):
         value_metadata = unit_value_metadata(values)
     if race_profile != "off":
         manager_kwargs["race_profile"] = race_profile
+    # Medivac pair-scorer channel (tree_skills): default off, current+terran
+    # adaptive only. The scorer OBJECT is built by the runner (it needs the
+    # live env/teacher service); only the policy flags are validated here.
+    pair_mode = getattr(args, "pair_mode", "off")
+    if pair_mode != "off":
+        if version != "current" or race_profile != "terran":
+            raise ValueError("--pair-mode requires --skill-version current and --race-profile terran")
+        if not getattr(args, "terran_keep_heal_order", False):
+            raise ValueError("--pair-mode expects the terran keep-heal-order protocol to stay explicit")
     return {"version": version, "source": str(source), "posture": posture,
-            "manager_kwargs": manager_kwargs, "value_metadata": value_metadata}
+            "manager_kwargs": manager_kwargs, "value_metadata": value_metadata,
+            "pair_mode": pair_mode}
 
 
 def source_files(version="current"):

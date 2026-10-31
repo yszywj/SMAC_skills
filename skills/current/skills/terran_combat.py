@@ -240,6 +240,8 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
     # strip it before deepcopy so the base planner contract is unchanged.
     pair_scorer = kwargs.pop('pair_scorer', None)
     pair_scoring = kwargs.pop('pair_scoring', 'off')
+    pair_histories = kwargs.pop('pair_histories', None)
+    pair_strict = kwargs.pop('pair_strict', False)
     options = copy.deepcopy(kwargs)
     memory = copy.deepcopy(race_memory or {})
     if V6_PARAMS['enabled'] and V6_PARAMS['known_threats']:
@@ -286,7 +288,9 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
                              previous_assignments=observed_orders,
                              unit_values=options.get('unit_values'),
                              pair_scorer=pair_scorer,
-                             pair_scoring=pair_scoring)
+                             pair_scoring=pair_scoring,
+                             pair_histories=pair_histories,
+                             pair_strict=pair_strict)
     healing['observed_orders']=observed_orders
     keep_decisions={};keep_memory={};keep_outcomes={}
     if V6_PARAMS['enabled'] and V6_PARAMS['keep_order']:
