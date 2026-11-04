@@ -38,6 +38,10 @@ for p in (MARL_GPT, REPO):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from tree_skills.teacher.runtime_dependencies import add_teacher_dependencies
+
+add_teacher_dependencies()
+
 
 def actor_raw_logits(model, obs_dict):
     """Official Actor raw-logits interface.
@@ -96,13 +100,16 @@ def main():
     base = dict(n_agents=10, n_enemies=10, history_len=4,
                 block_size=model_args["block_size"], vocab_size=model_args["vocab_size"],
                 action_size=model_args["action_size"], n_attr=model_args["n_attr"],
-                obs_with_race=True,
+                obs_with_race=True, env_indicator=0,
                 last_token=(args.last_token == "on"))
 
     sys.stdout.write(json.dumps({"ok": True, "model_sha256": model_sha,
                                  "model_args": model_args,
-                                 "history_len": model_args["history_len"],
-                                 "last_token": args.last_token}) + "\n")
+                                 "history_len": base["history_len"],
+                                 "history_embedding_capacity": model_args["history_len"],
+                                 "last_token": args.last_token,
+                                 "env_indicator": base["env_indicator"],
+                                 "env_specific": False}) + "\n")
     sys.stdout.flush()
 
     for line in sys.stdin:
@@ -116,7 +123,10 @@ def main():
                 reply = {"pong": model_sha}
             elif request.get("op") == "init":
                 builder = SmacObsBuilder(**{**base, **request["dims"]})
-                reply = {"ok": True, "per_frame_tokens": builder.per_frame_tokens}
+                reply = {"ok": True, "per_frame_tokens": builder.per_frame_tokens,
+                         "history_len": builder.history_len,
+                         "last_token": builder.last_token,
+                         "env_indicator": builder.env_indicator}
             elif request.get("op") == "reset":
                 if builder is not None:  # resets before init are no-ops
                     builder.reset_episode(request["episode"])

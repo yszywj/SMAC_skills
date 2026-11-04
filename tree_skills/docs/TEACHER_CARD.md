@@ -1,5 +1,7 @@
 # TEACHER_CARD：marlgpt_terran10_native_teacher_v1
 
+> 当前状态（2026-11-01）：末token已修正为官方默认0，原环境真实输入24/24通过。新四组诊断160局已完成，混合筛选集A/B/C/D胜局为14/14/12/10，原始分布20局为7/7/5/6；教师尚无优于规则的证据，qualified=false。见 [TEACHER_CONTROL_DIAGNOSTIC_REPORT.md](TEACHER_CONTROL_DIAGNOSTIC_REPORT.md)。此前旧场景17→18胜的修复复验见 [TOKENFIX_REPORT.md](TOKENFIX_REPORT.md)。以下保留早期准备与来源记录，其中“未下载/未执行”等历史描述不代表当前状态。
+
 状态：**ready（接口级，2026-10-31）**——G1 结构审计 + G2 真实快照逐字段对照（24/24）+ 动作映射真实校验（10/10）全部通过；`qualified` 未授予，待 G4。接口级 ready 不代表教师强度。
 
 权重已下载并核验：`tree_skills/teacher/checkpoints/`（86,860,385 B ×2，SHA-256 与登记一致）。结构：7,232,256 参数、8 层/8 头/256、block_size 700、动作头 20、n_attr 129（多环境基础模型；SMAC 是否在训练分布内无法从权重确认，资格完全依据本项目 G4 实测）。详见 `teacher/CHECKPOINT_AUDIT.md`。

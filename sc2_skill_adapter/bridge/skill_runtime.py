@@ -169,9 +169,39 @@ def manager_configuration(args):
             raise ValueError("--pair-mode requires --skill-version current and --race-profile terran")
         if not getattr(args, "terran_keep_heal_order", False):
             raise ValueError("--pair-mode expects the terran keep-heal-order protocol to stay explicit")
+    medivac_mode = getattr(args, "medivac_policy", "legacy")
+    if medivac_mode not in ("legacy", "tree-shadow", "tree"):
+        raise ValueError("--medivac-policy must be legacy/tree-shadow/tree")
+    coordination_arg = getattr(args, "medical_patient_coordination", None)
+    if coordination_arg not in (None, "on", "off"):
+        raise ValueError("--medical-patient-coordination must be on/off")
+    coordination = coordination_arg != "off" if coordination_arg is not None else medivac_mode != "tree"
+    tree_path = getattr(args, "medivac_tree", None)
+    if medivac_mode == "legacy" and tree_path is not None:
+        raise ValueError("--medivac-tree requires tree or tree-shadow mode")
+    if medivac_mode != "legacy" or not coordination:
+        if version != "current" or race_profile != "terran":
+            raise ValueError("medical policy controls require current Terran skills")
+    if medivac_mode != "legacy":
+        if pair_mode != "off" or getattr(args, "native_teacher_control", "off") != "off":
+            raise ValueError("direct medical tree excludes pair scoring and native teacher control")
+        if not getattr(args, "terran_keep_heal_order", False):
+            raise ValueError("direct medical tree requires the explicit --terran-keep-heal-order contract")
+        if any(spatial.values()):
+            raise ValueError("initial medical tree evaluation excludes spatial dispatch/overlays")
+        if medivac_mode == "tree" and coordination:
+            raise ValueError("tree mode requires --medical-patient-coordination off")
+        if str(WORKSPACE) not in sys.path:
+            sys.path.insert(0, str(WORKSPACE))
+        from medivac_tree import MedivacTree
+        manager_kwargs.update(medivac_tree=MedivacTree(tree_path),
+                              medivac_policy_mode=medivac_mode)
+    if version == "current" and race_profile == "terran":
+        manager_kwargs["medical_patient_coordination"] = coordination
     return {"version": version, "source": str(source), "posture": posture,
             "manager_kwargs": manager_kwargs, "value_metadata": value_metadata,
-            "pair_mode": pair_mode}
+            "pair_mode": pair_mode, "medivac_policy":medivac_mode,
+            "medical_patient_coordination":coordination}
 
 
 def source_files(version="current"):

@@ -211,9 +211,11 @@ class PairRuntime:
         if self.collector is None:
             return
         healing = (telemetry or {}).get("race_telemetry", {}).get("healing", {})
+        keep_decisions = (telemetry or {}).get("race_telemetry", {}).get(
+            "terran_coordination", {}).get("keep_order")
         self.collector.finish_step(f"ep{episode:04d}", game_loop,
                                    healing.get("pair_scoring"), healing,
-                                   final_actions)
+                                   final_actions, keep_decisions=keep_decisions)
 
     def describe(self, checkpoint=None, model_dir=None, last_token="off"):
         """Audit metadata for run.json / pair_configuration events."""
@@ -236,7 +238,9 @@ class PairRuntime:
             info["teacher_model_args"] = {
                 k: teacher.model_args.get(k) for k in
                 ("block_size", "history_len", "action_size", "n_attr", "vocab_size")}
-            info["effective_history_len"] = 4  # block_size 700 capacity, see manifest
+            info["effective_history_len"] = teacher.history_len
+            info["env_indicator"] = teacher.env_indicator
+            info["teacher_last_token"] = teacher.last_token
         tree = getattr(self.scorer, "schema", None)
         if tree is not None:
             info["feature_schema_version"] = tree.version

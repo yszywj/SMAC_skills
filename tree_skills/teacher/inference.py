@@ -78,12 +78,14 @@ class _LineReader(threading.Thread):
 
 
 class TeacherServiceClient:
-    def __init__(self, checkpoint, last_token="off", python=TEACHER_PYTHON,
+    def __init__(self, checkpoint, last_token="off", python=None,
                  startup_timeout=300.0, request_timeout=120.0):
+        python = python or os.environ.get("TREE_SKILLS_TEACHER_PYTHON") or TEACHER_PYTHON
         if not os.path.isfile(python):
             raise TeacherServiceError(
-                f"teacher python not found at {python}; create "
-                "tree_skills/.venv-teacher with torch first")
+                f"teacher python not found at {python}; set "
+                "TREE_SKILLS_TEACHER_PYTHON to an existing teacher Python "
+                "or create tree_skills/.venv-teacher with torch")
         self.proc = subprocess.Popen(
             [python, SERVICE, "--checkpoint", checkpoint,
              "--last-token", last_token],
@@ -100,6 +102,9 @@ class TeacherServiceClient:
         self.model_sha256 = hello["model_sha256"]
         self.model_args = hello["model_args"]
         self.history_len = hello["history_len"]
+        self.env_indicator = hello["env_indicator"]
+        self.env_specific = hello["env_specific"]
+        self.last_token = hello["last_token"]
 
     def _read_json(self, timeout):
         line = self._reader.read(timeout)

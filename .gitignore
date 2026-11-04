@@ -18,3 +18,30 @@ venv/
 # MARL-GPT teacher checkpoints (large weights, never commit)
 /tree_skills/teacher/checkpoints/
 /tree_skills/.venv-teacher/
+
+# Direct medical tree: native logs/replays are local experiment evidence.
+/medivac_tree/artifacts/
+
+# Optional local-only orchestration component
+/langchain_agent/
+
+# Generated packaging metadata, test caches and editor files
+*.egg-info/
+build/
+dist/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.DS_Store
+Thumbs.db
+
+# Raw execution evidence and binary model checkpoints
+*.log
+*.SC2Replay
+*.pt
+*.pth
+*.ckpt
+/skills/verification/adapter-tests.txt
+/skills/verification/skill-tests.txt

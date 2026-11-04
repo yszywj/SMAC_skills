@@ -12,14 +12,15 @@ the official InferenceSmacWrapper + InferenceHistoryWrapper flow:
     -> smacTokenizer.get_obs_pos_vectors (official class, terran attr map)
     -> append_agent_race (terran code 0, attr 16)            [wrapper.py]
     -> reshape_obs pad to checkpoint block_size (value 0)    [env_observation.py]
-    -> optional last_token (attr n_attr-1, env indicator 1)  [inference.py]
+    -> optional last_token (attr n_attr-1, env indicator 0)  [inference.py]
 
 Differences from the official path are deliberate and recorded:
 - history_len: the checkpoint's model_args carry history_len=10, but that is
   the TIME-EMBEDDING TABLE capacity, not the trained sequence length. With
   terran 10v10 token layout (162 tokens/frame) the checkpoint block_size
   (700) only fits 4 frames + race token (4*162+1=649 <= 700); 10 frames
-  would need 1621 positions. The official SMAC configs also use 4. The
+  would need 1621 positions. The official terran eval config uses 6, which
+  also exceeds this checkpoint's capacity for 10v10. The
   builder therefore defaults to history_len=4 and REJECTS configurations
   that would exceed block_size instead of truncating; the chosen value is
   recorded in INFERENCE_VALIDATION.md and must match across A/B/C/D runs;
@@ -32,6 +33,10 @@ Differences from the official path are deliberate and recorded:
 
 import os
 import sys
+
+from .runtime_dependencies import add_teacher_dependencies
+
+add_teacher_dependencies()
 
 import numpy as np
 import torch
@@ -56,7 +61,7 @@ class SmacObsBuilder:
     def __init__(self, *, n_agents, n_enemies, move_feats, own_feats,
                  obs_nf_en, obs_nf_al, history_len, block_size, vocab_size,
                  action_size, obs_with_race=True, last_token=False,
-                 env_indicator=1, n_attr=129):
+                 env_indicator=0, n_attr=129):
         self.n_agents, self.n_enemies = n_agents, n_enemies
         self.move_feats, self.own_feats = move_feats, own_feats
         self.obs_nf_en, self.obs_nf_al = obs_nf_en, obs_nf_al
@@ -65,6 +70,9 @@ class SmacObsBuilder:
         self.action_size = action_size
         self.obs_with_race = obs_with_race
         self.last_token = last_token
+        # Official InferenceConfig defaults to env_specific=False, so the
+        # last token is 0 even though its unused env_indx default is 1.
+        # An explicit override is retained only for controlled ablations.
         self.env_indicator = env_indicator
         self.n_attr = n_attr
         # smacTokenizer("terran") reads a CWD-relative path; load the attr

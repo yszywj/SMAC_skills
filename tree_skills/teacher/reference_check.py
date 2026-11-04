@@ -28,9 +28,7 @@ import argparse
 import json
 import os
 import sys
-
-import numpy as np
-import torch
+from types import SimpleNamespace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -39,8 +37,16 @@ for p in (MARL_GPT, REPO):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from tree_skills.teacher.runtime_dependencies import add_teacher_dependencies
+
+add_teacher_dependencies()
+
+import numpy as np
+import torch
+
 from utils.env_observation import reshape_obs, stack_dict_tensor  # noqa: E402
 from envs.smac_env.obs_tokenizer import smacTokenizer  # noqa: E402
+from gpt.inference import InferenceConfig, MARLGPTInference  # noqa: E402
 
 from tree_skills.teacher.obs_builder import (  # noqa: E402
     ObsBuildError, SmacObsBuilder)
@@ -79,6 +85,16 @@ class OfficialReference:
             attr = json.load(fh)
         self.tokenizer = smacTokenizer("terran", pos_dict=attr["terran"])
         self.last_token = last_token
+        # Run the actual official constructor to obtain its default token
+        # convention, then call its actual add_last_token method below.
+        # Supplying an inert net avoids loading a second checkpoint; the
+        # constructor only stores it. Never duplicate the indicator default
+        # here: doing so previously let the same bug pass on both sides.
+        self.inference = MARLGPTInference(
+            InferenceConfig(device="cpu", last_token=last_token),
+            net=object(),
+            gpt_config=SimpleNamespace(block_size=BLOCK, action_size=ACT,
+                                       n_attr=N_ATTR))
 
     def build(self, frames_oldest_first):
         # official history stacking: per-step dicts (each key batch-leading,
@@ -104,8 +120,7 @@ class OfficialReference:
                   for k, v in result.items()}
         result = reshape_obs(result, BLOCK, ACT)
         if self.last_token:
-            result["attr_pos"][..., -1] = N_ATTR - 1
-            result["obs"][..., -1] = 1.0
+            self.inference.add_last_token(result)
         return result
 
 
@@ -126,6 +141,8 @@ def main():
     parser.add_argument("--collect", required=True)
     parser.add_argument("--last-token", choices=("on", "off"), default="on")
     parser.add_argument("--samples", type=int, default=10)
+    parser.add_argument("--output", default=os.path.join(HERE, "REFERENCE_CHECK_run.json"),
+                        help="report path; use a fresh path to preserve previous evidence")
     args = parser.parse_args()
 
     rows = [json.loads(line) for line in open(args.collect, encoding="utf-8") if line.strip()]
@@ -175,12 +192,14 @@ def main():
         if checked >= args.samples * 2:
             break
     result = {"collect": args.collect, "last_token": args.last_token,
+              "env_indicator": reference.inference._env_indicator,
+              "reference_last_token": "official MARLGPTInference constructor + add_last_token",
               "comparisons": checked, "mismatches": mismatches,
               "limitation": "slicing replicated from decomposer.decompose_obs; "
                             "history/positions/race/padding run official code",
               "details": report[:10]}
     print(json.dumps(result, indent=1))
-    out = os.path.join(HERE, "REFERENCE_CHECK_run.json")
+    out = args.output
     payload = {args.last_token: result}
     if os.path.exists(out):
         payload = {**json.load(open(out, encoding="utf-8")), **payload}

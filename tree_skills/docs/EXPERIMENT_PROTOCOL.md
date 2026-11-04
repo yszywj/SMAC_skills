@@ -37,7 +37,7 @@
 
 ## 树训练与导出（已实现部分）
 
-- 训练：`training/train_tree.py`（默认 GBR 64×3×0.05、squared_error、seed 固定、min_samples_leaf 20；首轮网格 ≤ {32,64,128}×{2,3}；按局划分验证；组内权重归一）。离线选型看组内 Top-1 一致率/联合分配一致率（初始工程目标 ≥90%，须报实际值与难例）。
+- 训练：`training/train_tree.py`（默认 GBR 64×3×0.05、squared_error、seed 固定、min_samples_leaf 20；首轮网格 ≤ {32,64,128}×{2,3}；按局划分验证；组内权重归一）。2026-11-01 起，选模指标为 `multi_candidate_top1_agreement`，验证集没有可评估的多候选组时拒绝选模。必须同时报告常数零评分器基线、样本/对局覆盖和教师分数 regret；全体 Top-1 仅作诊断，不再以总体 ≥90% 验收。联合指标在至少一机有多候选的完整决策步上计算，保留同一步其他医疗机的占位约束；该条件仍不保证存在多个可行联合匹配。
 - 导出：`export/exporter.py` → `models/<name>/model.json`（全精度阈值、missing_left、学习率单次计入、float32 输入转换显式记录）；部署运行时 `export/rule_model.py` 仅标准库。等价验收 ≤1e-6（已测试）。
 - 数据协议与标签定义见 DATA_PROTOCOL.md；特征定义见 medivac/features.py 模块 docstring（FEATURE_SCHEMA 与代码同源，schema 不符拒绝加载）。
 

@@ -1,7 +1,7 @@
 {
  "teacher_id": "marlgpt_terran10_native_teacher_v1",
  "state": "ready",
- "note": "planned local teacher identifier, not a confirmed usable model",
+ "note": "Interface validated with corrected env token; new four-arm diagnostic has not demonstrated superiority over rules. Performance qualification remains false; see docs/TEACHER_CONTROL_DIAGNOSTIC_REPORT.md.",
  "source_repo": "https://github.com/Cognitive-AI-Systems/marl-gpt",
  "weight_entrypoint": "https://huggingface.co/nortem/marl-gpt-model",
  "weight_entrypoint_verified": {
@@ -218,14 +218,50 @@
  "last_token_convention": {
   "official_terran_eval_config": "eval_configs/smac/terran_v2.yaml: last_token=True, history_len=6, obs_with_race=True",
   "capacity_calc": "terran 10v10 = 162 tokens/frame + 1 race token; H frames need H*162+1 <= block_size 700 -> H <= 4 (official 6 would need 973)",
-  "decision": "use H=4 for both checkpoints; last_token=on for marl-gpt-main.pt, off for marl-gpt-wo-last-token.pt (final G4 candidates; verified runnable in INFERENCE_VALIDATION_run.json)"
+  "decision": "use H=4 for both checkpoints; last_token=on for marl-gpt-main.pt, off for marl-gpt-wo-last-token.pt; enabled last token uses env_indicator=0, matching official env_specific=False",
+  "env_specific": false,
+  "env_indicator": 0,
+  "correction": "2026-11-01: previous local indicator=1 differed from the official default. Old G4 labels and results retain that bug and do not validate the corrected teacher. Fixed reference calls the actual official constructor and add_last_token.",
+  "corrected_reference_report": "artifacts/reference_check_token0_native_20261101.json"
  },
  "state_progress": {
   "G1_weights_audited": true,
-  "G2_real_snapshot_parity": "passed 2026-10-31 (REFERENCE_CHECK_run.json: 24/24 exact on real observations; REAL_SNAPSHOT_TABLE.json: 10/10 multi-candidate moments, heal-slot + native-mask verified)",
-  "G4_qualification": "screen completed 2026-10-31: B-main vs A = 17/40 vs 17/40, paired diff 0 [0,0], 0 outcome changes; NOT qualified (see docs/G4_REPORT.md)",
+  "G2_real_snapshot_parity": "corrected 2026-11-01: 24/24 real-observation comparisons pass in original teacher environment via actual official last-token API; artifacts/reference_check_token0_native_20261101.json",
+  "G4_qualification": "Corrected old-seed screen: A17/B18 of40. New four-arm screen: A14/B14/C12/D10 of40, pooled diagnostic mix only; native cohort A7/B7/C5/D6 of20. No demonstrated advantage, no student trained, qualified=false. See docs/TEACHER_CONTROL_DIAGNOSTIC_REPORT.md.",
   "ready": true,
   "qualified": false,
-  "ready_scope": "interface-level: inputs/mapping/inference validated; NOT a claim of teacher strength"
+  "ready_scope": "interface-level: inputs/mapping/inference validated; NOT a claim of teacher strength",
+  "corrected_screen": {
+   "date": "2026-11-01",
+   "run_a": "sc2_skill_adapter/runs/terran-tokenfix-A2-n40-seed400",
+   "run_b": "sc2_skill_adapter/runs/terran-tokenfix-B0-n40-seed400",
+   "episodes_per_arm": 40,
+   "wins_a": 17,
+   "wins_b": 18,
+   "paired_difference": 0.025,
+   "qualified": false,
+   "report": "docs/TOKENFIX_REPORT.md"
+  },
+  "four_arm_diagnostic": {
+   "date": "2026-11-01",
+   "episodes_per_arm": 40,
+   "formal_episodes": 160,
+   "wins_mixed_screen": {
+    "A": 14,
+    "B": 14,
+    "C": 12,
+    "D": 10
+   },
+   "native_cohort_n": 20,
+   "native_cohort_wins": {
+    "A": 7,
+    "B": 7,
+    "C": 5,
+    "D": 6
+   },
+   "qualified": false,
+   "report": "docs/TEACHER_CONTROL_DIAGNOSTIC_REPORT.md",
+   "protocol": "artifacts/teacher_diagnostic_20261101/protocol.json"
+  }
  }
 }

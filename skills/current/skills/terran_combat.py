@@ -242,6 +242,15 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
     pair_scoring = kwargs.pop('pair_scoring', 'off')
     pair_histories = kwargs.pop('pair_histories', None)
     pair_strict = kwargs.pop('pair_strict', False)
+    medivac_mode = kwargs.pop('medivac_policy_mode', 'legacy')
+    medivac_tree = kwargs.pop('medivac_tree', None)
+    patient_coordination = kwargs.pop('medical_patient_coordination', True)
+    if medivac_mode not in ('legacy', 'tree-shadow', 'tree'):
+        raise ValueError('unknown medivac policy mode')
+    if medivac_mode != 'legacy' and (medivac_tree is None or pair_scorer is not None or pair_scoring != 'off'):
+        raise ValueError('direct medical tree requires runtime and excludes pair scoring')
+    if medivac_mode == 'tree' and patient_coordination:
+        raise ValueError('direct medical tree requires disabled patient coordination')
     options = copy.deepcopy(kwargs)
     memory = copy.deepcopy(race_memory or {})
     if V6_PARAMS['enabled'] and V6_PARAMS['known_threats']:
@@ -270,6 +279,14 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
             a:c for a,c in local.get('heal_candidates', {}).get(actor, {}).items()
             if int(a) in allowed and not (isinstance(energy, (int,float)) and energy < 1)}
     result = allocate_adaptive_focus_fire(local, n_agents, **options)
+    if medivac_mode == 'tree':
+        from medivac_tree.integration import apply_tree_plan
+        plan = medivac_tree.decide(local, n_agents, memory.get('medivac_tree'))
+        return apply_tree_plan(local, result, plan, medivac_tree.metadata,
+                               _clear_actor, _refresh_budget, options.get('parameters'))
+    shadow_plan = None
+    if medivac_mode == 'tree-shadow':
+        shadow_plan = medivac_tree.decide(local, n_agents, memory.get('medivac_tree_shadow'))
     healing_state = copy.deepcopy(local)
     healer_threats = {}
     for actor, unit in healing_state['allies'].items():
@@ -350,8 +367,10 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
             before=result['actions'][int(actor[1:])]
             legacy_actions[actor]=(_support_retreat(local,actor,before,healing['assignments'],options.get('parameters'),
                                                   memory.get('actors',{}).get(actor))
-                                   if retreat_uses.get(actor,0)<2 else before)
+                                   if patient_coordination and retreat_uses.get(actor,0)<2 else before)
         def patient_guard(actor,before,baseline,proposal,healer):
+            if not patient_coordination and proposal != before:
+                return {'allowed':False,'exceptions':[], 'reason':'medical_patient_coordination_disabled'}
             primary=result.get('engagement_state_updates',{}).get(actor,{}).get('engagement',{}).get('target')
             context={'healer':healer,'primary_target':primary,
                      'allow_reentry_delay':bool(V6_PARAMS['reentry_slack']),
@@ -396,6 +415,7 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
             changes[actor]={'before':before,'after':action,'reason':reason}
             _clear_actor(result,actor);reset.add(actor)
     for actor in list(result['retreat_units']):
+        if not patient_coordination:break
         if V6_PARAMS['enabled']:break
         if actor in healer_threats:continue
         index = int(actor[1:]);before = result['actions'][index]
@@ -482,4 +502,13 @@ def allocate_terran_combat(state, n_agents, race_memory=None, **kwargs):
         'reset_actor_histories':sorted(reset),'damage_budget':'recomputed_from_final_attack_assignments',
         'support_retreat_limit':'at most two redirected retreat moves per actor per episode',
         'order_semantics':'heal action reissued; Stop only for explicit idle cancellation, never order retention'}
+    if not patient_coordination:
+        result['race_telemetry']['medical_patient_coordination'] = False
+    if shadow_plan is not None:
+        result['race_memory']['medivac_tree_shadow'] = shadow_plan['memory']
+        result['race_telemetry']['medivac_tree'] = {
+            'mode':'tree-shadow', 'metadata':medivac_tree.metadata,
+            'decisions':shadow_plan['decisions'],
+            'assignments':shadow_plan.get('assignments', {}),
+            'memory_semantics':'hypothetical shadow state on actual observations; never a counterfactual rollout'}
     return result

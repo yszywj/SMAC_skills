@@ -54,16 +54,24 @@ class PairCollector:
             "agents": agents, "logits": {str(a): v for a, v in logits_by_agent.items()}}
 
     # -- runner-side completion -------------------------------------------
-    def finish_step(self, episode, loop, pair_diag, healing_telemetry, final_actions):
+    def finish_step(self, episode, loop, pair_diag, healing_telemetry, final_actions,
+                    keep_decisions=None):
         row = self._pending.pop((episode, loop), None)
         if row is None:
             return
+        from .build_shard import original_assignments
+        pair_diag = dict(pair_diag) if pair_diag is not None else None
+        if pair_diag is not None:
+            pair_diag["original_assignments"] = original_assignments(pair_diag)
         row["pair_scoring"] = pair_diag
         row["final_actions"] = list(final_actions)
         row["healing"] = {
             k: healing_telemetry.get(k) for k in
             ("assignments", "retained_orders", "released", "rescue_requests",
-             "self_preserving", "wounded_targets", "keep_decisions")}
+             "self_preserving", "wounded_targets")}
+        # The actual field belongs to terran_coordination.keep_order, not
+        # healing. Missing legacy telemetry remains unknown, never fabricated.
+        row["healing"]["keep_decisions"] = keep_decisions
         with open(self.path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(row) + "\n")
         self.rows += 1

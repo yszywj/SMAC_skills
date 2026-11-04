@@ -86,10 +86,24 @@ class SkillManager:
                  heal_switch_margin=None, adaptive_params=None, combat_params=None,
                  unit_value_params=None, spatial_params=None, race_profile="off",
                  pair_scorer=None, pair_scoring="off", pair_histories=None,
-                 pair_strict=False):
+                 pair_strict=False, medivac_policy_mode="legacy", medivac_tree=None,
+                 medical_patient_coordination=True):
         if race_profile not in ("off", "terran", "zerg"):
             raise ValueError("race_profile must be off, terran or zerg")
         self.race_profile = race_profile
+        if medivac_policy_mode not in ("legacy", "tree-shadow", "tree"):
+            raise ValueError("medivac_policy_mode must be legacy/tree-shadow/tree")
+        if not isinstance(medical_patient_coordination, bool):
+            raise ValueError("medical_patient_coordination must be boolean")
+        if (medivac_policy_mode != "legacy" or not medical_patient_coordination) and race_profile != "terran":
+            raise ValueError("medical policy controls require race_profile='terran'")
+        if medivac_policy_mode != "legacy" and (medivac_tree is None or pair_scorer is not None or pair_scoring != "off"):
+            raise ValueError("direct medical tree requires a runtime and excludes pair scoring")
+        if medivac_policy_mode == "tree" and medical_patient_coordination:
+            raise ValueError("direct tree requires frozen ground actions (medical_patient_coordination=False)")
+        self.medivac_policy_mode = medivac_policy_mode
+        self.medivac_tree = medivac_tree
+        self.medical_patient_coordination = medical_patient_coordination
         # Optional, default-off medivac pair-scorer channel (tree_skills).
         # Only the terran adaptive path consumes it; off == original bits.
         if pair_scoring not in ("off", "on", "shadow"):
@@ -511,6 +525,17 @@ class SkillManager:
     def _step_adaptive(self, payload, n_agents):
         """One AdaptiveFocusFire step with persistent per-unit role history."""
         state = payload["state"]
+        if self.medivac_policy_mode != "legacy":
+            # The tree consumes the exact public action menu. Do not mutate the
+            # caller's snapshot, or add new masks to non-medical unit planning.
+            state = {**state, "legal_actions": deepcopy(state.get("legal_actions", {}))}
+            for actor, unit in state["allies"].items():
+                if str(unit.get("type", "")).lower().startswith("medivac"):
+                    menu = payload.get("questions", {}).get(actor, {}).get("criteria")
+                    if menu is not None:
+                        state["legal_actions"][actor] = sorted(int(a) for a in menu)
+                    elif not unit["alive"]:
+                        state["legal_actions"][actor] = [0]
         engagement_enabled = bool(self.combat_params.get('engagement_commitment',
                                                         self.adaptive_params.get('engagement_commitment')))
         cache_enabled = engagement_enabled or self.race_profile != "off"
@@ -594,6 +619,10 @@ class SkillManager:
             allocator = allocate_zerg_combat
         if self.race_profile != "off":
             race_kwargs["race_memory"] = self._race_memory
+        if self.race_profile == "terran":
+            race_kwargs.update(medivac_policy_mode=self.medivac_policy_mode,
+                               medivac_tree=self.medivac_tree,
+                               medical_patient_coordination=self.medical_patient_coordination)
         if self.pair_scorer is not None and self.race_profile == "terran":
             race_kwargs.update(pair_scorer=self.pair_scorer,
                                pair_scoring=self.pair_scoring,

@@ -136,12 +136,19 @@ async def evaluate(args, manifest, method, output):
     value_metadata = skill_config["value_metadata"] if is_skill else {}
     combat_params = skill_config["manager_kwargs"]["combat_params"] if is_skill else {}
     action_extensions = validate_keep_heal_order(args, method, manifest['env_args'])
+    native_control = getattr(args, "native_teacher_control", "off")
+    if native_control != "off":
+        if str(ROOT.parent) not in sys.path:
+            sys.path.insert(0, str(ROOT.parent))
+        from tree_skills.integration.native_teacher import NativeTeacherRuntime, validate_control
+        validate_control(args, method, manifest["env_args"])
 
     output.mkdir(parents=True, exist_ok=False)
     os.environ["SC2PATH"] = str(args.sc2_path.resolve())
     env, client, planner = None, None, None
     skill_manager = None
     pair_runtime = None
+    native_runtime = None
     records, latencies = [], []
     requests, usage = 0, {}
     started = time.monotonic()
@@ -157,11 +164,21 @@ async def evaluate(args, manifest, method, output):
                 for name in ("starcraft2.py", "wrapper.py", "distributions.py")]
     sources.append(map_file(manifest["env_args"]))
     selected_skill_sources = skill_source_files(skill_version) if is_skill else []
+    medivac_mode = skill_config.get("medivac_policy", "legacy") if is_skill else "legacy"
+    medivac_runtime = skill_config["manager_kwargs"].get("medivac_tree") if is_skill else None
+    if medivac_runtime is not None:
+        sources.extend(sorted((ROOT.parent / "medivac_tree").glob("*.py")))
+        sources.append(Path(medivac_runtime.metadata["tree_path"]))
     sources.extend(selected_skill_sources)
     skill_hashes = {p.relative_to(ROOT.parent).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                     for p in selected_skill_sources}
     metadata = {
         "method": method, "skills": "adaptive_focus_fire" if is_skill else "off",
+        "native_teacher_control": native_control,
+        "medivac_policy": medivac_mode,
+        "medical_patient_coordination": skill_config.get("medical_patient_coordination") if is_skill else None,
+        "medivac_tree_metadata": medivac_runtime.metadata if medivac_runtime is not None else None,
+        "rule_controller_executed": is_skill and native_control != "all",
         "skill_version": skill_version,
         "skill_source": skill_config["source"] if is_skill else None,
         "skill_source_hashes": skill_hashes,
@@ -180,7 +197,8 @@ async def evaluate(args, manifest, method, output):
         "planner_model": args.planner_model if method == "astra-jev" else None,
         "planner_effort": args.planner_effort if method == "astra-jev" else None,
         "planning_scope": "distribution-level; no episode snapshot; reused within run",
-        "information": "centralized union of SMACv2 observations; not decentralized MARL",
+        "information": ("per-agent native observations and histories" if native_control == "all"
+                        else "centralized union of SMACv2 observations for rules; teacher uses per-agent native observations"),
         "batch_concurrency": args.batch_concurrency,
         "request_timeout": args.request_timeout, "max_requests": args.max_requests,
         "source_hashes": {os.path.relpath(p, ROOT.parent): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -197,8 +215,22 @@ async def evaluate(args, manifest, method, output):
         emit("unit_value_configuration", **value_metadata)
     if action_extensions:
         emit('action_extension_configuration', action_extensions=action_extensions)
+    if medivac_runtime is not None:
+        emit('medivac_tree_configuration', mode=medivac_mode,
+             medical_patient_coordination=skill_config['medical_patient_coordination'],
+             metadata=medivac_runtime.metadata)
     failure = None
     try:
+        if medivac_runtime is not None and medivac_runtime.metadata.get('selection_mode') == 'model':
+            from medivac_tree.experiment import validate_deployment
+            audit = validate_deployment(metadata, medivac_runtime.selection['model'])
+            emit('medivac_return_deployment', **audit)
+        if native_control != "off":
+            native_runtime = NativeTeacherRuntime(native_control, args.native_teacher_checkpoint,
+                                                  args.native_teacher_last_token)
+            metadata["native_teacher_metadata"] = native_runtime.describe()
+            write_json(output / "run.json", metadata)
+            emit("native_teacher_configuration", **native_runtime.describe())
         if is_skill and getattr(args, "pair_mode", "off") != "off":
             import sys as _sys, os as _os
             _root = _os.path.abspath(_os.path.join(
@@ -221,7 +253,7 @@ async def evaluate(args, manifest, method, output):
                 checkpoint=args.pair_teacher_checkpoint,
                 model_dir=args.pair_model_dir, last_token=args.pair_last_token)
             emit("pair_configuration", **pair_metadata)
-        if is_skill:
+        if is_skill and native_control != "all":
             skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
         if method in ("jev", "astra-jev"):
             client = JevClient(load_api_key(args.config_file), timeout=args.request_timeout)
@@ -269,7 +301,10 @@ async def evaluate(args, manifest, method, output):
                 if pair_runtime is not None:
                     pair_runtime.begin_step(f"ep{episode:04d}", int(loop), env,
                                             reset=(steps == 0))
-                if skill_manager is not None:
+                if native_control == "all":
+                    emit("policy_observation", episode=episode, step=steps, payload=payload)
+                    actions = None  # full actor chooses below, without executing any rules
+                elif skill_manager is not None:
                     emit("skill_observation", episode=episode, step=steps, payload=payload)
                     spatial_choice = None
                     if getattr(args, "auto_spatial_dispatch", False):
@@ -362,6 +397,12 @@ async def evaluate(args, manifest, method, output):
                     actions = decode_actions(payload, {
                         actor: {"choice": rng.choice(list(question["criteria"]))}
                         for actor, question in payload["questions"].items()}, env.n_agents)
+                if native_runtime is not None:
+                    actions, native_telemetry = native_runtime.choose(
+                        f"ep{episode:04d}", int(loop), env, actions)
+                    emit("native_teacher_step", episode=episode, step=steps,
+                         game_loop=loop, **native_telemetry)
+                    assert_clock(env, loop)
                 if not isinstance(actions, list) or len(actions) != env.n_agents:
                     raise RuntimeError("Final actions must be a complete per-unit list.")
                 for i, action in enumerate(actions):
@@ -370,6 +411,27 @@ async def evaluate(args, manifest, method, output):
                         raise RuntimeError(f"Illegal action for u{i}: {action}")
                 if skill_manager is not None and hasattr(skill_manager, "commit_final_actions"):
                     skill_manager.commit_final_actions(actions)
+                if medivac_runtime is not None:
+                    tree_trace = telemetry.get('race_telemetry', {}).get('medivac_tree')
+                    if tree_trace is None:
+                        raise RuntimeError('medical tree enabled but no decision trace was produced')
+                    decision_rows = []
+                    for actor, decision in tree_trace['decisions'].items():
+                        row = copy.deepcopy(decision)
+                        proposed = row.get('proposed_action', row['action'])
+                        final = actions[int(actor[1:])]
+                        if medivac_mode == 'tree' and proposed != final:
+                            raise RuntimeError(f'direct medical tree was silently overridden for {actor}')
+                        row.update(actor=actor,
+                                   decision_id=f'{output.name}/{episode}/{loop}/{actor}',
+                                   leaf_id=row.get('leaf_id', row.get('leaf')),
+                                   proposed_action=proposed, final_action=final,
+                                   executed=medivac_mode == 'tree',
+                                   override_reason=None if medivac_mode == 'tree' else 'shadow_not_applied')
+                        decision_rows.append(row)
+                    emit('medivac_tree_step', episode=episode, step=steps, game_loop=loop,
+                         mode=medivac_mode, candidate_metadata=medivac_runtime.metadata,
+                         decisions=decision_rows)
                 health = {u.tag: u.health for u in env.agents.values()}
                 shields = {u.tag: u.shield for u in env.agents.values()}
                 previous_actions = {f"u{i}": str(action) for i, action in enumerate(actions)}
@@ -409,6 +471,8 @@ async def evaluate(args, manifest, method, output):
         emit("run_failed", error=failure, completed_episodes=len(records))
         raise
     finally:
+        if native_runtime is not None:
+            native_runtime.close()
         if pair_runtime is not None:
             pair_runtime.close()
             if pair_runtime.collector is not None:
@@ -421,6 +485,8 @@ async def evaluate(args, manifest, method, output):
             await planner.close()
         summary = {
             "method": method, "status": "failed" if failure else "complete", "error": failure,
+            "native_teacher_control": native_control,
+            "native_teacher_metadata": native_runtime.describe() if native_runtime is not None else None,
             "pair_mode": getattr(args, "pair_mode", "off"),
             "pair_failure_policy": getattr(args, "pair_failure", "strict"),
             "pair_metadata": (pair_runtime.describe(
@@ -493,8 +559,18 @@ def parser():
                              help="Opt-in race-specific adaptive combat; current skills only")
         command.add_argument('--terran-keep-heal-order', action='store_true',
                              help='Native current Terran only: append an action that submits no command for an eligible observed heal order')
+        command.add_argument('--medivac-policy', choices=('legacy', 'tree-shadow', 'tree'), default='legacy',
+                             help='Shared direct-action medical tree; legacy preserves the original controller')
+        command.add_argument('--medivac-tree', type=Path, default=None,
+                             help='Validated action tree or paired-return policy JSON (defaults to medivac_tree/tree_v0.json)')
+        command.add_argument('--medical-patient-coordination', choices=('on', 'off'), default=None,
+                             help='Medical-driven ground movement: defaults on for legacy, off for active tree')
         command.add_argument('--pair-mode', choices=('off','a-plug','shadow','teacher-score','tree-score'), default='off',
                              help='Default-off medivac pair-preference channel (tree_skills); current+terran adaptive only')
+        command.add_argument('--native-teacher-control', choices=('off', 'medivac', 'all'), default='off',
+                             help='Frozen native-action teacher diagnostic; bypass healing gates for controlled units')
+        command.add_argument('--native-teacher-checkpoint', default=None)
+        command.add_argument('--native-teacher-last-token', choices=('on', 'off'), default='on')
         command.add_argument('--pair-model-dir', default=None,
                              help='Exported/native tree model dir for --pair-mode tree-score/shadow')
         command.add_argument('--pair-teacher-checkpoint', default=None,

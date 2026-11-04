@@ -1,5 +1,7 @@
 # tree_skills：医疗机治疗目标偏好评分器（MARL-GPT 蒸馏到树）
 
+最新实验（2026-11-01）：新场景四组诊断已完成，各40局。原规则A/条件治疗评分B/医疗艇完整教师C/全队教师D分别14/14/12/10胜；这是原始分布与医疗艇诊断场景的混合筛选集，须分组解读。当前教师未显示优于基线的优势，尚未训练真实学生树或验证迁移。结果、边界和复现命令见 [TEACHER_CONTROL_DIAGNOSTIC_REPORT.md](docs/TEACHER_CONTROL_DIAGNOSTIC_REPORT.md)。此前token修复、旧轨迹重标及17→18胜的历史复验见 [TOKENFIX_REPORT.md](docs/TOKENFIX_REPORT.md)。
+
 第一版只学习"已决定治疗时治疗谁"：在原人族 adaptive 体系内，由冻结 MARL-GPT 教师监督训练一个所有医疗机共享的树评分器，只替换"医疗机—伤员"合法配对的偏好；订单、合法性、联合分配框架、撤退、keep、执行与状态全部沿用原 skill。当前状态总览见 `docs/RESULTS.md`（已实现/已测/被阻塞边界如实分列），阻塞项见 `docs/BLOCKERS.md`。
 
 ## 快速开始
