@@ -198,7 +198,16 @@ def manager_configuration(args):
                               medivac_policy_mode=medivac_mode)
     if version == "current" and race_profile == "terran":
         manager_kwargs["medical_patient_coordination"] = coordination
+    skill_tree_policy = None
+    if getattr(args, 'skill_tree', None) is not None:
+        if version != 'current' or medivac_mode != 'legacy' or pair_mode != 'off' or getattr(args, 'native_teacher_control', 'off') != 'off':
+            raise ValueError('--skill-tree requires current skills and excludes medical trees/teacher channels')
+        if str(WORKSPACE) not in sys.path:
+            sys.path.insert(0, str(WORKSPACE))
+        from decision_tree.schema import load_policy
+        skill_tree_policy = load_policy(args.skill_tree)
     return {"version": version, "source": str(source), "posture": posture,
+            "skill_tree_policy": skill_tree_policy,
             "manager_kwargs": manager_kwargs, "value_metadata": value_metadata,
             "pair_mode": pair_mode, "medivac_policy":medivac_mode,
             "medical_patient_coordination":coordination}

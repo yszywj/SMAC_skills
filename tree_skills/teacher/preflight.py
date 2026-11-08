@@ -38,6 +38,14 @@ STATE_ORDER = {"absent": 0, "downloaded": 1, "audited": 2, "ready": 3}
 
 
 def _load_manifest():
+    if not os.path.exists(MANIFEST_PATH):
+        return {
+            "teacher_id": "marlgpt_terran10_native_teacher_v1",
+            "state": "absent",
+            "source_repo": "https://github.com/Cognitive-AI-Systems/marl-gpt",
+            "weight_entrypoint": "https://huggingface.co/nortem/marl-gpt-model",
+            "checkpoints": {},
+        }
     with open(MANIFEST_PATH, "r", encoding="utf-8") as fh:
         return json.load(fh)
 

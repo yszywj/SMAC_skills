@@ -126,7 +126,17 @@ async def evaluate(args, manifest, method, output):
     from .keep_order import validate_keep_heal_order
 
     is_skill = method == "adaptive-skill"
+    if getattr(args, 'skill_tree', None) is not None and not is_skill:
+        raise ValueError('--skill-tree requires --method adaptive-skill')
     skill_config = manager_configuration(args) if is_skill else None
+    skill_tree_policy = skill_config.get('skill_tree_policy') if is_skill else None
+    local_policy = None
+    if getattr(args, 'local_policy', None) is not None:
+        if str(ROOT.parent) not in sys.path:
+            sys.path.insert(0, str(ROOT.parent))
+        from decision_tree.local.runtime import load_policy, validate_options, execution_context
+        validate_options(args, method, manifest['env_args'])
+        local_policy = load_policy(args.local_policy)
     race_profile = getattr(args, "race_profile", "off")
     if race_profile != "off" and not is_skill:
         raise ValueError("--race-profile requires --method adaptive-skill")
@@ -147,6 +157,8 @@ async def evaluate(args, manifest, method, output):
     os.environ["SC2PATH"] = str(args.sc2_path.resolve())
     env, client, planner = None, None, None
     skill_manager = None
+    skill_tree_controller = None
+    local_controller = None
     pair_runtime = None
     native_runtime = None
     records, latencies = [], []
@@ -170,6 +182,11 @@ async def evaluate(args, manifest, method, output):
         sources.extend(sorted((ROOT.parent / "medivac_tree").glob("*.py")))
         sources.append(Path(medivac_runtime.metadata["tree_path"]))
     sources.extend(selected_skill_sources)
+    if skill_tree_policy is not None:
+        sources.extend(sorted((ROOT.parent / 'decision_tree').glob('*.py')))
+    if local_policy is not None:
+        sources.extend(sorted((ROOT.parent / 'decision_tree/local').glob('*.py')))
+        sources.extend(sorted((ROOT.parent / 'skills/local_v1').glob('*.py')))
     skill_hashes = {p.relative_to(ROOT.parent).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                     for p in selected_skill_sources}
     metadata = {
@@ -207,6 +224,21 @@ async def evaluate(args, manifest, method, output):
                      for n in ("pysc2", "numpy", "protobuf", "s2clientprotocol", "httpx")},
         **({'action_extensions': action_extensions} if action_extensions else {}),
     }
+    if skill_tree_policy is not None:
+        from decision_tree.experiment import policy_contract, validate_deployment
+        from decision_tree.schema import policy_hash
+        metadata['skill_tree'] = {
+            'policy': skill_tree_policy, 'policy_contract': policy_contract(skill_tree_policy),
+            'policy_hash': policy_hash(skill_tree_policy),
+            'evidence_kind': 'matched_observed_prefix', 'intervention_unit': 'skill_call'}
+        validate_deployment(metadata, skill_tree_policy)
+    if local_policy is not None:
+        from skills.local_v1 import FEATURE_NAMES
+        metadata['local_policy'] = {
+            'policy': local_policy, 'feature_names': list(FEATURE_NAMES),
+            'context_hash': execution_context(metadata, local_policy),
+            'evidence_kind': 'matched_observed_prefix_not_internal_snapshot',
+            'intervention_unit': 'single_actor_single_decision_step'}
     write_json(output / "run.json", metadata)
     write_json(output / "manifest.json", manifest)
     if is_skill:
@@ -255,6 +287,16 @@ async def evaluate(args, manifest, method, output):
             emit("pair_configuration", **pair_metadata)
         if is_skill and native_control != "all":
             skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
+            if skill_tree_policy is not None:
+                from decision_tree.integration import SkillTreeController
+                from .config import race_for_map
+                skill_tree_controller = SkillTreeController(
+                    skill_manager, skill_tree_policy, race=race_for_map(manifest['env_args']['map_name']),
+                    posture=args.adaptive_posture)
+        if local_policy is not None:
+            from decision_tree.local.runtime import LocalController
+            local_controller = LocalController(skill_manager, local_policy,
+                posture=args.adaptive_posture, context_hash=metadata['local_policy']['context_hash'])
         if method in ("jev", "astra-jev"):
             client = JevClient(load_api_key(args.config_file), timeout=args.request_timeout)
         if method == "astra-jev":
@@ -264,6 +306,10 @@ async def evaluate(args, manifest, method, output):
         for episode, scenario in enumerate(manifest["episodes"], 1):
             if skill_manager is not None:
                 skill_manager.reset()
+            if skill_tree_controller is not None:
+                skill_tree_controller.reset()
+            if local_controller is not None:
+                local_controller.reset()
             episode_started = time.monotonic()
             config = copy.deepcopy(manifest["env_args"])
             config.update(seed=scenario["sc2_seed"], replay_dir=str(output / "replays"))
@@ -284,6 +330,14 @@ async def evaluate(args, manifest, method, output):
                 write_json(output / "balance" / f"episode-{episode:04d}.json", audit)
                 emit("unit_balance_verified", episode=episode, audit=audit)
             initial_digest = initial_state_digest(env)
+            if skill_tree_policy is not None and skill_tree_policy['selection']['mode'] == 'model':
+                expected_version = skill_tree_policy['selection']['model'].get('game_version')
+                if not expected_version or env._controller.ping().game_version != expected_version:
+                    raise ValueError('Skill return model SC2 build differs from the fitted data')
+            if local_policy is not None and local_policy['selection']['mode'] == 'model':
+                expected = local_policy['model'].get('game_version')
+                if not expected or env._controller.ping().game_version != expected:
+                    raise ValueError('Local model requires matching recorded SC2 game version')
             emit("episode_started", episode=episode, scenario_sha256=scenario["sha256"],
                  initial_state_sha256=initial_digest,
                  game_loop=env._obs.observation.game_loop,
@@ -304,6 +358,24 @@ async def evaluate(args, manifest, method, output):
                 if native_control == "all":
                     emit("policy_observation", episode=episode, step=steps, payload=payload)
                     actions = None  # full actor chooses below, without executing any rules
+                elif local_controller is not None:
+                    emit('skill_observation', episode=episode, step=steps, payload=payload)
+                    actions, telemetry, local_events = local_controller.step(payload, env.n_agents)
+                    for row in local_events:
+                        row = dict(row)
+                        name = row.pop('event')
+                        emit(name, episode=episode, **row)
+                    emit('skill_step', episode=episode, step=steps, game_loop=loop, **telemetry)
+                elif skill_tree_controller is not None:
+                    emit('skill_observation', episode=episode, step=steps, payload=payload)
+                    actions, telemetry, tree_events = skill_tree_controller.step(payload, env.n_agents, nearest_actions)
+                    for row in tree_events:
+                        row = dict(row)
+                        event_name = row.pop('event')
+                        emit(event_name, episode=episode, step=steps, **row)
+                    emit('skill_step', episode=episode, step=steps, game_loop=loop, **telemetry)
+                    if telemetry.get('termination_reason'):
+                        emit('skill_terminated', episode=episode, step=steps, reason=telemetry['termination_reason'])
                 elif skill_manager is not None:
                     emit("skill_observation", episode=episode, step=steps, payload=payload)
                     spatial_choice = None
@@ -446,6 +518,9 @@ async def evaluate(args, manifest, method, output):
                      actions=actions, reward=float(reward), terminated=terminated, feedback=feedback)
                 if terminated:
                     break
+            if (local_controller is not None and local_policy['selection']['mode'] == 'forced'
+                    and local_controller.interventions != 1):
+                raise RuntimeError('Forced local intervention was never reached')
             replay_dir = output / "replays"
             replay_dir.mkdir(exist_ok=True)
             replay = replay_dir / f"episode-{episode:04d}.SC2Replay"
@@ -557,6 +632,10 @@ def parser():
                              help="Skill implementation; baseline_v2_70pct requires its original fixed preset")
         command.add_argument("--race-profile", choices=("off", "terran", "zerg"), default="off",
                              help="Opt-in race-specific adaptive combat; current skills only")
+        command.add_argument('--local-policy', type=Path, default=None,
+                             help='Local single-actor patch gain/veto policy; Protoss current baseline')
+        command.add_argument('--skill-tree', type=Path, default=None,
+                             help='Generic skill-call policy JSON; current local skills only')
         command.add_argument('--terran-keep-heal-order', action='store_true',
                              help='Native current Terran only: append an action that submits no command for an eligible observed heal order')
         command.add_argument('--medivac-policy', choices=('legacy', 'tree-shadow', 'tree'), default='legacy',
@@ -605,6 +684,10 @@ def main():
     args = parser().parse_args()
     if args.command in ("run", "suite"):
         methods = [args.method] if args.command == "run" else args.methods
+        if args.local_policy is not None and any(m != 'adaptive-skill' for m in methods):
+            raise SystemExit('--local-policy requires adaptive-skill only')
+        if args.skill_tree is not None and any(m != 'adaptive-skill' for m in methods):
+            raise SystemExit('--skill-tree requires adaptive-skill only')
         expected = "always" if getattr(args, "method", None) == "adaptive-skill" else "off"
         if args.skill_mode is not None and args.skill_mode != expected:
             raise SystemExit(f"--skill-mode must be {expected} for the selected method")

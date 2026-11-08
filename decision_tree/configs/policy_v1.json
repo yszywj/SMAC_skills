@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "skill_return_policy",
+  "description": "Experimental invocation candidates; legacy initial dispatcher remains the baseline. No learned gains or performance claim.",
+  "supported_races": ["protoss"],
+  "initial_tree": {"delegate": "legacy"},
+  "gate": {"phases": ["engage"], "min_game_loop": 0},
+  "candidates": [
+    {"id": "focus_weakest", "skill": "adaptive_focus_fire", "actor_scope": "whole_squad", "target_rule": "lowest_effective_health", "posture": null, "adaptive_params": {}, "max_steps": null},
+    {"id": "protect", "skill": "adaptive_focus_fire", "actor_scope": "whole_squad", "target_rule": "default", "posture": "defensive", "adaptive_params": {"max_retreat_steps": 3}, "max_steps": null}
+  ],
+  "selection": {"mode": "base", "max_interventions_per_episode": 1, "min_gain": 0}
+}

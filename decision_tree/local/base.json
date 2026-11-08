@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "kind": "local_patch_policy",
+  "description": "Frozen adaptive baseline; collect local alternatives without applying untrained predictions.",
+  "selection": {"mode": "base", "max_interventions": 1, "min_gain": 0},
+  "candidates": {"max_candidates": 24, "max_per_family": 8}
+}

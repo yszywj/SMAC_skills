@@ -109,10 +109,12 @@ class CrossRaceTests(unittest.TestCase):
 
     def test_v7_freeze_is_exact_historical_skill_source(self):
         import hashlib,json
-        from bridge.config import ROOT
-        historical=json.loads((ROOT/'runs/native-10v10-v7-skill-n40-seed170/run.json').read_text())
-        for path in skill_runtime.source_files('baseline_v7_20261024'):
-            key='skills/current/'+path.relative_to(skill_runtime.SOURCES['baseline_v7_20261024']).as_posix()
-            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),historical['skill_source_hashes'][key])
+        source=skill_runtime.SOURCES['baseline_v7_20261024']
+        provenance=json.loads((source/'provenance.json').read_text(encoding='utf-8'))
+        paths={path.relative_to(source).as_posix():path
+               for path in skill_runtime.source_files('baseline_v7_20261024')}
+        self.assertEqual(set(paths),set(provenance['source_hashes']))
+        for key,path in paths.items():
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),provenance['source_hashes'][key])
 
 if __name__=='__main__':unittest.main()

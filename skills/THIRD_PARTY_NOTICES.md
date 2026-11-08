@@ -15,5 +15,5 @@ The source manifest records the original paths, commits and file hashes.
 | StarCraft II maps and screenshots | Existing SC2/SMAC research assets | Original game and asset authors retain their rights. The game client is not distributed here. |
 
 This initial consolidation does not assign a blanket license to all components.
-See [source-manifest.json](docs/source-manifest.json) for provenance and the
-[cleanup record](docs/repository-cleanup.md) for packaging changes.
+The original project's provenance and packaging records are not included in
+this code distribution.

@@ -13,3 +13,12 @@
 *.cmd text eol=crlf
 .gitignore text eol=lf
 .gitattributes text eol=lf
+
+# Frozen policies verify raw source bytes. Preserve the recorded line endings.
+/sc2_skill_adapter/bridge/**/*.py -text !eol
+/skills/current/**/*.py -text !eol
+/skills/baseline_v2_70pct/**/*.py -text !eol
+/skills/baseline_v6_20261024/**/*.py -text !eol
+/decision_tree/local/**/*.py -text !eol
+/skills/local_v1/**/*.py -text !eol
+/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/**/*.py -text !eol

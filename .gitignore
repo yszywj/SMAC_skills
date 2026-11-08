@@ -22,6 +22,9 @@ venv/
 # Direct medical tree: native logs/replays are local experiment evidence.
 /medivac_tree/artifacts/
 
+# Skill-call tree: generated studies, fitted policies and native evidence.
+/decision_tree/artifacts/
+
 # Optional local-only orchestration component
 /langchain_agent/
 
@@ -45,3 +48,58 @@ Thumbs.db
 *.ckpt
 /skills/verification/adapter-tests.txt
 /skills/verification/skill-tests.txt
+
+# Retired implementation: keep local research, omit from published repository.
+/medivac_tree/
+
+# Publish basic READMEs and attribution; keep reports and research notes local.
+*.md
+!README.md
+!THIRD_PARTY_NOTICES.md
+!LICENSE.md
+!NOTICE.md
+*.pdf
+*.docx
+*.pptx
+
+# Generated evidence and local campaign data (source configs remain publishable).
+artifacts/
+runs/
+analysis/
+results/
+reports/
+*.jsonl
+*.sqlite
+*.sqlite3
+*.SC2Map
+/skills/MIGRATION.json
+/skills/verification/
+/skills/baseline_v2_70pct/provenance/
+/tree_skills/docs/
+/tree_skills/teacher/AUDIT_*.json
+/tree_skills/teacher/INFERENCE_VALIDATION_run.json
+/tree_skills/teacher/REFERENCE_CHECK_run.json
+/tree_skills/teacher/TEACHER_MANIFEST.json
+
+# Local editor/agent state.
+.idea/
+.vscode/
+.codex/
+.agents/
+
+# The legacy v7 loader uses this frozen code path. Publish source only.
+!/sc2_skill_adapter/analysis/
+/sc2_skill_adapter/analysis/*
+!/sc2_skill_adapter/analysis/skill_v7_20261024/
+/sc2_skill_adapter/analysis/skill_v7_20261024/*
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/
+/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/*
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/
+/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/*
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/
+/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/*
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/*.py
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/provenance.json
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/skills/
+/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/skills/*
+!/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/skills/*.py

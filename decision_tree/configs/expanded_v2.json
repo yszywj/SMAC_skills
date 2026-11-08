@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "skill_return_policy",
+  "description": "Expanded development exploration. One complete call per paired replay; candidate configurations are not performance endorsements.",
+  "supported_races": ["protoss"],
+  "initial_tree": {"delegate": "legacy"},
+  "exploration": {"enabled": true, "seed": 20261104},
+  "gate": {"phases": ["search", "approach", "engage", "lost_contact"], "min_game_loop": 0, "effect_check": "call_config"},
+  "candidates": [
+    {"id": "focus_weakest", "skill": "adaptive_focus_fire", "target_rule": "lowest_effective_health"},
+    {"id": "protect", "skill": "adaptive_focus_fire", "posture": "defensive", "adaptive_params": {"max_retreat_steps": 3}},
+    {"id": "press", "skill": "adaptive_focus_fire", "posture": "aggressive", "adaptive_params": {"disable_retreat": true}},
+    {"id": "short_call", "skill": "adaptive_focus_fire", "max_steps": 2},
+    {"id": "long_call", "skill": "adaptive_focus_fire", "max_steps": 8},
+    {"id": "focus_budget", "skill": "focus_fire_budget", "max_steps": 4}
+  ],
+  "selection": {"mode": "base", "max_interventions_per_episode": 1, "min_gain": 0}
+}

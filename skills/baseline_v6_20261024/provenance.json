@@ -1,6 +1,5 @@
 {
   "version": "baseline_v6_20261024",
-  "source_snapshot": "C:\\Users\\ry\\skill\\smacv2_jev_adapter\\analysis\\skill_v2_v6_paired_20261024\\SOURCE_SNAPSHOT.json",
   "source_hashes": {
     "__init__.py": "6a9b2fbb7a9a2db671dc16917068861086cdaa833dc399c20c0ad0a1733e8436",
     "client.py": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
@@ -17,15 +16,6 @@
     "skills\\focus_fire.py": "e54414e6471fc0963f891dfbef2a431b7e67bac5d3e7ee3abe5a269c98baa8a1",
     "skills\\heal_assign.py": "5601f43e4641a932321042fcab083cb2b47ccb8532703a8f3847838564db28a6",
     "skills\\movement_scoring.py": "c53cd09cc5ca4e3a613b0bdea5abf6a4c0a0da6854875d69816da8150c6c5a2f"
-  },
-  "historical_results": {
-    "seed_range": [
-      170,
-      189
-    ],
-    "5v5_wins": 15,
-    "10v10_wins": 15,
-    "episodes_per_size": 20
   },
   "note": "Frozen before v7; future edits belong only in skills/current."
 }

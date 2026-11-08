@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "skill_return_policy",
+  "description": "State-wise complete candidate comparisons with independent vector-leaf returns. Skill capabilities remain generic; this development preset starts with Protoss.",
+  "supported_races": ["protoss"],
+  "initial_tree": {"delegate": "legacy"},
+  "exploration": {"enabled": true, "seed": 20261105, "feature_schema": 3},
+  "gate": {"phases": ["search", "approach", "engage", "lost_contact"], "min_game_loop": 0, "effect_check": "call_config"},
+  "candidates": [
+    {"id": "focus_weakest", "skill": "adaptive_focus_fire", "target_rule": "lowest_effective_health", "phases": ["engage"]},
+    {"id": "press", "skill": "adaptive_focus_fire", "posture": "aggressive", "adaptive_params": {"disable_retreat": true}, "phases": ["approach", "engage"]},
+    {"id": "focus_budget", "skill": "focus_fire_budget", "max_steps": 4, "phases": ["approach", "engage"]},
+    {"id": "focus_threat", "skill": "adaptive_focus_fire", "target_rule": "highest_threat", "phases": ["engage"]},
+    {"id": "focus_easy", "skill": "adaptive_focus_fire", "target_rule": "easiest_focus", "phases": ["engage"]},
+    {"id": "retreat_early", "skill": "adaptive_focus_fire", "adaptive_params": {"critical_escape_ratio": 0.45}, "phases": ["engage"], "when": [{"feature": "ally_effective_health_ratio", "op": "le", "threshold": 0.95}]},
+    {"id": "cover_retreat", "skill": "cover_retreat", "max_steps": 4, "phases": ["engage"], "when": [{"feature": "ally_effective_health_ratio", "op": "le", "threshold": 0.9}]},
+    {"id": "regroup", "skill": "regroup", "max_steps": 4, "phases": ["search", "lost_contact"], "when": [{"feature": "main_group_share", "op": "le", "threshold": 0.8}]},
+    {"id": "cohesive_search", "skill": "cohesive_search", "max_steps": 4, "phases": ["search", "lost_contact"]}
+  ],
+  "selection": {"mode": "base", "max_interventions_per_episode": 1, "min_gain": 0}
+}

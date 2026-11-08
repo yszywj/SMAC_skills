@@ -2,6 +2,8 @@
 
 from time import perf_counter
 from copy import deepcopy
+import math
+import re
 
 from .unit_value import evaluate_unit_values, validate_parameters
 from .skill_policy import (ADAPTIVE_FOCUS_FIRE, COHESIVE_SEARCH, COVER_RETREAT,
@@ -36,6 +38,16 @@ SPATIAL_BOOLS = ("enable_regroup", "enable_cohesive_search", "enable_combat_posi
                  "auto_spatial_dispatch")
 SPATIAL_RATIOS = ("main_group_min_share", "regroup_entry_share", "regroup_target_share",
                   "dispatch_enter_share", "dispatch_exit_share", "search_severe_split_share")
+
+# Public, bounded invocation controls. These configure a complete skill call;
+# they never change engine legality, action ownership or the damage ledger.
+CALL_ADAPTIVE_RANGES = {
+    "max_retreat_steps": (1, 8, int), "max_recover_steps": (0, 8, int),
+    "stall_steps": (1, 30, int), "max_retreat_cycles": (1, 10, int),
+    "all_in_team_ratio": (.05, 1.0, float),
+    "critical_escape_ratio": (0.0, 1.0, float),
+}
+CALL_ADAPTIVE_BOOLS = ("disable_all_in", "disable_retreat")
 
 
 def validate_spatial_parameters(params):
@@ -146,6 +158,15 @@ class SkillManager:
         # are valid only for the exact configuration that produced them.
         self._spatial_config_key = tuple(sorted(
             (key, value) for key, value in self.spatial_params.items()))
+        self._invocation_defaults = {
+            "max_steps": self.max_steps,
+            "adaptive_params": deepcopy(self.adaptive_params),
+            "combat_params": deepcopy(self.combat_params),
+            "spatial_params": deepcopy(self.spatial_params),
+        }
+        self._invocation_managed = False
+        self._applying_invocation = False
+        self.last_invocation = None
         self.stats = {"activations": 0, "steps": 0, "terminations": {},
                       "reassignments": 0, "estimated_overkill": 0.0,
                       "predicted_damage": 0.0, "selections": {},
@@ -176,6 +197,9 @@ class SkillManager:
 
     def reset(self):
         """Clear per-episode execution state; cumulative stats survive for the run."""
+        if self._invocation_managed:
+            self._restore_invocation_defaults()
+        self.last_invocation = None
         self._race_memory = {}
         self._race_episode = None
         self.current_skill = None
@@ -222,6 +246,122 @@ class SkillManager:
 
     # -- selection -------------------------------------------------------
 
+    def _restore_invocation_defaults(self):
+        """Restore constructor configuration without discarding battle memory."""
+        for key, value in self._invocation_defaults.items():
+            setattr(self, key, deepcopy(value))
+        self._spatial_config_key = tuple(sorted(self.spatial_params.items()))
+        self._engagement_cached_step = None
+        self._spatial_cache = {}
+        self._invocation_managed = False
+
+    def apply_call(self, call):
+        """Start one bounded invocation, or KEEP it without resetting anything.
+
+        Call construction/validation is side-effect free until this method
+        commits the selected call. A new invocation inherits constructor
+        settings, never overrides from its predecessor. Episode-scoped
+        histories stay owned by the manager and survive starts and KEEP.
+        """
+        if not isinstance(call, dict):
+            raise ValueError("skill call must be an object")
+        allowed = {"operation", "skill", "posture", "priority_target", "max_steps",
+                   "adaptive_params", "movement_profile", "actor_scope"}
+        if set(call) - allowed:
+            raise ValueError("unknown skill call fields: " + ", ".join(sorted(set(call) - allowed)))
+        operation = call.get("operation", "start")
+        if call.get("actor_scope", "whole_squad") != "whole_squad":
+            raise ValueError("only whole_squad invocation scope is currently supported")
+        if operation == "keep":
+            if set(call) - {"operation", "skill", "actor_scope"}:
+                raise ValueError("KEEP cannot change invocation parameters")
+            if not self.active:
+                raise ValueError("KEEP requires an active skill")
+            if call.get("skill", self.current_skill) != self.current_skill:
+                raise ValueError("KEEP cannot change the active skill")
+            return {"operation": "keep", "skill": self.current_skill,
+                    "active_invocation": deepcopy(self.last_invocation)}
+        if operation != "start":
+            raise ValueError("skill operation must be start or keep")
+        skill = call.get("skill")
+        if skill not in (FOCUS_FIRE_BUDGET, COVER_RETREAT, HEAL_ASSIGN,
+                         ADAPTIVE_FOCUS_FIRE, REGROUP, COHESIVE_SEARCH):
+            raise ValueError("unknown executable skill in call")
+        defaults = self._invocation_defaults
+        if skill == REGROUP and not defaults["spatial_params"]["enable_regroup"]:
+            raise ValueError("regroup requires enable_regroup")
+        if skill == COHESIVE_SEARCH and not defaults["spatial_params"]["enable_cohesive_search"]:
+            raise ValueError("cohesive_search requires enable_cohesive_search")
+        max_steps = call.get("max_steps", defaults["max_steps"])
+        if type(max_steps) is not int or not 1 <= max_steps <= 64:
+            raise ValueError("call max_steps must be an integer in [1, 64]")
+        posture = call.get("posture", "balanced")
+        if posture not in ("aggressive", "balanced", "defensive"):
+            raise ValueError("call posture must be aggressive, balanced or defensive")
+        priority = call.get("priority_target")
+        if priority is not None:
+            if not isinstance(priority, str) or not re.fullmatch(r"e\d+", priority):
+                raise ValueError("priority_target must be a visible-enemy id or null")
+            if skill not in (FOCUS_FIRE_BUDGET, ADAPTIVE_FOCUS_FIRE):
+                raise ValueError("priority_target is only supported by focus/adaptive skills")
+        adaptive = call.get("adaptive_params", {})
+        if not isinstance(adaptive, dict):
+            raise ValueError("call adaptive_params must be an object")
+        if adaptive and skill != ADAPTIVE_FOCUS_FIRE:
+            raise ValueError("adaptive_params require adaptive_focus_fire")
+        for key, value in adaptive.items():
+            if key in CALL_ADAPTIVE_BOOLS:
+                if type(value) is not bool:
+                    raise ValueError(f"{key} must be a boolean")
+            elif key in CALL_ADAPTIVE_RANGES:
+                lower, upper, kind = CALL_ADAPTIVE_RANGES[key]
+                if (type(value) not in (int, float)
+                        or (kind is int and type(value) is not int)
+                        or not lower <= value <= upper or not math.isfinite(value)):
+                    raise ValueError(f"{key} must be {kind.__name__} in [{lower}, {upper}]")
+            else:
+                raise ValueError(f"unsupported adaptive invocation parameter: {key}")
+        movement = call.get("movement_profile", {})
+        if not isinstance(movement, dict) or set(movement) - {"spacing", "layout"}:
+            raise ValueError("movement_profile accepts only spacing and layout")
+        if movement:
+            if skill != ADAPTIVE_FOCUS_FIRE or not defaults["combat_params"].get("combat_positioning"):
+                raise ValueError("movement_profile requires enabled adaptive combat positioning")
+            if movement.get("spacing", "normal") not in ("compact", "normal", "spread"):
+                raise ValueError("invalid positioning spacing")
+            if movement.get("layout", "free") not in ("free", "front_back"):
+                raise ValueError("invalid positioning layout")
+
+        # Everything above validates before touching state, including caches.
+        self._restore_invocation_defaults()
+        self.max_steps = max_steps
+        self.adaptive_params.update(deepcopy(adaptive))
+        for key in adaptive:
+            # The historical combat overlay otherwise shadows adaptive knobs.
+            self.combat_params.pop(key, None)
+        for key, value in movement.items():
+            self.combat_params["positioning_" + key] = value
+            self.spatial_params["positioning_" + key] = value
+        self._spatial_config_key = tuple(sorted(self.spatial_params.items()))
+        self._applying_invocation = True
+        try:
+            self.select(skill, priority_target=priority, posture=posture)
+        finally:
+            self._applying_invocation = False
+        self._invocation_managed = True
+        self.last_invocation = {
+            "operation": "start", "skill": skill, "posture": posture,
+            "actor_scope": "whole_squad",
+            "priority_target": priority, "max_steps": max_steps,
+            "adaptive_params": deepcopy(adaptive), "movement_profile": deepcopy(movement),
+            "effective_config": {
+                "max_steps": self.max_steps, "posture": self.posture,
+                "adaptive_params": deepcopy(self.adaptive_params),
+                "combat_params": deepcopy(self.combat_params),
+            },
+        }
+        return deepcopy(self.last_invocation)
+
     def select(self, skill, priority_target=None, posture=None):
         """JEV (or --skill-mode always) chose a mode; hold it for one window."""
         if skill not in (DIRECT_CONTROL, FOCUS_FIRE_BUDGET, COVER_RETREAT,
@@ -231,6 +371,11 @@ class SkillManager:
             raise ValueError("regroup requires enable_regroup")
         if skill == COHESIVE_SEARCH and not self.spatial_params["enable_cohesive_search"]:
             raise ValueError("cohesive_search requires enable_cohesive_search")
+        if self._invocation_managed and not self._applying_invocation:
+            self._restore_invocation_defaults()
+            self.last_invocation = None
+            # Returning to legacy select cannot retain an invocation posture.
+            self.posture = "balanced"
         if self.race_profile != "off" and (
                 skill != self.current_skill or (posture and posture != self.posture)):
             self._engagement_cached_step = None
@@ -633,7 +778,24 @@ class SkillManager:
             stall=self.stall_steps, contacted=self.contacted, posture=self.posture,
             parameters={**self.adaptive_params, **self.combat_params},
             previous_attack_assignments=self.target_assignments or None,
-            move_history=self._last_move, unit_values=self._unit_values, **race_kwargs)
+            move_history=self._last_move, unit_values=self._unit_values,
+            **({"priority_target": self.priority_target} if self.priority_target is not None else {}),
+            **race_kwargs)
+        local_hook = getattr(self, "local_decision_hook", None)
+        if local_hook is not None:
+            if self.race_profile != "off":
+                raise ValueError("Local decisions require the non-race baseline")
+            result = local_hook({**payload, "state": state}, result)
+            # Discard promises for the proposal that was not committed. Keep
+            # only lifecycle counters; the normal update below records the
+            # selected role/action, never the discarded baseline role.
+            for actor in result.get("local_changed_actors", []):
+                if actor in self.unit_states:
+                    self.unit_states[actor] = {
+                        k: v for k, v in self.unit_states[actor].items()
+                        if k in ("role", "retreat_steps", "retreat_cycles", "recover_steps",
+                                 "progress_since_retreat")}
+                self._last_move.pop(actor, None)
         if self.race_profile != "off":
             self._race_memory = deepcopy(result.get("race_memory", {}))
             for actor in result.get("race_telemetry", {}).get("reset_actor_histories", []):

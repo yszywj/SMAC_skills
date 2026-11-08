@@ -24,7 +24,7 @@ class UnifiedLauncherTests(unittest.TestCase):
                            "(environment.__file__, skill_manager.__file__, pysc2.__file__, map_source('3m'))]))")
         self.assertEqual(Path(paths[0]).parent, ROOT / "smacv1/jev_micro")
         self.assertEqual(Path(paths[1]).parent, WORKSPACE / "skills/current")
-        self.assertEqual(Path(paths[2]).parent, GAME_ROOT / "micro/pysc2")
+        self.assertEqual(Path(paths[2]).parent.resolve(), (GAME_ROOT / "micro/pysc2").resolve())
         self.assertTrue(Path(paths[3]).is_file())
 
     def test_v2_sources_and_dependency_isolation(self):

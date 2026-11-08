@@ -1,14 +1,7 @@
-# models/medivac_v1
+# 医疗配对部署模型
 
-**当前为空——本目录必须只存放由真实教师标签训练并导出的模型。**
+本目录用于放置真实教师标签训练并导出的模型。源码发布不附带训练产物。
 
-放入条件（全部满足）：
-1. `TEACHER_MANIFEST.json` 状态 `ready`（真实 MARL-GPT 权重通过结构审计与接口验证）；
-2. 真实 A/B 轨迹采集与教师标注完成（DATA_PROTOCOL.md）；
-3. `training/train_tree.py` 在批准训练清单上训练，按局验证报告（Top-1 一致率、联合分配一致率、难例）随模型保存；
-4. `export/exporter.py` 导出 `model.json`，与原模型数值等价 ≤1e-6（阈值边界/邻近位/极值）；
-5. C/D 同观察一致性测试通过。
+加载入口：`tree_skills.medivac.pair_scorer.TreePairScorer(model_dir)`。导出规则使用 `model.json`；原生 sklearn 格式还需模型文件和相应依赖。特征 schema 必须与运行时一致。
 
-禁止：随机初始化树、手写规则、合成标签模型冒充训练产物（合成冒烟产物只放 `artifacts/demo/`）。
-
-加载：`tree_skills.medivac.pair_scorer.TreePairScorer("<本目录>")`；schema 版本或特征名单不符将拒绝加载。
+部署前应验证教师输入与标签、按对局划分的留出表现、导出数值一致性及完整策略效果。合成测试模型应放在本地实验目录，与部署模型区分。

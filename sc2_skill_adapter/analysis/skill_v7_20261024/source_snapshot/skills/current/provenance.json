@@ -1,0 +1,21 @@
+{
+  "version": "baseline_v7_20261024",
+  "source_hashes": {
+    "__init__.py": "6a9b2fbb7a9a2db671dc16917068861086cdaa833dc399c20c0ad0a1733e8436",
+    "client.py": "52474a4afbeae02962ff0b5a42bdbc5a4ea0dfe01aa0b157e5bc0f082b9a7e6e",
+    "skill_manager.py": "699e010cef6893c198a8e4e4d49d9e24f4112e407717622fa060d8c70f087595",
+    "skill_policy.py": "f543e3bdf054e3bcd449511e17c967696d63c8215959f7067bebc1149cfd26c2",
+    "unit_value.py": "29906321e9191393213d5ca85977656e7f486b1061e63095d41eefee74fce854",
+    "skills/__init__.py": "143db889ca6245631c6722ca8ae199c2ccaf1fd70bd5946b1f52c97b2688c294",
+    "skills/adaptive_focus_fire.py": "acadec27680ffbf0a601417a9ba231fd09094d39a6c12334d707142d19443482",
+    "skills/approach_progress.py": "2bdb8a3c535edb258c0fd13370287ef66c579db3ec48a7a2be311df023eeb0ff",
+    "skills/combat_timing.py": "d94e10928e27abe70def55f0f2d38a8bb9b734debbb4e54aa22b94d027cecde3",
+    "skills/coordinated_approach.py": "e575f139085d0b78b00a9bcccf5703e3b6568759edd35ff0c46cb0f1371757e2",
+    "skills/cover_retreat.py": "99f203139cec50f9ad1c40a1acedd0e3a222235737e6eeb29c8229c2f0e571bd",
+    "skills/damage_model.py": "45a93ac8f3d1ff090d52cd77bd54ea7e85d50f89c4c03a8449daa8ba3630903d",
+    "skills/engagement_control.py": "9f11477589ab2f7dd04380f6925721df54ad5edb87cb9a2702edb40d1943a7a5",
+    "skills/focus_fire.py": "e54414e6471fc0963f891dfbef2a431b7e67bac5d3e7ee3abe5a269c98baa8a1",
+    "skills/heal_assign.py": "5601f43e4641a932321042fcab083cb2b47ccb8532703a8f3847838564db28a6",
+    "skills/movement_scoring.py": "c53cd09cc5ca4e3a613b0bdea5abf6a4c0a0da6854875d69816da8150c6c5a2f"
+  }
+}

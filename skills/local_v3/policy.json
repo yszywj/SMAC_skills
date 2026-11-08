@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "kind": "conditional_local_skills",
+  "priority": ["retarget", "regroup_step"],
+  "actor_cooldown_steps": 2,
+  "max_interventions": null,
+  "regroup_max_enemy_distance": 12.0,
+  "regroup_min_alive": 6,
+  "regroup_unknown": "wait"
+}

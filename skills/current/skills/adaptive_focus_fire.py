@@ -273,7 +273,7 @@ def should_enter_all_in(state, stall, contacted, unit_states, heal_capacity,
 def allocate_adaptive_focus_fire(state, n_agents, unit_states=None, all_in=False,
                                  stall=0, contacted=False, posture="balanced",
                                  parameters=None, previous_attack_assignments=None, move_history=None,
-                                 unit_values=None):
+                                 unit_values=None, priority_target=None):
     """One AdaptiveFocusFire decision step on a fresh snapshot.
 
     ``unit_states`` carries per-unit role history (retreat step counts and
@@ -383,6 +383,7 @@ def allocate_adaptive_focus_fire(state, n_agents, unit_states=None, all_in=False
         restricted["relations"] = {a: state["relations"][a] for a in attackers}
         attack_result = allocate_focus_fire(
             restricted, n_agents,
+            priority_target=priority_target,
             previous_assignments={a: t for a, t in (previous_attack_assignments or {}).items()
                                   if a in attackers},
             parameters={k: v for k, v in (parameters or {}).items()
@@ -521,7 +522,7 @@ def allocate_adaptive_focus_fire(state, n_agents, unit_states=None, all_in=False
             contacted=contacted, posture=posture,
             parameters={**params, 'planned_reentry': False},
             previous_attack_assignments=previous_attack_assignments,
-            move_history=move_history, unit_values=unit_values)
+            move_history=move_history, unit_values=unit_values, priority_target=priority_target)
         for actor, diagnostic in planned_diagnostics.items():
             index = int(actor[1:])
             diagnostic.update(applied=actions[index] != baseline_result['actions'][index],
