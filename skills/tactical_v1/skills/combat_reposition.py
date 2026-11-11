@@ -1,33 +1,32 @@
-"""G3 CombatReposition: in-cycle repositioning between attacks.
+"""G3 CombatReposition: retreat, sidestep, pursuit and hold IN the cycle.
 
-One skill proposes attack-hold (via G1), sidestep, short retreat and pursuit
-candidates from a single comparison — never four separate controllers. The
-decision uses the control window (loops until this unit's next meaningful
-action), the weapon cooldown, real distance and the opportunity cost of the
-damage foregone while moving. Kiting is the RANGED default only when the
-window math favours it; melee compares the cost of leaving the contact face.
+One comparison over several move classes plus keep-attacking (via G1). The
+movement decision compares the LOST window output (only when a shot could
+actually land) against the risk/congestion change at the predicted
+position. Colossus runs the same flow with S1 impact/coverage hooks.
 """
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from ..context import Context, STOP, distance
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from .common import best_move_away, best_move_toward, make_plan, move_progress, threats_reaching
+from .common import best_move_away, best_move_toward, make_plan, move_progress, space_claim
 
 
 class CombatRepositionSkill:
     name = "combat_reposition"
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, providers: Optional[Dict] = None):
         self.config = config
-        params = config.get("combat_reposition", {})
-        self.retreat_health_fraction = params.get("retreat_health_fraction", 0.5)
-        self.min_window_loops = params.get("min_window_loops", 8)
-        self.max_retreat_steps = params.get("max_retreat_steps", 8)
+        self.providers = providers or {}
+        self.max_candidates = config.get("search", {}).get(
+            "max_candidates_per_unit", 6)
 
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
         plans: List = []
+        if not context.snapshot.enemies:
+            return plans
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive:
                 continue
@@ -36,63 +35,68 @@ class CombatRepositionSkill:
                 continue
             attackable = context.attackable_enemies(actor)
             if not attackable:
-                continue  # G2 owns out-of-contact units
+                continue                      # G2 owns out-of-contact units
             telemetry.count(self.name, "applicable")
-            window = max(context.snapshot.step_mul, 1)
-            cooldown = unit.weapon_cooldown_loops
-            threats = context.threats_to(actor)
-            # Damage foregone if this unit moves this step.
-            best_target = attackable[0]
-            damage, evidence, confidence = context.expected_damage(actor, best_target)
-            opportunity = damage if cooldown <= window else 0.0
-            under_fire = unit.health_lost + unit.shield_lost > 0 and threats
-            # Ranged kite / sidestep during cooldown, when the window is long
-            # enough that moving does not waste a shot.
-            if capability.uses_normal_kiting and threats \
-                    and cooldown >= self.min_window_loops \
-                    and (under_fire or unit.health_fraction <= self.retreat_health_fraction):
-                move = best_move_away(context, actor, threats)
-                if move is not None:
-                    destinations = context.move_destinations(actor)
-                    threat_delta = (len(threats_reaching(context, destinations[move]))
-                                    - len(threats))
-                    plans.append(make_plan(
-                        self.name, {actor: move}, best_target, {actor: move},
-                        [EffectClaim("exposure", actor, float(-threat_delta),
-                                     window, HEURISTIC, "kite_threat_reduction", 0.6),
-                         EffectClaim("position", actor,
-                                     move_progress(context, actor, move,
-                                                   context.snapshot.enemies[best_target].position),
-                                     window, HEURISTIC, "kite_reposition", 0.6)],
-                        ResourceClaims(controls=(actor,), space=(f"{actor}@{move}",)),
-                        Commitment("repositioning", 0, self.max_retreat_steps,
-                                   interrupt_on=("weapon_ready", "danger_change")),
-                        {"move_opportunity_cost": opportunity,
-                         "raw_bonus": (0.5 if unit.health_fraction
-                                       <= self.retreat_health_fraction else 0.0)},
-                        snapshot_id, fingerprint,
-                        rationale=f"kite during {cooldown:.0f}-loop cooldown"))
-            # Melee: leaving the contact face is expensive; only propose a
-            # positional shuffle that keeps contact-range distance.
-            if capability.combat_class == "melee" and under_fire \
-                    and unit.health_fraction <= self.retreat_health_fraction:
-                move = best_move_away(context, actor, threats)
-                if move is not None:
-                    destinations = context.move_destinations(actor)
-                    after = distance(destinations[move],
-                                     context.snapshot.enemies[best_target].position)
-                    if after <= (context.snapshot.relations[actor][best_target]
-                                 .native_weapon_range or 2.0) + 1.0:
-                        plans.append(make_plan(
-                            self.name, {actor: move}, best_target, {actor: move},
-                            [EffectClaim("exposure", actor, 0.0, window,
-                                         HEURISTIC, "melee_in_contact_shuffle", 0.5)],
-                            ResourceClaims(controls=(actor,),
-                                           space=(f"{actor}@{move}",)),
-                            Commitment("repositioning", 0, 2,
-                                       interrupt_on=("illegal", "danger_change")),
-                            {"move_opportunity_cost": opportunity},
-                            snapshot_id, fingerprint,
-                            rationale="melee shuffle keeps contact"))
+            estimate = context.fire_estimate(actor, attackable[0])
+            shot_available = estimate.window_shots >= 1
+            # Opportunity actually lost by moving: a real window shot only
+            # (cooldown > H or out of range => nothing lost this window).
+            lost = estimate.damage_est if shot_available else 0.0
+            lost_norm = min((lost or 0.0) /
+                            max(context.snapshot.enemies[attackable[0]].max_health, 1.0), 1.0)
+            risk_now = context.risk_at(actor, unit.position)
+            under_fire = (unit.health_lost + unit.shield_lost > 0
+                          and risk_now.threats) or risk_now.effect_weapon_near
+            cooldown_long = unit.weapon_cooldown_loops > context.H
+            melee = capability.combat_class == "melee"
+            worth_moving = (cooldown_long or not shot_available) or \
+                           (under_fire and (melee is False or
+                                            unit.health_fraction < 0.5))
+            if not worth_moving:
+                continue
+            target_id = attackable[0]
+            enemy = context.snapshot.enemies[target_id]
+            # candidate classes: retreat, sidestep, pursuit
+            classes: List[tuple] = []
+            retreat = best_move_away(context, actor, list(risk_now.threats))
+            if retreat is not None:
+                classes.append(("retreat", retreat))
+            for action in sorted(context.move_destinations(actor)):
+                if action not in (c[1] for c in classes):
+                    classes.append(("sidestep", action))
+            pursuit = best_move_toward(context, actor, enemy.position)
+            if pursuit is not None and pursuit not in (c[1] for c in classes):
+                classes.append(("pursuit", pursuit))
+            provider = self.providers.get("splash_fire")
+            for label, move in classes[:self.max_candidates]:
+                prediction = context.predict_position(actor, move)
+                risk_after = context.risk_at(actor, prediction.position)
+                # melee: leaving the contact face must be paid for explicitly
+                if melee:
+                    after = distance(prediction.position, enemy.position)
+                    relation = context.snapshot.relations[actor][target_id]
+                    if after > (relation.native_weapon_range or 2.0) + 1.0:
+                        continue      # keeps contact or it is a G4 decision
+                coverage = 0.0
+                if capability.specialization == "splash_fire" \
+                        and provider is not None:
+                    coverage = min(provider.reposition_coverage(
+                        context, actor, move, target_id) / 4.0, 1.0)
+                plans.append(make_plan(
+                    self.name, {actor: move}, target_id, {actor: move},
+                    [EffectClaim("position", actor,
+                                 move_progress(context, actor, move, enemy.position),
+                                 max(context.H, 1), HEURISTIC,
+                                 f"reposition_{label}")],
+                    ResourceClaims(controls=(actor,),
+                                   space=(space_claim(context, actor, move),)),
+                    Commitment("repositioning", 0, max_loops=8 * max(context.H, 1),
+                               interrupt_on=("weapon_ready", "danger_change")),
+                    {"switch_cost": lost_norm * 0.5,   # bounded lost-output cost
+                     "progress": coverage * 0.3},
+                    snapshot_id, fingerprint,
+                    provider="splash_fire" if capability.specialization == "splash_fire"
+                    and provider else None,
+                    rationale=f"{label} during weapon cycle"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

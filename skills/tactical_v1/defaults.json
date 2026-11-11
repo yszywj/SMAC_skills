@@ -12,79 +12,79 @@
     "burst_engage": true
   },
   "weights": {
-    "damage": 1.0,
-    "kill": 6.0,
-    "heal": 0.9,
-    "position_progress": 0.35,
-    "exposure_relief": 0.5,
-    "exposure_cost": 0.45,
-    "expected_loss": 0.8,
-    "move_opportunity_cost": 0.3,
-    "switch_cost": 0.25,
-    "commitment_break_cost": 0.4,
-    "suicide_cost": 1.2,
-    "support_follow": 0.2,
-    "attack_intent": 0.3,
-    "overkill_credit": 0.25
+    "useful_damage": 3.0,
+    "kill": 2.0,
+    "heal": 1.5,
+    "coverage": 1.0,
+    "progress": 0.6,
+    "risk": 0.8,
+    "congestion": 0.2,
+    "switch": 0.3,
+    "reentry_cost": 0.2,
+    "planned_loss": 1.5,
+    "hold_value": 0.3
   },
   "search": {
-    "beam_width": 16,
-    "max_expansions": 400,
-    "repair_rounds": 2
+    "beam_width": 8,
+    "max_plan_evaluations": 512,
+    "rounds": 2,
+    "max_candidates_per_unit": 6,
+    "max_atomic_candidates": 12
+  },
+  "lifecycle": {
+    "no_progress_window_h": 3.0,
+    "retry_cooldown_h": 2.0,
+    "engage_target_max_h": 12.0,
+    "engage_wait_max_h": 2.0,
+    "escape_max_h": 3.0,
+    "stabilize_max_h": 2.0,
+    "reenter_max_h": 6.0,
+    "disengage_total_max_h": 12.0,
+    "regroup_max_h": 8.0,
+    "formation_max_h": 3.0,
+    "search_waypoint_max_h": 12.0,
+    "observation_ttl_loops": 240,
+    "search_revisit_cooldown_loops": 160
   },
   "focus_fire": {
-    "kill_window_loops": 24,
-    "joint_kill_max_attackers": 5,
-    "urgent_enemy_types": ["baneling"]
+    "kill_window_h": 3.0,
+    "joint_kill_max_members": 5,
+    "urgency_value": 0.5
   },
   "coordinated_engage": {
-    "slot_spacing": 1.4,
-    "wait_max_steps": 3,
-    "max_approach_steps": 60
+    "slot_spacing": 1.4
   },
-  "combat_reposition": {
-    "retreat_health_fraction": 0.5,
-    "min_window_loops": 8,
-    "max_retreat_steps": 8
-  },
+  "combat_reposition": {},
   "disengage_reenter": {
     "critical_health_fraction": 0.35,
     "reenter_health_fraction": 0.6,
-    "max_retreat_steps": 10,
-    "max_stabilize_steps": 20
+    "escape_risk_threshold": 2
   },
   "regroup": {
-    "support_radius": 8.0,
-    "max_wait_steps": 8
+    "support_radius": 8.0
   },
   "local_formation": {
     "spread_radius": 3.5,
     "min_pair_distance": 1.2
   },
   "cohesive_search": {
-    "max_search_steps": 120,
-    "cohesion_radius": 10.0,
-    "waypoint_cell_size": 8.0
+    "arrival_tolerance": 2.0,
+    "cohesion_radius": 10.0
   },
   "splash_fire": {
     "coverage_radius": 3.0,
-    "coverage_weight": 0.8,
-    "max_secondary_targets": 4
+    "coverage_weight": 0.5
   },
   "heal_support": {
-    "max_heal_per_step": 8.0,
-    "switch_margin": 6.0,
-    "follow_distance": 5.0
+    "follow_distance": 5.0,
+    "switch_margin": 0.3
   },
   "burst_engage": {
     "proxy_radius": 2.5,
     "value_per_enemy": 2.0,
     "min_exchange_value": 2.0,
-    "self_cost": 3.0,
-    "max_approach_steps": 40
-  },
-  "memory": {
-    "observation_ttl_loops": 240
+    "self_cost": 1.0,
+    "lonely_enemy_exception": true
   },
   "telemetry": {
     "top_k_candidates": 3

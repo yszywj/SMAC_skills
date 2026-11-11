@@ -1,17 +1,18 @@
-"""G2 CoordinatedEngage: obtain an effective fighting position.
+"""G2 CoordinatedEngage: establish effective shared contact.
 
-Melee units get deterministic contact-slot allocation around the target
-(body size + already-approaching allies considered); ranged units pick a
-legal move that best closes on their chosen enemy without the whole squad
-mirroring one unit. Front squads may fight while rear units catch up: the
-skill proposes per-unit, never one team-wide phase.
+Local squads from observed ally positions (flying supports do not chain
+distant ground groups). Melee get real contact slots around the target —
+slot width from body sizes, ALREADY-OCCUPIED positions subtracted — instead
+of an average ring over the whole melee count. Waiting is bounded (2H) and
+proposed only when it clearly helps. Progress/no-progress guards consume
+the instance budgets.
 """
 import math
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from ..context import Context, STOP, distance
-from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from .common import best_move_toward, make_plan, move_progress
+from ..contracts import Commitment, Dependency, EffectClaim, HEURISTIC, ResourceClaims
+from .common import best_move_toward, h_loops, make_plan, move_progress, space_claim
 
 
 class CoordinatedEngageSkill:
@@ -19,10 +20,54 @@ class CoordinatedEngageSkill:
 
     def __init__(self, config: Dict):
         self.config = config
-        params = config.get("coordinated_engage", {})
-        self.slot_spacing = params.get("slot_spacing", 1.4)
-        self.wait_max_steps = params.get("wait_max_steps", 3)
-        self.max_approach_steps = params.get("max_approach_steps", 60)
+        lifecycle = config.get("lifecycle", {})
+        self.target_max_h = lifecycle.get("engage_target_max_h", 12.0)
+        self.wait_max_h = lifecycle.get("engage_wait_max_h", 2.0)
+        self.no_progress_h = lifecycle.get("no_progress_window_h", 3.0)
+        self.retry_h = lifecycle.get("retry_cooldown_h", 2.0)
+        self.slot_spacing = config.get("coordinated_engage", {}).get(
+            "slot_spacing", 1.4)
+        self.max_candidates = config.get("search", {}).get(
+            "max_candidates_per_unit", 6)
+
+    def _squad(self, context: Context, actor: str) -> List[str]:
+        for group in context.engagement_groups():
+            if actor in group:
+                return group
+        return [actor]
+
+    def _squad_target(self, context: Context, squad: List[str]) -> Optional[str]:
+        """One approachable LOCAL enemy cluster for the squad (not per-unit
+        nearest): fewest total approach distance, deterministic."""
+        if not context.snapshot.enemies:
+            return None
+        def cost(enemy_id):
+            return sum(min(context.distance(a, enemy_id) for enemy_id in
+                           [enemy_id]) for a in squad)
+        return min(sorted(context.snapshot.enemies), key=lambda e: (cost(e), e))
+
+    def _occupied_slots(self, context: Context, target_id: str) -> List[tuple]:
+        """Positions currently crowding the target (allies in contact)."""
+        target = context.snapshot.enemies[target_id]
+        return [u.position for u in context.snapshot.allies.values()
+                if u.alive and distance(u.position, target.position)
+                <= target.radius + u.radius + 0.6]
+
+    def _contact_slot(self, context: Context, actor: str, target_id: str,
+                      index: int, occupied: List[tuple]) -> tuple:
+        """A deterministic free contact slot: ring positions around the
+        target sized by both bodies, skipping already-occupied ones."""
+        unit = context.snapshot.allies[actor]
+        target = context.snapshot.enemies[target_id]
+        offset = target.radius + unit.radius + self.slot_spacing * 0.5
+        candidates = []
+        for step in range(8):
+            angle = (index + step) * math.pi / 4.0
+            position = (target.position[0] + offset * math.cos(angle),
+                        target.position[1] + offset * math.sin(angle))
+            if all(distance(position, o) > unit.radius + 0.2 for o in occupied):
+                candidates.append(position)
+        return candidates[0] if candidates else target.position
 
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
@@ -30,73 +75,93 @@ class CoordinatedEngageSkill:
         plans: List = []
         if not context.snapshot.enemies:
             return plans
-        melee_slots = self._melee_slots(context)
+        melee_index = 0
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive:
                 continue
             capability = context.capabilities[actor]
             if capability.healer or capability.suicide_attack:
                 continue
+            # Blocked-attack detection: an issuable attack that has produced
+            # no progress for the whole no-progress window also engages.
             attackable = context.attackable_enemies(actor)
+            instance = memory.instance_for(self.name, actor)
+            blocked = False
             if attackable:
-                continue  # already in effective contact: G1/G3 own this unit
+                if instance is not None and instance.phase == "blocked_check":
+                    blocked = memory.displacement(
+                        actor, h_loops(context, self.no_progress_h),
+                        context.snapshot) < 0.5
+                if not blocked:
+                    continue       # effective contact: G1/G3 own this unit
             telemetry.count(self.name, "applicable")
-            target_id = context.nearest_enemy(actor)
+            if instance is not None and instance.retry_after_loop \
+                    and context.snapshot.game_loop < instance.retry_after_loop \
+                    and instance.phase == "cooldown":
+                continue
+            squad = self._squad(context, actor)
+            target_id = self._squad_target(context, squad)
             if target_id is None:
                 continue
             enemy = context.snapshot.enemies[target_id]
+            goal = enemy.position
+            slot = None
             if capability.combat_class == "melee":
-                goal = melee_slots.get(actor, enemy.position)
-            else:
-                goal = enemy.position
-            move = best_move_toward(context, actor, goal)
-            if move is not None:
-                progress = move_progress(context, actor, move, goal)
+                occupied = self._occupied_slots(context, target_id)
+                slot = self._contact_slot(context, actor, target_id,
+                                          melee_index, occupied)
+                goal = slot
+                melee_index += 1
+            # candidate moves: direct, and lateral alternatives
+            moves = []
+            direct = best_move_toward(context, actor, goal)
+            if direct is not None and direct not in moves:
+                moves.append(direct)
+            for lateral in sorted(context.move_destinations(actor)):
+                if lateral not in moves:
+                    moves.append(lateral)
+            no_progress = instance is not None and memory.displacement(
+                actor, h_loops(context, self.no_progress_h),
+                context.snapshot) < 0.5
+            budget = h_loops(context, self.target_max_h)
+            for move in moves[:self.max_candidates]:
                 plans.append(make_plan(
                     self.name, {actor: move}, target_id, {actor: move},
-                    [EffectClaim("position", actor, progress,
-                                 max(context.snapshot.step_mul, 1), HEURISTIC,
-                                 "approach_engagement_position", 0.7)],
+                    [EffectClaim("position", actor,
+                                 move_progress(context, actor, move, goal),
+                                 max(context.H, 1), HEURISTIC,
+                                 "approach_contact_position")],
                     ResourceClaims(controls=(actor,),
-                                   space=(f"{actor}@{move}",)),
-                    Commitment("approaching", 0, self.max_approach_steps,
-                               interrupt_on=("contact", "illegal", "danger_change",
-                                             "no_progress")),
-                    {"move_opportunity_cost": 0.0}, snapshot_id, fingerprint,
-                    rationale=f"approach {target_id} slot"))
-            else:
-                # No legal move improves the approach: bounded wait.
+                                   space=(space_claim(context, actor, move),)),
+                    Commitment("approaching", 0, max_loops=budget,
+                               interrupt_on=("contact", "no_progress",
+                                             "danger_change")),
+                    {"switch_cost": 0.1 if no_progress else 0.0,
+                     "progress": abs(move_progress(context, actor, move, goal))},
+                    snapshot_id, fingerprint,
+                    instance_id=instance.instance_id if instance else None,
+                    dependencies=(Dependency("target_valid", (target_id,)),),
+                    memory_delta=({"kind": "create", "skill": self.name,
+                                   "actors": [actor], "goal": target_id,
+                                   "phase": "approaching",
+                                   "max_loops": budget}
+                                  if instance is None else None),
+                    rationale=f"approach {target_id}"
+                              + (f" slot {slot}" if slot else "")))
+            # bounded wait: only when squadmates are close to arriving
+            mates_close = any(
+                distance(context.snapshot.allies[m].position, enemy.position)
+                <= 2 * (unit.radius + enemy.radius) + 3.0
+                for m in squad if m != actor)
+            if mates_close:
                 plans.append(make_plan(
                     self.name, {actor: STOP}, target_id, {actor: STOP},
-                    [EffectClaim("position", actor, 0.0,
-                                 max(context.snapshot.step_mul, 1), HEURISTIC,
-                                 "bounded_wait", 0.5)],
+                    [EffectClaim("position", actor, None, max(context.H, 1),
+                                 HEURISTIC, "bounded_wait")],
                     ResourceClaims(controls=(actor,)),
-                    Commitment("waiting", 0, self.wait_max_steps,
-                               interrupt_on=("contact", "danger_change")),
-                    {"raw_bonus": -0.2}, snapshot_id, fingerprint,
-                    rationale="no improving move; bounded wait"))
+                    Commitment("waiting", 0, max_loops=h_loops(
+                        context, self.wait_max_h)),
+                    {"hold_value": 0.3}, snapshot_id, fingerprint,
+                    rationale="bounded wait for squad contact"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
-
-    def _melee_slots(self, context: Context) -> Dict[str, tuple]:
-        """Deterministic ring slots around each melee unit's nearest enemy so
-        melee attackers spread over the contact face instead of stacking."""
-        slots: Dict[str, tuple] = {}
-        assigned: Dict[str, list] = {}
-        melee = [a for a, cap in sorted(context.capabilities.items())
-                 if cap.combat_class == "melee"
-                 and context.snapshot.allies[a].alive
-                 and not context.attackable_enemies(a)]
-        for actor in melee:
-            target_id = context.nearest_enemy(actor)
-            if target_id is None:
-                continue
-            enemy = context.snapshot.enemies[target_id]
-            users = assigned.setdefault(target_id, [])
-            angle = (len(users) * 2 * math.pi / max(len(melee), 1)) % (2 * math.pi)
-            offset = enemy.radius + context.snapshot.allies[actor].radius + 0.1
-            slots[actor] = (enemy.position[0] + offset * math.cos(angle),
-                            enemy.position[1] + offset * math.sin(angle))
-            users.append(actor)
-        return slots

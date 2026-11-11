@@ -35,7 +35,9 @@ class Capability:
 
     @property
     def uses_normal_kiting(self) -> bool:
-        return self.combat_class == "ranged" and self.specialization is None
+        # Colossus keeps ranged cycle-repositioning; S1 only replaces its
+        # impact/target model (task 2.1).
+        return self.combat_class == "ranged"
 
 
 RANGED = ("marine", "marauder", "stalker", "hydralisk")
@@ -73,10 +75,11 @@ def canonical_type(type_name: str, unit_type_id: Optional[int]) -> str:
 
 
 def capability_for(type_key: str, is_flying: bool = False) -> Capability:
-    key = type_key
-    cached = _CAPABILITY_CACHE.get(key)
+    cache_key = (type_key, bool(is_flying))   # flying affects capability (R1)
+    cached = _CAPABILITY_CACHE.get(cache_key)
     if cached is not None:
         return cached
+    key = type_key
     specialization = SPECIALIZATIONS.get(key)
     if key in RANGED:
         combat_class, complete = "ranged", "complete"
@@ -98,5 +101,5 @@ def capability_for(type_key: str, is_flying: bool = False) -> Capability:
                      suicide_attack=key == "baneling",
                      splash_attack=key in ("colossus", "baneling"),
                      data_completeness=complete)
-    _CAPABILITY_CACHE[key] = cap
+    _CAPABILITY_CACHE[cache_key] = cap
     return cap

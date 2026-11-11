@@ -1,17 +1,13 @@
-"""G6 LocalFormation: local relative-position improvement.
-
-Configurable spacing, spread against enemy splash threat and melee envelop
-positions. Distinct from G2 (which establishes contact) and G5 (which repairs
-support breaks): this skill only improves local stance, and its candidates
-always pay the opportunity cost of the attack they would give up — never a
-last unconditional override.
-"""
-import math
+"""G6 LocalFormation: joint position improvement (de-crowding, moderate
+spread, role positions). Synchronous moves are evaluated against the
+PREDICTED positions of teammates, with soft congestion penalties — a
+counter-baneling spread competes against G1 interception instead of
+overriding it."""
 from typing import Dict, List
 
 from ..context import Context, STOP, distance
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from .common import make_plan, threats_reaching
+from .common import h_loops, make_plan, space_claim
 
 
 class LocalFormationSkill:
@@ -19,9 +15,12 @@ class LocalFormationSkill:
 
     def __init__(self, config: Dict):
         self.config = config
-        params = config.get("local_formation", {})
-        self.spread_radius = params.get("spread_radius", 3.5)
-        self.min_pair_distance = params.get("min_pair_distance", 1.2)
+        lifecycle = config.get("lifecycle", {})
+        self.max_h = lifecycle.get("formation_max_h", 3.0)
+        self.spread_radius = config.get("local_formation", {}).get(
+            "spread_radius", 3.5)
+        self.min_pair_distance = config.get("local_formation", {}).get(
+            "min_pair_distance", 1.2)
 
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
@@ -29,78 +28,62 @@ class LocalFormationSkill:
         plans: List = []
         splash_threats = [e for e, cap in sorted(context.enemy_capabilities.items())
                           if cap.splash_attack]
+        # predicted teammate positions under a SAME-STEP joint adjustment
+        predicted = {a: u.position for a, u in context.snapshot.allies.items()
+                     if u.alive}
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive or context.capabilities[actor].healer:
                 continue
-            attackable = context.attackable_enemies(actor)
-            opportunity = 0.0
-            if attackable:
-                damage, _, _ = context.expected_damage(actor, attackable[0])
-                opportunity = damage
             destinations = context.move_destinations(actor)
             if not destinations:
                 continue
-            # 1. Spread against an observed enemy splash threat.
-            if splash_threats:
-                telemetry.count(self.name, "applicable")
-                crowded = self._crowding(context, actor)
-                best = None
-                for action in sorted(destinations):
-                    destination = destinations[action]
-                    near_threat = any(distance(destination,
-                                               context.snapshot.enemies[e].position)
-                                      <= self.spread_radius
-                                      for e in splash_threats)
-                    if near_threat:
-                        continue
-                    score = (self._crowding_at(context, actor, destination), action)
-                    if best is None or score < best:
-                        best = score
-                if best is not None and crowded > 0:
-                    action = best[1]
-                    endangered = 1 + self._crowding(context, actor)  # self + packed neighbours
-                    plans.append(make_plan(
-                        self.name, {actor: action}, "spread", {actor: action},
-                        [EffectClaim("exposure", actor, endangered * 3.0,
-                                     max(context.snapshot.step_mul, 1), HEURISTIC,
-                                     "leaving_splash_threat_area", 0.6)],
-                        ResourceClaims(controls=(actor,),
-                                       space=(f"{actor}@{action}",)),
-                        Commitment("spreading", 0, 3,
-                                   interrupt_on=("illegal", "danger_change")),
-                        {"move_opportunity_cost": opportunity},
-                        snapshot_id, fingerprint,
-                        rationale="spread from enemy splash threat"))
+            crowded = self._crowding(context, actor, predicted)
+            under_splash = any(distance(unit.position,
+                                        context.snapshot.enemies[e].position)
+                               <= self.spread_radius
+                               for e in splash_threats)
+            if not (crowded >= 1 or under_splash):
+                continue
+            telemetry.count(self.name, "applicable")
+            attackable = context.attackable_enemies(actor)
+            # interception competition: a timely joint kill beats scattering;
+            # that comparison happens in the coordinator via equal scoring.
+            for action in sorted(destinations):
+                prediction = context.predict_position(actor, action)
+                after = self._crowding_at(context, actor, prediction.position,
+                                          predicted)
+                new_splash = any(distance(prediction.position,
+                                          context.snapshot.enemies[e].position)
+                                 <= self.spread_radius for e in splash_threats)
+                improves = (after < crowded) or (under_splash and not new_splash)
+                if not improves:
                     continue
-            # 2. De-crowding when stacked on a teammate while in contact.
-            if attackable and self._crowding(context, actor) >= 2:
-                telemetry.count(self.name, "applicable")
-                best = min(sorted(destinations),
-                           key=lambda a: (self._crowding_at(
-                               context, actor, destinations[a]), a))
-                if self._crowding_at(context, actor, destinations[best]) \
-                        < self._crowding(context, actor):
-                    plans.append(make_plan(
-                        self.name, {actor: best}, "spacing", {actor: best},
-                        [EffectClaim("position", actor, 0.3,
-                                     max(context.snapshot.step_mul, 1), HEURISTIC,
-                                     "local_spacing_improvement", 0.5)],
-                        ResourceClaims(controls=(actor,),
-                                       space=(f"{actor}@{best}",)),
-                        Commitment("spacing", 0, 2, interrupt_on=("illegal",)),
-                        {"move_opportunity_cost": opportunity},
-                        snapshot_id, fingerprint,
-                        rationale="reduce local crowding while in contact"))
+                plans.append(make_plan(
+                    self.name, {actor: action}, "formation", {actor: action},
+                    [EffectClaim("position", actor,
+                                 float(crowded - after) / 2.0,
+                                 max(context.H, 1), HEURISTIC,
+                                 "local_position_quality_gain")],
+                    ResourceClaims(controls=(actor,),
+                                   space=(space_claim(context, actor, action),)),
+                    Commitment("adjusting", 0,
+                               max_loops=h_loops(context, self.max_h)),
+                    {"switch_cost": 0.1 if attackable else 0.0},
+                    snapshot_id, fingerprint,
+                    rationale=("spread from splash danger" if under_splash
+                               else "reduce local crowding")))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
 
-    def _crowding(self, context: Context, actor: str) -> int:
+    def _crowding(self, context: Context, actor: str, positions) -> int:
         unit = context.snapshot.allies[actor]
-        return sum(1 for other, u in context.snapshot.allies.items()
-                   if other != actor and u.alive
-                   and distance(unit.position, u.position) < self.min_pair_distance)
+        return sum(1 for other, position in positions.items()
+                   if other != actor
+                   and distance(unit.position, position) < self.min_pair_distance)
 
-    def _crowding_at(self, context: Context, actor: str, destination) -> int:
-        return sum(1 for other, u in context.snapshot.allies.items()
-                   if other != actor and u.alive
-                   and distance(destination, u.position) < self.min_pair_distance)
+    def _crowding_at(self, context: Context, actor: str, destination,
+                     positions) -> int:
+        unit = context.snapshot.allies[actor]
+        return sum(1 for other, position in positions.items()
+                   if other != actor
+                   and distance(destination, position) < self.min_pair_distance)

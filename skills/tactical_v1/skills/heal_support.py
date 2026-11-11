@@ -1,18 +1,17 @@
-"""S2 HealSupport: Medivac sustained healing.
+"""S2 HealSupport: joint healing, sustained execution, safe escort.
 
-Heal need is based on healable HEALTH loss only (shields are not healable).
-The observed heal occupation (a committed heal order visible in the current
-environment) and this step's new assignment are tracked separately. A
-healed ally keeps its own action; only plans that explicitly need the
-patient to move claim its control. Normal attack/kiting logic never applies
-to a Medivac.
+Patient/healer graph from LEGAL heal candidates plus OBSERVED orders; the
+verified single-patient occupancy rule is respected (an observed order's
+patient stays owned until a later observation confirms release). Every
+medivac keeps ALL legal patients as candidates (no first-match break) —
+capacity is the coordinator's job. Heal rate is NOT calibrated: the window
+value is an explicit opportunity proxy, and a moving patient halves it.
 """
 from typing import Dict, List, Optional
 
 from ..context import Context, STOP, distance
-from ..contracts import (CALIBRATED, CandidatePlan, Commitment, EffectClaim,
-                         HEURISTIC, ResourceClaims)
-from .common import best_move_toward, make_plan
+from ..contracts import Commitment, Dependency, EffectClaim, HEURISTIC, ResourceClaims
+from .common import best_move_toward, make_plan, move_progress, space_claim
 
 
 class HealSupportSkill:
@@ -21,142 +20,175 @@ class HealSupportSkill:
     def __init__(self, config: Dict):
         self.config = config
         params = config.get("heal_support", {})
-        self.max_heal_per_step = params.get("max_heal_per_step", 8.0)
-        self.switch_margin = params.get("switch_margin", 6.0)
         self.follow_distance = params.get("follow_distance", 5.0)
+        self.switch_margin = params.get("switch_margin", 0.3)
 
-    def _patients(self, context: Context) -> List[str]:
-        """Allies with healable health loss, worst first."""
-        def need(actor):
-            unit = context.snapshot.allies[actor]
-            return (-(unit.max_health - unit.health), actor)
-        return sorted((a for a, u in sorted(context.snapshot.allies.items())
-                       if u.alive and u.health < u.max_health and not
-                       context.capabilities[a].healer), key=need)
+    def _urgency(self, context: Context, patient: str) -> float:
+        """Missing HEALTH fraction x visible pressure. Shields never count."""
+        unit = context.snapshot.allies[patient]
+        missing = max(unit.max_health - unit.health, 0.0)
+        pressure = len(context.threats_to(patient))
+        return missing / max(unit.max_health, 1.0) + 0.1 * min(pressure, 3)
 
-    def propose(self, context: Context, memory, telemetry, ledger=None
-                ) -> List[CandidatePlan]:
+    def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
-        plans: List[CandidatePlan] = []
+        plans: List = []
         medivacs = [a for a, cap in sorted(context.capabilities.items())
                     if cap.healer and context.snapshot.allies[a].alive]
         if not medivacs:
             return plans
         telemetry.count(self.name, "applicable", len(medivacs))
+        owners = context.heal_occupancy()          # observed occupancy
         for actor in medivacs:
-            # 1. Observed keep-heal order: the env exposes a dedicated legal
-            #    action only when the extension is enabled. Prefer it when the
-            #    current patient still needs healing.
+            instance = memory.instance_for(self.name, actor)
+            # 1. observed keep-heal order (explicit extension only)
             keep = context.keep_heal_action(actor)
             if keep is not None:
-                candidate = context.snapshot.keep_heal_order.get(actor, {})
-                target = candidate.get("target")
+                target = context.snapshot.keep_heal_order.get(actor, {}).get("target")
                 plans.append(make_plan(
                     self.name, {actor: keep}, target or "observed_order",
                     {actor: keep},
-                    [EffectClaim("heal", target or "", self.max_heal_per_step,
-                                 max(context.snapshot.step_mul, 1), CALIBRATED,
-                                 "observed_heal_order_retained", 0.9)],
-                    ResourceClaims(controls=(actor,),
-                                   healing=((target, self.max_heal_per_step),)
-                                   if target else ()),
-                    Commitment("sustained_heal", min_steps=1, max_steps=8),
-                    {"switch_cost": 0.0},
-                    snapshot_id, fingerprint, provider="heal_support",
+                    [EffectClaim("heal", target or "", None, max(context.H, 1),
+                                 HEURISTIC, "observed_heal_order_retained")],
+                    ResourceClaims(controls=(actor,)),
+                    Commitment("sustained_heal", 0,
+                               max_loops=30 * max(context.H, 1)),
+                    {}, snapshot_id, fingerprint, provider="heal_support",
                     beneficiaries=(target,) if target else (),
+                    instance_id=instance.instance_id if instance else None,
                     rationale=f"keep heal order on {target}"))
-            # 2. New heal assignment on the neediest patient in range.
-            chosen: Optional[str] = None
-            for patient in self._patients(context):
+            # 2. ALL legal patients as candidates (occupancy-aware urgency)
+            candidates: List[str] = []
+            for action, info in sorted(context.snapshot.heal_candidates
+                                       .get(actor, {}).items()):
+                patient = info.get("target")
+                if patient and patient in context.snapshot.allies:
+                    candidates.append(patient)
+            candidates.sort(key=lambda p: (-self._urgency(context, p), p))
+            for patient in candidates:
                 action = context.heal_action(actor, patient)
-                if action is not None:
-                    already = (ledger.healing.get(patient, 0.0)
-                               if ledger else 0.0)
-                    patient_unit = context.snapshot.allies[patient]
-                    missing = max(patient_unit.max_health - patient_unit.health
-                                  - already, 0.0)
+                if action is None:
+                    continue
+                owner = owners.get(patient)
+                taken = owner is not None and owner != actor
+                switch = 0.2 if instance and instance.goal not in (
+                        patient, "observed_order") else 0.0
+                plans.append(make_plan(
+                    self.name, {actor: action}, patient, {actor: action},
+                    [EffectClaim("heal", patient, None, max(context.H, 1),
+                                 HEURISTIC,
+                                 "heal_opportunity_proxy_taken" if taken
+                                 else "heal_opportunity_proxy")],
+                    ResourceClaims(controls=(actor,),
+                                   healing=((patient, 1.0),)),
+                    Commitment("sustained_heal", 0, max_loops=30 * max(context.H, 1)),
+                    {"switch_cost": switch}, snapshot_id, fingerprint,
+                    provider="heal_support", beneficiaries=(patient,),
+                    dependencies=(Dependency("heal_owner", (patient, actor)),),
+                    instance_id=instance.instance_id if instance else None,
+                    memory_delta=({"kind": "create", "skill": self.name,
+                                   "actors": [actor], "goal": patient,
+                                   "phase": "sustained_heal",
+                                   "max_loops": 30 * max(context.H, 1)}
+                                  if instance is None else None),
+                    rationale=f"heal {patient}" +
+                              (" (occupied by observed order)" if taken else "")))
+            # 3. approach the neediest unowned patient
+            owned = set(owners) - {p for p, a in owners.items() if a == actor}
+            approachable = [p for p in sorted(
+                context.snapshot.allies,
+                key=lambda p: (-self._urgency(context, p), p))
+                if 0 < context.snapshot.allies[p].health
+                < context.snapshot.allies[p].max_health
+                and not context.capabilities[p].healer
+                and p not in owned]
+            if approachable and not candidates:
+                patient = approachable[0]
+                move = best_move_toward(
+                    context, actor, context.snapshot.allies[patient].position)
+                if move is not None:
                     plans.append(make_plan(
-                        self.name, {actor: action}, patient, {actor: action},
-                        [EffectClaim("heal", patient,
-                                     min(missing, self.max_heal_per_step),
-                                     max(context.snapshot.step_mul, 1),
-                                     CALIBRATED, "smac_heal_action", 0.9)],
+                        self.name, {actor: move}, patient, {actor: move},
+                        [EffectClaim("position", actor,
+                                     move_progress(context, actor, move,
+                                                   context.snapshot.allies[patient].position),
+                                     max(context.H, 1), HEURISTIC,
+                                     "approach_patient")],
                         ResourceClaims(controls=(actor,),
-                                       healing=((patient,
-                                                 min(missing, self.max_heal_per_step)),)),
-                        Commitment("sustained_heal", min_steps=2, max_steps=30),
-                        {"switch_cost": 0.0}, snapshot_id, fingerprint,
-                        provider="heal_support", beneficiaries=(patient,),
-                        rationale=f"heal {patient}"))
-                    chosen = patient
-                    break
-            # 3. No heal action in range: approach the neediest patient.
-            if keep is None and chosen is None:
-                patients = self._patients(context)
-                if patients:
-                    patient = patients[0]
-                    move = best_move_toward(
-                        context, actor, context.snapshot.allies[patient].position)
-                    if move is not None:
-                        progress = _progress(context, actor, move,
-                                             context.snapshot.allies[patient].position)
-                        plans.append(make_plan(
-                            self.name, {actor: move}, patient, {actor: move},
-                            [EffectClaim("position", actor, progress,
-                                         max(context.snapshot.step_mul, 1),
-                                         HEURISTIC, "approach_patient", 0.7)],
-                            ResourceClaims(controls=(actor,), space=(f"{actor}@{move}",)),
-                            Commitment("approach_patient", min_steps=0, max_steps=12),
-                            {"move_opportunity_cost": 0.0}, snapshot_id,
-                            fingerprint, provider="heal_support",
-                            beneficiaries=(patient,),
-                            rationale=f"approach patient {patient}"))
-                else:
-                    # 4. No patients: follow the main combat group, never the enemy.
-                    group = _combat_group_center(context, actor)
-                    if group is not None:
-                        if distance(context.snapshot.allies[actor].position, group) \
-                                > self.follow_distance:
-                            move = best_move_toward(context, actor, group)
-                            if move is not None:
-                                plans.append(make_plan(
-                                    self.name, {actor: move}, "follow_group",
-                                    {actor: move},
-                                    [EffectClaim("position", actor,
-                                                 _progress(context, actor, move, group),
-                                                 max(context.snapshot.step_mul, 1),
-                                                 HEURISTIC, "escort_follow", 0.6)],
-                                    ResourceClaims(controls=(actor,)),
-                                    Commitment("escort", min_steps=0, max_steps=6),
-                                    {"support_follow": 0.3}, snapshot_id,
-                                    fingerprint, provider="heal_support",
-                                    rationale="follow combat group"))
-                        else:
+                                       space=(space_claim(context, actor, move),)),
+                        Commitment("approach_patient", 0,
+                                   max_loops=12 * max(context.H, 1)),
+                        {"progress": abs(move_progress(
+                            context, actor, move,
+                            context.snapshot.allies[patient].position))},
+                        snapshot_id, fingerprint, provider="heal_support",
+                        beneficiaries=(patient,),
+                        rationale=f"approach patient {patient}"))
+            # 4. own danger: shared safe-move RETREAT candidate competes with
+            #    healing (S2.10) — never skipped because of the healer class.
+            risk = context.risk_at(actor, context.snapshot.allies[actor].position)
+            if risk.threats:   # only real domain-compatible threats count
+                from .common import best_move_away
+                move = best_move_away(context, actor, list(risk.threats))
+                if move is not None:
+                    plans.append(make_plan(
+                        self.name, {actor: move}, "escape", {actor: move},
+                        [EffectClaim("position", actor,
+                                     move_progress(context, actor, move,
+                                                   (0., 0.)), max(context.H, 1),
+                                     HEURISTIC, "medivac_self_danger_move")],
+                        ResourceClaims(controls=(actor,),
+                                       space=(space_claim(context, actor, move),)),
+                        Commitment("escape", 0, max_loops=3 * max(context.H, 1)),
+                        {}, snapshot_id, fingerprint, provider="heal_support",
+                        rationale="leave domain-compatible danger"))
+            # 5. no patients: escort the largest effective fighting group
+            if not candidates and not approachable:
+                goal = self._escort_point(context, actor)
+                if goal is not None:
+                    if distance(context.snapshot.allies[actor].position, goal) \
+                            > self.follow_distance:
+                        move = best_move_toward(context, actor, goal)
+                        if move is not None:
                             plans.append(make_plan(
-                                self.name, {actor: STOP}, "escort_hold",
-                                {actor: STOP},
-                                [EffectClaim("position", actor, 0.0,
-                                             max(context.snapshot.step_mul, 1),
-                                             HEURISTIC, "escort_hold", 0.6)],
-                                ResourceClaims(controls=(actor,)),
-                                Commitment("escort", min_steps=0, max_steps=6),
-                                {"support_follow": 0.2}, snapshot_id,
-                                fingerprint, provider="heal_support",
-                                rationale="hold escort position"))
+                                self.name, {actor: move}, "escort", {actor: move},
+                                [EffectClaim("position", actor,
+                                             move_progress(context, actor, move, goal),
+                                             max(context.H, 1), HEURISTIC,
+                                             "escort_follow")],
+                                ResourceClaims(
+                                    controls=(actor,),
+                                    space=(space_claim(context, actor, move),)),
+                                Commitment("escort", 0, max_loops=6 * max(context.H, 1)),
+                                {"progress": abs(move_progress(
+                                    context, actor, move, goal))},
+                                snapshot_id, fingerprint,
+                                provider="heal_support",
+                                rationale="follow main fighting group"))
+                    else:
+                        plans.append(make_plan(
+                            self.name, {actor: STOP}, "escort", {actor: STOP},
+                            [EffectClaim("position", actor, None, max(context.H, 1),
+                                         HEURISTIC, "escort_hold")],
+                            ResourceClaims(controls=(actor,)),
+                            Commitment("escort", 0, max_loops=6 * max(context.H, 1)),
+                            {"hold_value": 0.5}, snapshot_id, fingerprint,
+                            provider="heal_support",
+                            rationale="hold escort position"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
 
-
-def _progress(context, actor, action, target) -> float:
-    from .common import move_progress
-    return move_progress(context, actor, action, target)
-
-
-def _combat_group_center(context: Context, actor: str):
-    allies = [u.position for a, u in sorted(context.snapshot.allies.items())
-              if u.alive and not context.capabilities[a].healer]
-    if not allies:
-        return None
-    n = len(allies)
-    return (sum(p[0] for p in allies) / n, sum(p[1] for p in allies) / n)
+    def _escort_point(self, context: Context, actor: str):
+        """Largest effective fighting group's centroid — never the nearest
+        enemy, never the unconditional whole-team center."""
+        groups = [g for g in context.engagement_groups()
+                  if any(context.attackable_enemies(a) or
+                         context.snapshot.enemies for a in g)]
+        if not groups:
+            return None
+        group = max(groups, key=lambda g: (len(g), g))
+        positions = [context.snapshot.allies[a].position for a in group]
+        n = len(positions)
+        return (sum(p[0] for p in positions) / n,
+                sum(p[1] for p in positions) / n)

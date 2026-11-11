@@ -1,45 +1,48 @@
 """Shared candidate-construction helpers for tactical_v1 skills."""
+import hashlib
 import math
 from typing import Dict, List, Optional, Tuple
 
-from ..context import Context, STOP, distance
-from ..contracts import (CALIBRATED, CandidatePlan, Commitment, EffectClaim,
-                         HEURISTIC, ResourceClaims, VERIFIED)
-
-_plan_counter = 0
+from ..context import Context, distance
+from ..contracts import (CandidatePlan, Commitment, Dependency, EffectClaim,
+                         ResourceClaims, SpaceClaim)
 
 
-def next_plan_id(prefix: str) -> str:
-    global _plan_counter
-    _plan_counter += 1
-    return f"{prefix}-{_plan_counter:05d}"
+def plan_id(skill: str, snapshot_id: int, actors, goal: str, phase: str,
+            actions: Dict[str, int]) -> str:
+    """Stable digest of snapshot + plan semantics (R4): re-running the same
+    decision yields the same id; it never depends on call order."""
+    payload = "|".join([
+        skill, str(snapshot_id), ",".join(sorted(actors)), str(goal), phase,
+        ",".join(f"{a}:{v}" for a, v in sorted(actions.items()))])
+    return f"{skill}-{hashlib.sha1(payload.encode()).hexdigest()[:10]}"
 
 
-def enemy_weapon_range(context: Context, enemy_id: str) -> Optional[float]:
-    """Public static data only: the adapter's action contract publishes
-    candidate-center distances per unit type (bridge RACE_RANGES)."""
-    contract = context.snapshot.raw_state.get("action_contract", {})
-    table = contract.get("candidate_center_distance_by_type", {})
-    enemy = context.snapshot.enemies[enemy_id]
-    for key, value in table.items():
-        if key == enemy.type_name or str(enemy.unit_type_id) == str(key):
-            return float(value)
-    return None
+def space_claim(context: Context, actor: str, action: int) -> SpaceClaim:
+    unit = context.snapshot.allies[actor]
+    prediction = context.predict_position(actor, action)
+    return SpaceClaim(actor=actor, position=prediction.position,
+                      window_loops=context.H,
+                      collision_class="air" if unit.is_flying else "ground",
+                      radius=unit.radius)
 
 
-def threats_reaching(context: Context, position, ignore_flying_domain=True) -> List[str]:
-    """Visible enemies whose weapon plausibly reaches ``position``."""
-    result = []
-    for enemy_id, enemy in context.snapshot.enemies.items():
-        relation_range = enemy_weapon_range(context, enemy_id)
-        if relation_range is None:
-            # Unknown range: treat near enemies (<=5) as potential threats.
-            if distance(position, enemy.position) <= 5.0:
-                result.append(enemy_id)
-            continue
-        if distance(position, enemy.position) <= relation_range:
-            result.append(enemy_id)
-    return result
+def move_progress(context: Context, actor: str, action: Optional[int],
+                  target) -> float:
+    """Distance closure toward ``target``, normalized and capped (A3)."""
+    if action is None:
+        return 0.0
+    destinations = context.move_destinations(actor)
+    destination = destinations.get(action)
+    if destination is None:
+        return 0.0
+    unit = context.snapshot.allies[actor]
+    before = distance(unit.position, target)
+    after = distance(destination, target)
+    return max(min((before - after) / PROGRESS_SCALE, 1.0), -1.0)
+
+
+PROGRESS_SCALE = 2.0
 
 
 def best_move_toward(context: Context, actor: str, target) -> Optional[int]:
@@ -52,34 +55,25 @@ def best_move_toward(context: Context, actor: str, target) -> Optional[int]:
 
 
 def best_move_away(context: Context, actor: str, threats: List[str]) -> Optional[int]:
-    """Legal move maximizing min distance to visible threats, preferring
-    destinations that also move toward the main ally group."""
+    """Legal move minimizing the risk AT THE PREDICTED position — the same
+    risk standard as the evaluator (R3), never 'max distance from nearest'."""
     destinations = context.move_destinations(actor)
-    if not destinations or not threats:
+    if not destinations:
         return None
-    allies = [u.position for u in context.snapshot.allies.values()
-              if u.actor != actor and u.alive]
-    def score(action):
-        destination = destinations[action]
-        threat_distance = min(distance(destination, context.snapshot.enemies[e].position)
-                              for e in threats)
-        support = (min(distance(destination, p) for p in allies) if allies else 0.0)
-        return (-round(threat_distance, 3), round(support, 3), action)
-    return min(sorted(destinations), key=score)
-
-
-def move_progress(context: Context, actor: str, action: Optional[int],
-                  target) -> float:
-    if action is None:
-        return 0.0
-    destinations = context.move_destinations(actor)
-    destination = destinations.get(action)
-    if destination is None:
-        return 0.0
     unit = context.snapshot.allies[actor]
-    before = distance(unit.position, target)
-    after = distance(destination, target)
-    return before - after
+    allies = [u.position for a, u in sorted(context.snapshot.allies.items())
+              if a != actor and u.alive]
+
+    def score(action):
+        prediction = context.predict_position(actor, action)
+        risk = context.risk_at(actor, prediction.position)
+        support = (min(distance(prediction.position, p) for p in allies)
+                   if allies else 0.0)
+        return (len(risk.threats), -round(distance(prediction.position,
+                                                  unit.position), 3),
+                round(support, 3), action)
+
+    return min(sorted(destinations), key=score)
 
 
 def make_plan(primary_skill: str, actors, goal: str, actions: Dict[str, int],
@@ -88,13 +82,32 @@ def make_plan(primary_skill: str, actors, goal: str, actions: Dict[str, int],
               snapshot_id: int, fingerprint: str,
               provider: Optional[str] = None, instance_id: Optional[str] = None,
               beneficiaries=(), dependencies=(), memory_delta=None,
-              rationale: str = "") -> CandidatePlan:
+              atomic: bool = False, rationale: str = "") -> CandidatePlan:
+    named = {k: float(v) for k, v in features.items()}
+    if set(named) - {"progress", "hold_value", "switch_cost", "reentry_cost",
+                     "urgency"}:
+        raise ValueError(
+            f"unnamed feature channel in {primary_skill}: "
+            f"{sorted(set(named) - {'progress', 'hold_value', 'switch_cost', 'reentry_cost', 'urgency'})}")
     return CandidatePlan(
-        proposal_id=next_plan_id(primary_skill), snapshot_id=snapshot_id,
-        config_fingerprint=fingerprint, primary_skill=primary_skill,
-        specialization_provider=provider, instance_id=instance_id,
-        controlled_actors=tuple(sorted(actions)), beneficiaries=tuple(beneficiaries),
-        goal=goal, current_actions=dict(actions), expected_effects=effects,
-        claims=claims, dependencies=tuple(dependencies), commitment=commitment,
-        features=dict(features), proposed_memory_delta=memory_delta or {},
-        rationale=rationale)
+        proposal_id=plan_id(primary_skill, snapshot_id, actors, goal,
+                            commitment.phase, actions),
+        snapshot_id=snapshot_id, config_fingerprint=fingerprint,
+        primary_skill=primary_skill, specialization_provider=provider,
+        instance_id=instance_id, controlled_actors=tuple(sorted(actions)),
+        beneficiaries=tuple(beneficiaries), goal=goal,
+        current_actions=dict(actions), expected_effects=effects, claims=claims,
+        dependencies=tuple(dependencies), commitment=commitment,
+        features=named, proposed_memory_delta=memory_delta or {},
+        atomic=atomic, rationale=rationale)
+
+
+def h_loops(context: Context, multiple: float) -> int:
+    """Convert an H-multiple lifecycle budget into game loops (2.3)."""
+    return int(round(context.H * multiple))
+
+
+def no_progress(context: Context, memory, actor: str, window_h: float) -> bool:
+    instance = memory.displacement(actor, h_loops(context, window_h),
+                                   context.snapshot)
+    return instance < 0.5

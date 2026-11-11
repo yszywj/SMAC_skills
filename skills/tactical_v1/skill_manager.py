@@ -1,64 +1,47 @@
-"""tactical_v1 manager facade.
+"""tactical_v1 manager facade (runner contract unchanged).
 
-Implements the exact interface the adapter runner calls:
-    __init__(**manager_kwargs), reset(), select(skill, posture=...),
-    step(payload, n_agents) -> (actions, telemetry),
-    commit_final_actions(actions), stats, active.
-
-One submission per unit per environment step; a repeated step() at the same
-game loop returns the cached result without consuming budget or advancing
-any instance.
+step(payload, n_agents) -> (actions, telemetry); commit_final_actions(actions)
+commits memory ONLY for plans whose final actions survived untouched. The
+step cache is keyed by the decision-relevant content (state + legal menus +
+n_agents + config); repeated identical calls return safe copies and never
+double-count observation history.
 """
+import copy
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 _HERE = Path(__file__).resolve()
 _WORKSPACE = _HERE.parents[2]
-import sys
 if str(_WORKSPACE) not in sys.path:  # reuse of skills/current pure helpers
     sys.path.insert(0, str(_WORKSPACE))
 
-from .context import build_snapshot, Context, DEAD_NOOP
+from . import config as config_module
+from .context import build_snapshot, Context
 from .coordinator import Coordinator
 from .evaluator import Evaluator
 from .memory import TacticalMemory
 from .registry import build_skills, GENERIC, SPECIALIZED
 from .telemetry import Telemetry
 
-DEFAULTS_PATH = _HERE.parent / "defaults.json"
 
-
-def _state_digest(payload: Dict) -> str:
-    import json as _json
-    return hashlib.sha256(_json.dumps(
-        payload.get("state", {}), sort_keys=True, default=str).encode()).hexdigest()[:16]
-
-
-def load_config(path: Optional[str] = None) -> Dict[str, Any]:
-    with open(DEFAULTS_PATH, encoding="utf-8") as handle:
-        config = json.load(handle)
-    if path:
-        override = json.loads(Path(path).read_text(encoding="utf-8"))
-        _deep_merge(config, override)
-    return config
-
-
-def _deep_merge(base: Dict, override: Dict) -> None:
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            _deep_merge(base[key], value)
-        else:
-            base[key] = value
+def _digest(payload: Dict, n_agents: int, fingerprint: str) -> str:
+    material = json.dumps(
+        {"state": payload.get("state", {}),
+         "questions": payload.get("questions", {}),
+         "n_agents": n_agents, "fingerprint": fingerprint},
+        sort_keys=True, default=str)
+    return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
 def config_fingerprint(config: Dict[str, Any]) -> str:
-    """Covers the whole package source (recursive), the shared reused code
-    and the effective configuration."""
+    """Whole package source (recursive, tests excluded) + the actually
+    reused shared modules + the effective configuration."""
     parts = []
-    for path in sorted((_HERE.parent).rglob("*.py")):
-        if "tests" in path.parts:
+    for path in sorted(_HERE.parent.rglob("*.py")):
+        if "tests" in path.parts or "__pycache__" in path.parts:
             continue
         parts.append(path.read_bytes())
     shared = _WORKSPACE / "skills/current/skills"
@@ -73,28 +56,31 @@ def config_fingerprint(config: Dict[str, Any]) -> str:
 class SkillManager:
     def __init__(self, max_steps: int = 4, posture: str = "balanced",
                  tactical_config: Optional[str] = None, **compat):
-        # Explicit compatibility surface: unknown kwargs are NOT silently
-        # behaviour-changing; they are recorded. The runner never passes the
-        # ones below to tactical_v1 today (they are rejected at the arg
-        # resolver); programmatic callers may pass None-valued legacy fields.
+        # Explicit compatibility surface: unknown kwargs are recorded, never
+        # silently behaviour-changing. The arg resolver rejects the legacy
+        # flag surface for tactical_v1 before we ever get here.
         self.compatibility_notes = {k: v for k, v in compat.items()}
-        self.config = load_config(tactical_config)
+        self.config = config_module.load(tactical_config)
         self.config["_fingerprint"] = config_fingerprint(self.config)
         self.posture = posture
         self.skills = build_skills(self.config)
-        self.evaluator = Evaluator(self.config.get("weights"))
+        self.evaluator = Evaluator(
+            self.config.get("weights"),
+            coverage_radius=self.config.get("splash_fire", {}).get(
+                "coverage_radius", 3.0))
         self.coordinator = Coordinator(self.config, self.evaluator)
+        lifecycle = self.config.get("lifecycle", {})
         self.memory = TacticalMemory(
-            observation_ttl_loops=int(
-                self.config.get("memory", {}).get("observation_ttl_loops", 240)))
-        self.telemetry = Telemetry(
-            top_k_candidates=int(self.config.get("telemetry", {}).get(
-                "top_k_candidates", 3)))
+            observation_ttl_loops=int(lifecycle.get("observation_ttl_loops", 240)),
+            search_revisit_cooldown_loops=int(
+                lifecycle.get("search_revisit_cooldown_loops", 160)))
+        self.telemetry = Telemetry(top_k_candidates=int(
+            self.config.get("telemetry", {}).get("top_k_candidates", 3)))
         self._snapshot_counter = 0
-        self._cache = None           # (game_loop, episode, actions, summary, plans)
+        self._cache = None           # (digest, actions, summary, plans, snapshot)
         self._pending_commit = None
         self.stats = {"steps": 0, "episodes": 0, "search_budget_events": 0,
-                      "repairs": 0, "fallback_units": 0}
+                      "repairs": 0, "baseline_units": 0}
         self.current_skill = "tactical_v1"
         self.reset()  # construction resets like the current manager does
 
@@ -104,7 +90,9 @@ class SkillManager:
         return True  # the joint controller is always the acting policy
 
     def reset(self) -> None:
-        self.memory.reset()
+        self.memory = TacticalMemory(
+            observation_ttl_loops=self.memory.observation_ttl_loops,
+            search_revisit_cooldown_loops=self.memory.search_revisit_cooldown_loops)
         self.telemetry = Telemetry(top_k_candidates=self.telemetry.top_k)
         self._snapshot_counter = 0
         self._cache = None
@@ -112,73 +100,41 @@ class SkillManager:
 
     def select(self, skill: Optional[str] = None, priority_target=None,
                posture: Optional[str] = None) -> None:
-        """Accepted for interface compatibility. The joint coordinator does
-        not hand control to one exclusive skill; posture is recorded."""
+        """Accepted for interface compatibility. The joint coordinator never
+        hands exclusive control to one skill; posture is recorded."""
         if posture:
             self.posture = posture
 
     def step(self, payload: Dict, n_agents: int):
-        snapshot = build_snapshot(payload, self._snapshot_counter + 1)
+        digest = _digest(payload, n_agents, self.config["_fingerprint"])
         cached = self._cache
-        if cached is not None and cached[0] == snapshot.game_loop \
-                and cached[1] == snapshot.episode \
-                and cached[4] == _state_digest(payload):
-            # Same clock AND same observed state: idempotent re-read, no
-            # budget or phase advance.
-            return cached[2], dict(cached[3])
+        if cached is not None and cached[0] == digest:
+            # Same decision content: idempotent re-read, safe copies, no
+            # observation-history appends, no budget advance.
+            return list(cached[1]), copy.deepcopy(cached[2])
+        snapshot = build_snapshot(payload, self._snapshot_counter + 1)
         self._snapshot_counter += 1
-        fresh = self.memory.begin_step(snapshot)
+        self.memory.begin_step(snapshot)
         context = Context(snapshot)
+        risk_now = {a: len(context.risk_at(a, snapshot.allies[a].position).threats)
+                    for a in snapshot.allies if snapshot.allies[a].alive}
         self.memory.retire_invalid(snapshot)
-        self.memory.observe(snapshot)
+        self.memory.observe(snapshot, risk_now)
         actions, summary, plans = self.coordinator.decide(
             context, self.skills, self.memory, self.telemetry, n_agents)
         self.stats["steps"] += 1
         self.stats["search_budget_events"] = self.telemetry.search_budget_events
-        self._cache = (snapshot.game_loop, snapshot.episode, actions, summary,
-                       _state_digest(payload), plans, context)
-        self._pending_commit = (snapshot, plans, actions)
-        return actions, summary
+        self._cache = (digest, list(actions), copy.deepcopy(summary), plans,
+                       snapshot)
+        self._pending_commit = (snapshot, plans, list(actions), risk_now)
+        return list(actions), copy.deepcopy(summary)
 
     def commit_final_actions(self, final_actions: List[int]) -> None:
-        """The runner validated the submitted list; commit memory deltas NOW,
-        once, for the executed plan only."""
+        """Commit memory for exactly the plans whose actions survived."""
         pending = self._pending_commit
         self._pending_commit = None
         if pending is None:
             return
-        snapshot, plans, actions = pending
+        snapshot, plans, actions, risk_now = pending
         actions_by_actor = {f"u{i}": a for i, a in enumerate(final_actions)}
-        deltas: List[Dict[str, Any]] = []
-        for plan in plans:
-            delta = dict(plan.proposed_memory_delta)
-            if delta:
-                deltas.append(delta)
-            actors = list(plan.controlled_actors)
-            if plan.instance_id:
-                deltas.append({"kind": "advance", "instance_id": plan.instance_id,
-                               "phase": plan.commitment.phase,
-                               "progress": True, "goal": plan.goal})
-            elif plan.commitment.max_steps is not None or plan.commitment.min_steps:
-                deltas.append({"kind": "create",
-                               "skill": plan.primary_skill,
-                               "actors": actors,
-                               "goal": plan.goal,
-                               "phase": plan.commitment.phase,
-                               "max_steps": plan.commitment.max_steps,
-                               "min_steps": plan.commitment.min_steps,
-                               "extra": {"provider": plan.specialization_provider}})
-        # Commit-time instance retirement: actors whose selected skill changed
-        # away from a held instance release it (e.g. disengage -> re-enter).
-        selected_skill = {p.primary_skill: None for p in plans}
-        for plan in plans:
-            for actor in plan.controlled_actors:
-                selected_skill[actor] = plan.primary_skill
-        for instance in list(self.memory.instances.values()):
-            for actor in instance.actors:
-                chosen = selected_skill.get(actor)
-                if chosen is not None and chosen != instance.skill:
-                    deltas.append({"kind": "drop",
-                                   "instance_id": instance.instance_id})
-                    break
-        self.memory.commit(snapshot, actions_by_actor, deltas)
+        self.memory.commit(snapshot, actions_by_actor, plans, risk_now)

@@ -1,171 +1,207 @@
-"""G1 FocusFire: joint fire allocation.
+"""G1 FocusFire: ordinary fire allocation and joint interception.
 
-Reuses the shared calibrated damage model through Context.expected_damage.
-Supports grouped multi-target allocation and an atomic joint-kill candidate
-(P4.2) for urgent high-risk targets (e.g. an approaching enemy Baneling).
-For splash units the S1 provider replaces the target value/impact model.
+Reuses the shared fire/contact queries; the S1 provider (registry-injected,
+respecting its real enabled state) replaces only the impact model for
+splash units. Candidate retention keeps: the still-valid original target,
+kill-completable targets, high-threat targets and nearby effective targets
+— deduped, capped per unit, never "first three by lowest HP".
 """
 from typing import Dict, List, Optional
 
-from ..context import Context
-from ..contracts import CALIBRATED, CandidatePlan, Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from ..ledger import Ledger
-from . import splash_fire as splash_provider
+from ..context import Context, IN_RANGE
+from ..contracts import (CALIBRATED, Commitment, Dependency, EffectClaim,
+                         HEURISTIC, ResourceClaims)
+from .common import h_loops, make_plan, space_claim
 
 
 class FocusFireSkill:
     name = "focus_fire"
 
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, providers: Optional[Dict] = None):
         self.config = config
         params = config.get("focus_fire", {})
-        self.kill_window_loops = params.get("kill_window_loops", 24)
-        self.joint_kill_max_attackers = params.get("joint_kill_max_attackers", 5)
-        self.urgent_targets = params.get("urgent_enemy_types", ["baneling"])
-        # The S1 mechanism provider replaces this skill's target-value and
-        # impact model for splash units (coverage matrix, P3).
-        self.splash = splash_provider.SplashFireSkill(config)
-        self.risk_critical_fraction = params.get(
-            "risk_critical_fraction",
-            config.get("disengage_reenter", {}).get(
-                "critical_health_fraction", 0.35))
-        self.risk_min_cooldown = params.get(
-            "risk_min_cooldown",
-            config.get("combat_reposition", {}).get("min_window_loops", 8))
-        self.risk_loss_per_threat = params.get("risk_loss_per_threat", 0.45)
+        self.kill_window_h = params.get("kill_window_h", 3.0)
+        self.joint_kill_max_members = params.get("joint_kill_max_members", 5)
+        self.urgency_value = params.get("urgency_value", 0.5)
+        self.max_candidates = config.get("search", {}).get(
+            "max_candidates_per_unit", 6)
+        self.urgent_types = ["baneling"]
+        # Registry-injected providers (R5): a disabled S1 is simply absent.
+        self.providers = providers or {}
 
-    def _target_value(self, context: Context, actor: str, enemy_id: str) -> float:
-        enemy = context.snapshot.enemies[enemy_id]
-        if context.capabilities.get(actor) is not None and \
-                context.capabilities[actor].specialization == "splash_fire":
-            return self.splash.target_value(context, actor, enemy_id)
-        # Lower effective health is better; distance breaks ties toward focus.
-        return max(enemy.effective_health, 1.0)
-
+    # -- impact model -------------------------------------------------------
     def _impact(self, context: Context, actor: str, enemy_id: str
                 ) -> List[EffectClaim]:
-        enemy = context.snapshot.enemies[enemy_id]
+        provider = self.providers.get("splash_fire")
         capability = context.capabilities[actor]
-        if capability.specialization == "splash_fire":
-            return self.splash.impact_claims(context, actor, enemy_id)
-        amount, evidence, confidence = context.expected_damage(actor, enemy_id)
-        window = max(int(context.snapshot.step_mul), 1)
-        if amount <= 0:
-            # Unknown damage: no fabricated number; tiny positional credit only.
-            return [EffectClaim("damage", enemy_id, 0.0, window, HEURISTIC,
-                                "damage_model_unknown", 0.0)]
-        return [EffectClaim("damage", enemy_id, amount, window, evidence,
-                            "shared_damage_model_single_attack", confidence)]
+        if capability.specialization == "splash_fire" and provider is not None:
+            return provider.impact_claims(context, actor, enemy_id)
+        estimate = context.fire_estimate(actor, enemy_id)
+        window = max(context.H, 1)
+        if estimate.window_shots >= 1 and estimate.damage_est is not None:
+            return [EffectClaim("damage", enemy_id, estimate.damage_est, window,
+                                estimate.evidence,
+                                "shared_damage_model_window_shot",
+                                lower=estimate.damage_lo, upper=estimate.damage_hi)]
+        # Command is legal but no window-qualified damage (cooldown/range):
+        # an approach/keep opportunity only, never a fabricated amount.
+        return [EffectClaim("damage", enemy_id, None, window, HEURISTIC,
+                            "attack_command_without_window_damage")]
+
+    def _window_damage(self, context: Context, actor: str, enemy_id: str) -> float:
+        for effect in self._impact(context, actor, enemy_id):
+            if effect.kind == "damage" and effect.target == enemy_id \
+                    and effect.amount is not None:
+                return effect.amount
+        return 0.0
+
+    # -- target ordering ----------------------------------------------------
+    def _target_value(self, context: Context, actor: str, enemy_id: str) -> float:
+        """Lower is better: contact feasibility, real threat, kill cost."""
+        enemy = context.snapshot.enemies[enemy_id]
+        contact = context.contact_status(actor, enemy_id)
+        feasibility = {"in_range": 0.0, "unknown": 1.0,
+                       "out_of_range": 2.0}[contact]
+        threats_us = sum(1 for a in context.snapshot.allies
+                         if enemy_id in context.threats_to(a))
+        damage = self._window_damage(context, actor, enemy_id)
+        kill_cost = enemy.effective_health / max(damage, 1.0)
+        return feasibility - 0.5 * min(threats_us, 3) + 0.1 * min(kill_cost, 10)
 
     def propose(self, context: Context, memory, telemetry,
-                ledger: Optional[Ledger] = None) -> List[CandidatePlan]:
+                ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
-        plans: List[CandidatePlan] = []
+        plans: List = []
         attackers: Dict[str, List[str]] = {}
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive:
                 continue
             capability = context.capabilities[actor]
             if capability.healer or capability.suicide_attack:
-                continue  # S2/S3 own these units
-            targets = context.attackable_enemies(actor)
-            if targets:
-                attackers[actor] = targets
-            telemetry.count(self.name, "applicable")
-        # -- atomic joint-kill candidate on an urgent target (P4.2) -------
-        for enemy_id, enemy in sorted(context.snapshot.enemies.items()):
-            if enemy.type_name not in self.urgent_targets:
-                continue
-            members: Dict[str, int] = {}
-            effects: List[EffectClaim] = []
-            fire: List[tuple] = []
-            already = (ledger.fire_on(enemy_id) if ledger else 0.0)
-            for actor in sorted(attackers):
-                if len(members) >= self.joint_kill_max_attackers:
-                    break
+                continue                      # S2 / S3 own these units
+            issuable = [e for e in sorted(context.snapshot.enemies)
+                        if context.can_issue_attack(actor, e)]
+            if issuable:
+                attackers[actor] = issuable
+                telemetry.count(self.name, "applicable")
+        # ---- per-attacker candidate set (diverse retention, dedup, cap) ----
+        for actor, issuable in sorted(attackers.items()):
+            original = self._original_target(context, memory, actor)
+            killable = [e for e in issuable
+                        if self._window_damage(context, actor, e)
+                        >= context.snapshot.enemies[e].effective_health]
+            high_threat = [e for e in issuable
+                           if any(e in context.threats_to(a)
+                                  for a in context.snapshot.allies)]
+            nearby = sorted(issuable, key=lambda e: (
+                context.snapshot.relations[actor][e].distance, e))
+            ordered: List[str] = []
+            for group in (killable, original and [original], high_threat, nearby):
+                for enemy_id in group or []:
+                    if enemy_id and enemy_id not in ordered:
+                        ordered.append(enemy_id)
+            for enemy_id in ordered[:self.max_candidates]:
                 action = context.attack_action(actor, enemy_id)
                 if action is None:
                     continue
-                members[actor] = action
-                effects.extend(self._impact(context, actor, enemy_id))
-                amount, _, _ = context.expected_damage(actor, enemy_id)
-                if amount <= 0:  # window estimate for unknown damage
-                    amount = 0.0
-                fire.append((enemy_id, amount))
-            if len(members) >= 2 and sum(a for _, a in fire) + already \
-                    >= enemy.effective_health * 0.9:
-                plans.append(_joint_plan(context, fingerprint, self.name,
-                                         members, enemy_id, effects, fire))
-        # -- per-attacker single-shot candidates ---------------------------
-        for actor, targets in sorted(attackers.items()):
-            provider = ("splash_fire"
-                        if context.capabilities[actor].specialization == "splash_fire"
-                        else None)
-            scored = []
-            for enemy_id in targets:
-                value = self._target_value(context, actor, enemy_id)
+                amount = self._window_damage(context, actor, enemy_id)
                 effects = self._impact(context, actor, enemy_id)
-                scored.append((value, -context.distance(actor, enemy_id),
-                               enemy_id, effects))
-            scored.sort()
-            for value, neg_distance, enemy_id, effects in scored[:3]:
-                action = context.attack_action(actor, enemy_id)
-                amount = next((e.amount for e in effects
-                               if e.kind == "damage" and e.target == enemy_id), 0.0)
-                effects = list(effects)
-                # Continued-exposure risk: an attack plan for a critical unit
-                # that is taking fire carries an expected-loss estimate. This
-                # is a heuristic probability proxy, never a certain outcome,
-                # and it COMPETES with damage instead of overriding it.
-                unit = context.snapshot.allies[actor]
-                threats = context.threats_to(actor)
-                if (unit.health_fraction <= self.risk_critical_fraction
-                        and threats
-                        and unit.weapon_cooldown_loops >= self.risk_min_cooldown):
-                    effects.append(EffectClaim(
-                        "loss", actor,
-                        self.risk_loss_per_threat * len(threats) * unit.max_health,
-                        max(context.snapshot.step_mul, 1), HEURISTIC,
-                        "continued_exposure_while_critical", 0.7))
-                features = {"raw_bonus": 0.0}
-                # A verified-legal attack with no calibrated damage estimate
-                # still carries intent value (never a fabricated amount).
-                features["attack_intent"] = 1.0 if amount <= 0 else 0.0
-                if provider:
-                    features["raw_bonus"] = self.splash.coverage_bonus(
-                        context, actor, enemy_id)
-                plans.append(_attack_plan(context, fingerprint, self.name,
-                                          actor, action, enemy_id, effects, amount,
-                                          provider=provider, features=features))
+                capability = context.capabilities[actor]
+                provider = ("splash_fire"
+                            if capability.specialization == "splash_fire"
+                            and self.providers.get("splash_fire") else None)
+                instance = memory.instance_for(self.name, actor)
+                switch = 0.0
+                if instance and instance.goal and instance.goal != enemy_id:
+                    switch = 0.3     # bounded target-switch cost, not distance faking
+                plans.append(make_plan(
+                    self.name, {actor: action}, enemy_id, {actor: action},
+                    effects,
+                    ResourceClaims(controls=(actor,),
+                                   fire=((enemy_id, amount),) if amount else ()),
+                    Commitment("attacking", min_loops=0),
+                    {"switch_cost": switch, "urgency": (
+                        self.urgency_value if enemy_id in high_threat else 0.0)},
+                    snapshot_id, fingerprint, provider=provider,
+                    instance_id=instance.instance_id if instance else None,
+                    memory_delta=({"kind": "create", "skill": self.name,
+                                   "actors": [actor], "goal": enemy_id,
+                                   "phase": "attacking"}
+                                  if instance is None else None),
+                    rationale=f"attack {enemy_id}"))
+        # ---- atomic joint interception on urgent targets (P4.2) ----------
+        plans.extend(self._joint_interceptions(
+            context, memory, telemetry, attackers, fingerprint, snapshot_id))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
 
+    def _original_target(self, context: Context, memory, actor: str) -> Optional[str]:
+        instance = memory.instance_for(self.name, actor)
+        if instance and instance.goal.startswith("e") \
+                and instance.goal in context.snapshot.enemies \
+                and context.can_issue_attack(actor, instance.goal):
+            return instance.goal
+        return None
 
-def _attack_plan(context, fingerprint, skill, actor, action, enemy_id, effects,
-                 amount, provider=None, features=None) -> CandidatePlan:
-    from .common import make_plan
-    plan_features = {"switch_cost": 0.0, "raw_bonus": 0.0}
-    plan_features.update(features or {})
-    return make_plan(
-        skill, {actor: action}, enemy_id, {actor: action}, effects,
-        ResourceClaims(controls=(actor,), fire=((enemy_id, amount),)),
-        Commitment("attacking", min_steps=0, max_steps=None),
-        plan_features,
-        context.snapshot.snapshot_id, fingerprint, provider=provider,
-        rationale=f"attack {enemy_id}")
-
-
-def _joint_plan(context, fingerprint, skill, members, enemy_id, effects,
-                fire) -> CandidatePlan:
-    from .common import make_plan
-    return make_plan(
-        skill, dict(members), enemy_id, dict(members), effects,
-        ResourceClaims(controls=tuple(sorted(members)), fire=tuple(fire)),
-        Commitment("joint_kill", min_steps=1, max_steps=4,
-                   interrupt_on=("target_lost", "illegal", "member_withdrawn",
-                                 "danger_change")),
-        {"raw_bonus": 1.0, "attack_intent": 1.0},  # urgency + verified intent
-        context.snapshot.snapshot_id, fingerprint,
-        dependencies=tuple(f"member_ready:{a}" for a in sorted(members)),
-        rationale=f"joint kill {enemy_id} with {len(members)} attackers")
+    def _joint_interceptions(self, context, memory, telemetry, attackers,
+                             fingerprint, snapshot_id) -> List:
+        plans: List = []
+        budget_h = self.kill_window_h
+        max_atomic = self.config.get("search", {}).get(
+            "max_atomic_candidates", 12)
+        produced = 0
+        for enemy_id, enemy in sorted(context.snapshot.enemies.items()):
+            if enemy.type_name not in self.urgent_types:
+                continue
+            # member pool ranked by window-qualified damage then fire delay
+            pool = []
+            for actor in sorted(attackers):
+                if not context.can_issue_attack(actor, enemy_id):
+                    continue
+                estimate = context.fire_estimate(actor, enemy_id)
+                if estimate.window_shots < 1:
+                    continue
+                damage = (context.fire_estimate(actor, enemy_id).damage_est
+                          or self._window_damage(context, actor, enemy_id))
+                if not damage:
+                    continue
+                delay = estimate.effective_after_loops or 0
+                pool.append((-damage, delay, actor, damage))
+            pool.sort()
+            # minimal sufficient member sets, few distinct combinations
+            cumulative, members, effects, fire = 0.0, {}, [], []
+            for neg_damage, delay, actor, damage in pool:
+                if len(members) >= self.joint_kill_max_members:
+                    break
+                action = context.attack_action(actor, enemy_id)
+                members[actor] = action
+                effects.extend(self._impact(context, actor, enemy_id))
+                fire.append((enemy_id, damage))
+                cumulative += damage
+                # emit this prefix as one atomic candidate when the
+                # CONSERVATIVE total covers the target's effective health
+                # inside the window; feasibility is "attempted", never
+                # guaranteed interception (arrival times unverified).
+                if cumulative >= enemy.effective_health \
+                        and len(members) >= 2 and produced < max_atomic:
+                    produced += 1
+                    plans.append(make_plan(
+                        self.name, dict(members), enemy_id, dict(members),
+                        effects,
+                        ResourceClaims(controls=tuple(sorted(members)),
+                                       fire=tuple(fire)),
+                        Commitment("intercepting", min_loops=0,
+                                   max_loops=h_loops(context, budget_h),
+                                   interrupt_on=("target_lost", "illegal",
+                                                 "member_withdrawn",
+                                                 "danger_change")),
+                        {"urgency": self.urgency_value},
+                        snapshot_id, fingerprint, atomic=True,
+                        dependencies=(Dependency("member", tuple(sorted(members))),
+                                     Dependency("target_valid", (enemy_id,)),
+                                     Dependency("fire_window", (enemy_id,))),
+                        rationale=f"attempted joint interception of {enemy_id} "
+                                  f"with {len(members)} attackers"))
+                    break   # minimal sufficient set: stop adding members
+        return plans

@@ -1,18 +1,20 @@
-"""Step telemetry and per-skill usage statistics (P5.2)."""
+"""Step telemetry and per-skill usage statistics (A5: concise)."""
 from typing import Any, Dict, List, Optional
 
 SKILL_NAMES = ("focus_fire", "coordinated_engage", "combat_reposition",
                "disengage_reenter", "regroup", "local_formation",
                "cohesive_search", "splash_fire", "heal_support", "burst_engage")
 
+USAGE_COUNTERS = ("applicable", "proposed", "selected", "continued", "exited")
+
 
 class Telemetry:
-    def __init__(self, top_k_candidates: int = 3):
+    def __init__(self, top_k_candidates: int = 3, debug: bool = False):
         self.top_k = top_k_candidates
+        self.debug = debug
         self.usage: Dict[str, Dict[str, int]] = {
-            skill: {"applicable": 0, "proposed": 0, "selected": 0,
-                    "continued": 0, "exited": 0}
-            for skill in (*SKILL_NAMES, "fallback")}
+            skill: {counter: 0 for counter in USAGE_COUNTERS}
+            for skill in (*SKILL_NAMES, "baseline")}
         self.specialization_stats: Dict[str, Dict[str, int]] = {
             "splash_fire": {"providers_active": 0, "plans_selected": 0},
             "heal_support": {"providers_active": 0, "plans_selected": 0},
@@ -21,7 +23,7 @@ class Telemetry:
         self.search_budget_events = 0
 
     def count(self, skill: str, counter: str, amount: int = 1) -> None:
-        if skill in self.usage:
+        if skill in self.usage and counter in self.usage[skill]:
             self.usage[skill][counter] += amount
 
     def log(self, event: str, **fields: Any) -> None:
@@ -43,12 +45,16 @@ class Telemetry:
             "chosen_plans": [
                 {"id": p.get("id"), "skill": p.get("skill"),
                  "provider": p.get("provider"), "actors": p.get("actors"),
-                 "goal": p.get("goal"), "score": round(p.get("score", 0.0), 4),
+                 "goal": p.get("goal"),
+                 "score": p.get("score"),   # joint plan score
                  "rationale": p.get("rationale")}
-                for p in chosen[:self.top_k * 3]],
-            "top_alternates": alternates[:self.top_k],
+                for p in chosen],
+            "top_alternates": [
+                {"id": p.get("id"), "skill": p.get("skill"),
+                 "rationale": p.get("rationale")}
+                for p in alternates[:self.top_k]],
             "repairs": repairs,
-            "events": self.events[-20:],
+            "events": self.events[-20:] if self.debug else [],
             "search_budget_events": self.search_budget_events,
             "duration_ms": round(duration_ms, 3),
         }
