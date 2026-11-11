@@ -144,7 +144,7 @@ async def evaluate(args, manifest, method, output):
         raise ValueError("--race-profile must match the manifest's race")
     skill_version = skill_config["version"] if is_skill else None
     value_metadata = skill_config["value_metadata"] if is_skill else {}
-    combat_params = skill_config["manager_kwargs"]["combat_params"] if is_skill else {}
+    combat_params = skill_config["manager_kwargs"].get("combat_params", {}) if is_skill else {}
     action_extensions = validate_keep_heal_order(args, method, manifest['env_args'])
     native_control = getattr(args, "native_teacher_control", "off")
     if native_control != "off":
@@ -629,7 +629,11 @@ def parser():
         command.add_argument("--skill-mode", choices=("off", "always"), default=None,
                              help="Optional consistency check; adaptive-skill uses always, other methods off")
         command.add_argument("--skill-version", choices=tuple(SOURCES), default="current",
-                             help="Skill implementation; baseline_v2_70pct requires its original fixed preset")
+                             help="Skill implementation; baseline_v2_70pct requires its original fixed preset; "
+                                  "tactical_v1 is the joint 7-generic+3-specialized Adaptive controller")
+        command.add_argument("--tactical-config", type=Path, default=None,
+                             help="tactical_v1 only: strict-JSON override of skills/tactical_v1/defaults.json "
+                                  "(per-skill ablation switches, budgets, scoring weights)")
         command.add_argument("--race-profile", choices=("off", "terran", "zerg"), default="off",
                              help="Opt-in race-specific adaptive combat; current skills only")
         command.add_argument('--local-policy', type=Path, default=None,

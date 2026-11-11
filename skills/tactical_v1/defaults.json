@@ -1,0 +1,92 @@
+{
+  "enabled": {
+    "focus_fire": true,
+    "coordinated_engage": true,
+    "combat_reposition": true,
+    "disengage_reenter": true,
+    "regroup": true,
+    "local_formation": true,
+    "cohesive_search": true,
+    "splash_fire": true,
+    "heal_support": true,
+    "burst_engage": true
+  },
+  "weights": {
+    "damage": 1.0,
+    "kill": 6.0,
+    "heal": 0.9,
+    "position_progress": 0.35,
+    "exposure_relief": 0.5,
+    "exposure_cost": 0.45,
+    "expected_loss": 0.8,
+    "move_opportunity_cost": 0.3,
+    "switch_cost": 0.25,
+    "commitment_break_cost": 0.4,
+    "suicide_cost": 1.2,
+    "support_follow": 0.2,
+    "attack_intent": 0.3,
+    "overkill_credit": 0.25
+  },
+  "search": {
+    "beam_width": 16,
+    "max_expansions": 400,
+    "repair_rounds": 2
+  },
+  "focus_fire": {
+    "kill_window_loops": 24,
+    "joint_kill_max_attackers": 5,
+    "urgent_enemy_types": ["baneling"]
+  },
+  "coordinated_engage": {
+    "slot_spacing": 1.4,
+    "wait_max_steps": 3,
+    "max_approach_steps": 60
+  },
+  "combat_reposition": {
+    "retreat_health_fraction": 0.5,
+    "min_window_loops": 8,
+    "max_retreat_steps": 8
+  },
+  "disengage_reenter": {
+    "critical_health_fraction": 0.35,
+    "reenter_health_fraction": 0.6,
+    "max_retreat_steps": 10,
+    "max_stabilize_steps": 20
+  },
+  "regroup": {
+    "support_radius": 8.0,
+    "max_wait_steps": 8
+  },
+  "local_formation": {
+    "spread_radius": 3.5,
+    "min_pair_distance": 1.2
+  },
+  "cohesive_search": {
+    "max_search_steps": 120,
+    "cohesion_radius": 10.0,
+    "waypoint_cell_size": 8.0
+  },
+  "splash_fire": {
+    "coverage_radius": 3.0,
+    "coverage_weight": 0.8,
+    "max_secondary_targets": 4
+  },
+  "heal_support": {
+    "max_heal_per_step": 8.0,
+    "switch_margin": 6.0,
+    "follow_distance": 5.0
+  },
+  "burst_engage": {
+    "proxy_radius": 2.5,
+    "value_per_enemy": 2.0,
+    "min_exchange_value": 2.0,
+    "self_cost": 3.0,
+    "max_approach_steps": 40
+  },
+  "memory": {
+    "observation_ttl_loops": 240
+  },
+  "telemetry": {
+    "top_k_candidates": 3
+  }
+}

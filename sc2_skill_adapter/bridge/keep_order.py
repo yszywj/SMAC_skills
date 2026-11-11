@@ -55,6 +55,16 @@ def action_extension_metadata(action_id):
 def validate_keep_heal_order(args, method, config):
     if not getattr(args, 'terran_keep_heal_order', False):
         return None
+    version = getattr(args, 'skill_version', None)
+    if version == 'tactical_v1':
+        # Same protocol gate, minus the legacy race-profile requirement:
+        # tactical_v1 resolves the Medivac capability from unit data.
+        if (method != 'adaptive-skill' or getattr(args, 'race_profile', 'off') != 'off'
+                or config.get('map_name') != '10gen_terran'
+                or config.get('unit_balance') != 'native'):
+            raise ValueError('--terran-keep-heal-order requires adaptive-skill/'
+                             'tactical_v1/no race profile/terran map/native balance')
+        return action_extension_metadata(6 + config['capability_config']['n_enemies'])
     if (method != 'adaptive-skill' or getattr(args, 'skill_version', None) != 'current'
             or getattr(args, 'race_profile', None) != 'terran'
             or config.get('map_name') != '10gen_terran' or config.get('unit_balance') != 'native'):

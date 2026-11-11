@@ -86,11 +86,15 @@ class SkillVersionTests(unittest.TestCase):
                         super().reset()
 
                 flags = ["--skill-version", version, *LEGACY_FLAGS]
-                if version != "baseline_v2_70pct":
-                    supported = [f for f in NEW_FLAGS if version != "baseline_v6_20261024" or
-                                 f != "--adaptive-approach-progress-guard"]
-                    flags += [*supported, "--unit-value-mode", "contextual",
-                              "--unit-value-spatial-context"]
+                if version == "tactical_v1":
+                    # Joint controller: no legacy combat/unit-value surface.
+                    flags = ["--skill-version", version]
+                else:
+                    if version != "baseline_v2_70pct":
+                        supported = [f for f in NEW_FLAGS if version != "baseline_v6_20261024" or
+                                     f != "--adaptive-approach-progress-guard"]
+                        flags += [*supported, "--unit-value-mode", "contextual",
+                                  "--unit-value-spatial-context"]
                 output = Path(temporary) / "run"
                 args = self.arguments(output, flags)
                 VersionEnv.actions = []
@@ -105,7 +109,8 @@ class SkillVersionTests(unittest.TestCase):
                 load.assert_called_once_with(version)
                 self.assertEqual(len(captured), 1)
                 self.assertEqual(len(resets), 3)  # Construction, then every episode.
-                self.assertEqual(captured[0]["max_steps"], 4)
+                if version != "tactical_v1":
+                    self.assertEqual(captured[0]["max_steps"], 4)
                 self.assertEqual(summary["completed_episodes"], 2)
                 self.assertEqual(summary["status"], "complete")
                 self.assertEqual(summary["jev_requests"], 0)
@@ -148,9 +153,17 @@ class SkillVersionTests(unittest.TestCase):
                         key = "skills/baseline_v2_70pct/" + source["exported_path"]
                         self.assertEqual(hashes[key], source["sha256"])
                 else:
-                    self.assertEqual(captured[0]["unit_value_params"]["mode"], "contextual")
-                    self.assertTrue(all(captured[0]["combat_params"].values()))
-                    self.assertTrue(all(event["engagement_commitment_enabled"] for event in steps))
+                    if version == "tactical_v1":
+                        self.assertEqual(captured[0], {"tactical_config": None})
+                        # The joint controller reports its own telemetry shape.
+                        self.assertTrue(all("skill_usage" in event for event in steps))
+                        self.assertTrue(all(
+                            event["specializations"] for event in steps
+                            if event.get("units")))
+                    else:
+                        self.assertEqual(captured[0]["unit_value_params"]["mode"], "contextual")
+                        self.assertTrue(all(captured[0]["combat_params"].values()))
+                        self.assertTrue(all(event["engagement_commitment_enabled"] for event in steps))
 
     def test_baseline_rejects_unsupported_or_changed_preset_before_output_and_environment(self):
         invalid = [([flag], "does not support") for flag in NEW_FLAGS]

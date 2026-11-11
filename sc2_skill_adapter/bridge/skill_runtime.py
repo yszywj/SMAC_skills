@@ -9,6 +9,7 @@ from .config import WORKSPACE
 SOURCE = WORKSPACE / "skills/current"
 PACKAGE = "_smacv2_portable_jev_skills"
 SOURCES = {"current": SOURCE,
+           "tactical_v1": WORKSPACE / "skills/tactical_v1",
            "baseline_v2_70pct": WORKSPACE / "skills/baseline_v2_70pct",
            "baseline_v6_20261024": WORKSPACE / "skills/baseline_v6_20261024",
            "baseline_v7_20261024": WORKSPACE / "sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current"}
@@ -107,6 +108,61 @@ def unit_value_metadata(parameters):
             "unit_value_semantics": "heuristic tactical importance; not win probability or actual damage"}
 
 
+def _tactical_v1_configuration(args, source):
+    """Explicit argument surface for the tactical_v1 joint controller.
+
+    Old-parameter combinations are either mapped clearly or rejected —
+    never silently ignored. Mechanism specialization follows unit
+    capabilities, so --race-profile is not part of this entry.
+    """
+    race_profile = getattr(args, "race_profile", "off")
+    if race_profile != "off":
+        raise ValueError("tactical_v1 resolves specializations from unit "
+                         "capabilities; --race-profile is not supported here")
+    spatial = spatial_parameters(args)
+    if any(spatial.values()):
+        raise ValueError("tactical_v1 has its own regroup/search/formation "
+                         "skills; the v8 spatial switches are not supported")
+    combat = {key: bool(getattr(args, "adaptive_" + key, False))
+              for key in (*LEGACY_COMBAT_PARAMETERS, *NEW_COMBAT_PARAMETERS)}
+    active = [key for key, value in combat.items() if value]
+    if active:
+        raise ValueError("tactical_v1 does not consume the legacy combat "
+                         "switches: " + ", ".join(sorted(active)))
+    values = unit_value_parameters(args)
+    if values["mode"] != "off":
+        raise ValueError("tactical_v1 uses its own evaluator; --unit-value-mode "
+                         "must stay off")
+    if getattr(args, "pair_mode", "off") != "off":
+        raise ValueError("--pair-mode is not supported by tactical_v1")
+    if getattr(args, "medivac_policy", "legacy") != "legacy":
+        raise ValueError("medical tree modes are not supported by tactical_v1")
+    if getattr(args, "medivac_tree", None) is not None:
+        raise ValueError("--medivac-tree is not supported by tactical_v1")
+    if getattr(args, "skill_tree", None) is not None:
+        raise ValueError("--skill-tree is not supported by tactical_v1")
+    if getattr(args, "native_teacher_control", "off") != "off":
+        raise ValueError("native teacher control is not supported by tactical_v1")
+    config_path = getattr(args, "tactical_config", None)
+    if config_path is not None:
+        import json
+        from pathlib import Path
+        path = Path(config_path)
+        if not path.is_file():
+            raise FileNotFoundError(f"--tactical-config: no such file: {path}")
+        json.loads(path.read_text(encoding="utf-8"))  # strict JSON check
+    manager_kwargs = {"tactical_config": str(config_path) if config_path else None}
+    value_metadata = {"unit_value_mode": "off", "unit_value_version": None,
+                      "unit_value_parameters": None,
+                      "unit_value_semantics": "tactical_v1 built-in rule evaluator"}
+    return {"version": "tactical_v1", "source": str(source),
+            "posture": getattr(args, "adaptive_posture", "balanced"),
+            "skill_tree_policy": None,
+            "manager_kwargs": manager_kwargs, "value_metadata": value_metadata,
+            "pair_mode": "off", "medivac_policy": "legacy",
+            "medical_patient_coordination": True}
+
+
 def manager_configuration(args):
     """Resolve a version before creating output or starting either environment.
 
@@ -118,8 +174,10 @@ def manager_configuration(args):
     race_profile = getattr(args, "race_profile", "off")
     if race_profile not in ("off", "terran", "zerg"):
         raise ValueError("race profile must be off, terran or zerg")
-    if version != "current" and race_profile != "off":
+    if version not in ("current", "tactical_v1") and race_profile != "off":
         raise ValueError("race profiles require --skill-version current")
+    if version == "tactical_v1":
+        return _tactical_v1_configuration(args, source)
     values = unit_value_parameters(args)
     combat = {key: bool(getattr(args, "adaptive_" + key, False))
               for key in (*LEGACY_COMBAT_PARAMETERS, *NEW_COMBAT_PARAMETERS)}
@@ -217,4 +275,9 @@ def source_files(version="current"):
     # Include root-level helpers (notably unit_value.py), as well as allocators.
     # Hashing them does not import their SMAC-Hard environment dependencies.
     source = _source(version)
+    if version == "tactical_v1":
+        # Recursive: the package keeps runtime code in subpackages (skills/).
+        # Offline tests are not runtime inputs and stay out of the fingerprint.
+        return [p for p in sorted(source.rglob("*.py"))
+                if "tests" not in p.parts and "__pycache__" not in p.parts]
     return [*sorted(source.glob("*.py")), *sorted((source / "skills").glob("*.py"))]
