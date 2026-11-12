@@ -97,8 +97,13 @@ class CoordinatedEngageSkill:
             capability = context.capabilities[actor]
             if capability.healer or capability.suicide_attack:
                 continue
-            if memory.retry_blocked(self.name, [actor], "engage",
-                                    context.snapshot.game_loop):
+            # 3.4: a failed engage toward THIS enemy is blocked from
+            # executing again during its cooldown (not just from creating)
+            loop = context.snapshot.game_loop
+            if any(memory.retry_blocked(
+                    *memory.task_retry_key(self.name, [actor], "enemy",
+                                           enemy_id), loop)
+                    for enemy_id in context.snapshot.enemies):
                 continue
             instance = memory.instance_for(self.name, actor)
             attackable = context.attackable_enemies(actor)
@@ -164,7 +169,9 @@ class CoordinatedEngageSkill:
                     instance_id=instance.instance_id if instance else None,
                     dependencies=(Dependency("target_valid", (target_id,)),),
                     goal_kind="enemy",
-                    goal_data={"target_id": target_id, "waypoint": goal},
+                    goal_data={"target_id": target_id, "waypoint": goal,
+                               "objective": _objective(context, actor,
+                                                       target_id, goal)},
                     memory_delta=({"kind": "create", "skill": self.name,
                                    "actors": [actor], "goal": target_id,
                                    "goal_kind": "enemy",
@@ -203,3 +210,16 @@ class CoordinatedEngageSkill:
         if relation is not None and relation.native_weapon_range:
             return max(relation.native_weapon_range - 0.5, 0.5)
         return None
+
+
+def _objective(context, actor, target_id, goal):
+    """2.2: melee evaluate the CONTACT SLOT; ranged evaluate the RANGE BAND
+    around the target — never the enemy centre for everyone."""
+    capability = context.capabilities[actor]
+    if capability.combat_class == "melee":
+        return {"kind": "contact_point", "position": list(goal)}
+    relation = context.snapshot.relations[actor].get(target_id)
+    r_max = (relation.native_weapon_range if relation is not None else None) \
+        or 5.0
+    return {"kind": "range_band", "target": target_id,
+            "r_min": max(r_max - 1.5, 0.0), "r_max": r_max}

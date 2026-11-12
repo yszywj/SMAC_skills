@@ -129,10 +129,9 @@ class SkillManager:
         context = Context(snapshot)
         risk_now = {a: len(context.risk_at(a, snapshot.allies[a].position).threats)
                     for a in snapshot.allies if snapshot.allies[a].alive}
-        # observation phase FIRST: compare with the last committed record,
-        # then update confirmed facts (arrivals, timeouts, invalidations).
-        # Only after this may read-only candidates be generated.
-        self.memory.retire_invalid(snapshot)
+        # observation phase FIRST (single ordered entry, 3.1): record the
+        # observation, then judge identity invalid -> progress -> completion
+        # -> deadline. No earlier retire call may delete timed-out tasks.
         self.memory.observe(snapshot, risk_now)
         for event in self.memory.update_task_facts(snapshot, context):
             self.telemetry.log(event)

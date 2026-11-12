@@ -39,26 +39,30 @@ class RegroupSkill:
                     if any(context.attackable_enemies(a) for a in g)]
         unit = context.snapshot.allies[actor]
         options = []
+        # each option carries its REAL target group: the declared
+        # group_b is exactly the group the waypoint serves (2.5)
         if fighting:
             main = max(fighting, key=lambda g: (len(g), g))
             positions = [context.snapshot.allies[a].position for a in main]
-            options.append(min(positions,
-                               key=lambda p: (distance(unit.position, p), p)))
+            options.append((main, min(positions,
+                                      key=lambda p: (distance(unit.position,
+                                                              p), p))))
         else:
             group = min(pool, key=lambda g: min(
                 distance(unit.position, context.snapshot.allies[a].position)
                 for a in g))
             positions = [context.snapshot.allies[a].position for a in group]
-            options.append(min(positions,
-                               key=lambda p: (distance(unit.position, p), p)))
+            options.append((group, min(positions,
+                                       key=lambda p: (distance(unit.position,
+                                                               p), p))))
         closest = min(pool, key=lambda g: min(
             distance(unit.position, context.snapshot.allies[a].position)
             for a in g))
         own_centre = _centroid(context, own)
         other_centre = _centroid(context, closest)
-        options.append(((own_centre[0] + other_centre[0]) / 2,
-                        (own_centre[1] + other_centre[1]) / 2))
-        return [o for o in options
+        options.append((closest, ((own_centre[0] + other_centre[0]) / 2,
+                                  (own_centre[1] + other_centre[1]) / 2)))
+        return [(g, o) for g, o in options
                 if distance(unit.position, o) > self.support_radius * 0.5]
 
     def _link_pairs(self, context: Context, actor: str):
@@ -90,7 +94,9 @@ class RegroupSkill:
             if capability.suicide_attack and memory.instance_for(
                     "burst_engage", actor):
                 continue                      # live burst task not pulled away
-            if memory.retry_blocked(self.name, [actor], "merge", loop):
+            if memory.retry_blocked(
+                    *memory.task_retry_key(self.name, [actor], "internal",
+                                           "merge"), loop):
                 continue
             instance = memory.instance_for(self.name, actor)
             options = self._merge_options(context, actor)
@@ -100,18 +106,11 @@ class RegroupSkill:
             no_progress = instance is not None and memory.displacement(
                 actor, h_loops(context, self.no_progress_h),
                 context.snapshot) < 0.5
-            own, pairs = self._link_pairs(context, actor)
-            for goal in options[:2]:          # comparable alternatives
+            own, _pairs = self._link_pairs(context, actor)
+            for other, goal in options[:2]:          # comparable alternatives
                 move = best_move_toward(context, actor, goal)
                 if move is None:
                     continue
-                # the REAL evaluator goal: which support link this closes
-                other = min((p[1] for p in pairs),
-                            key=lambda g: min(
-                                distance(unit.position,
-                                         context.snapshot.allies[a].position)
-                                for a in g if a in context.snapshot.allies),
-                            default=None)
                 plans.append(make_plan(
                     self.name, {actor: move}, "merge", {actor: move},
                     [EffectClaim("position", actor,
@@ -135,9 +134,11 @@ class RegroupSkill:
                         "group_a": sorted(own),
                         "group_b": sorted(other) if other else [],
                         "support_radius": self.support_radius,
-                        "scale": 4.0, "position": list(goal)},
-                    task_key="|".join(("regroup", ",".join(sorted(own)),
-                                       ",".join(sorted(other or [])))),
+                        "scale": 4.0, "position": list(goal),
+                        "objective": {"kind": "support_link"}},
+                    task_key="|".join((
+                        "regroup", ",".join(sorted(own)),
+                        ",".join(sorted(other or [])))),
                     rationale="rally toward merge goal"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

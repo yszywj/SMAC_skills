@@ -402,3 +402,331 @@ class ManagerCycle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Round 5: A-D property groups
+# ---------------------------------------------------------------------------
+
+class Round5A_LockedCompletion(unittest.TestCase):
+    def _scene(self):
+        # two medivacs and ONE wounded marine; no observed heal orders
+        state = scene([((0., 0.), "medivac"), ((2., 0.), "medivac"),
+                       ((4., 0.), "marine")],
+                      enemies={"e0": enemy((9., 9.))})
+        state["allies"]["u0"]["energy"] = 50.
+        state["allies"]["u1"]["energy"] = 50.
+        state["allies"]["u2"]["health"] = 30.
+        heal_candidates(state, "u1")
+        return state
+
+    def test_locked_medivac_moves_u1_still_heals(self):
+        from skills.tactical_v1.baseline import complete_plan
+        from skills.tactical_v1.contracts import Commitment, ResourceClaims
+
+        def plan(pid, actions):
+            from skills.tactical_v1.contracts import CandidatePlan
+            return CandidatePlan(
+                proposal_id=pid, snapshot_id=1, config_fingerprint="t",
+                primary_skill="heal_support", specialization_provider=None,
+                instance_id=None, controlled_actors=tuple(sorted(actions)),
+                beneficiaries=(), goal="escape", goal_kind="internal",
+                goal_data={"objective": {"kind": "escape"}},
+                current_actions=dict(actions), expected_effects=[],
+                claims=ResourceClaims(controls=tuple(sorted(actions))),
+                dependencies=(), commitment=Commitment("escape", 0),
+                features={}, proposed_memory_delta={})
+        state = self._scene()
+        context = make_context(state)
+        manager = SkillManager()
+        actions = complete_plan(context, manager.memory, None,
+                                [plan("lock-u0-east", {"u0": 4})])
+        self.assertEqual(actions["u0"], 4, "locked action unchanged")
+        self.assertEqual(actions["u1"], 6 + 2,
+                         "u1 must still heal the only patient — u0's escape "
+                         "must not claim or block the heal capacity")
+
+    def test_fire_budget_visible_to_second_free_attacker(self):
+        from skills.tactical_v1.baseline import complete_plan
+        from skills.tactical_v1.contracts import (CandidatePlan, Commitment,
+                                                  ResourceClaims)
+
+        def plan(pid, actions, goal):
+            return CandidatePlan(
+                proposal_id=pid, snapshot_id=1, config_fingerprint="t",
+                primary_skill="focus_fire", specialization_provider=None,
+                instance_id=None, controlled_actors=("u0",),
+                beneficiaries=(), goal=goal, goal_kind="enemy",
+                goal_data={"target_id": goal},
+                current_actions=dict(actions), expected_effects=[],
+                claims=ResourceClaims(controls=("u0",)),
+                dependencies=(), commitment=Commitment("attacking", 0),
+                features={}, proposed_memory_delta={})
+        # e0 with 5 effective HP: u0's locked attack (6 dmg) already covers
+        # it, so the free u1 must be assigned the OTHER target e1
+        state = scene([((0., 0.), "marine"), ((1., 0.), "marine")],
+                      enemies={"e0": enemy((3., 0.), health=5.,
+                                           max_health=5.),
+                               "e1": enemy((3., 1.), health=30.)})
+        context = make_context(state)
+        manager = SkillManager()
+        actions = complete_plan(context, manager.memory, None,
+                                [plan("lock-e0", {"u0": 6}, "e0")])
+        self.assertEqual(actions["u0"], 6)
+        self.assertEqual(actions["u1"], 6 + 1,
+                         "the second attacker must see the updated window "
+                         "fire budget (e0 already covered)")
+
+
+class Round5B_Objectives(unittest.TestCase):
+    def test_g2_melee_scores_around_contact_slot_not_enemy_centre(self):
+        from skills.tactical_v1.contracts import (CandidatePlan, Commitment,
+                                                  ResourceClaims)
+        state = scene([((8., 2.), "zealot")],
+                      enemies={"e0": enemy((10., 0.))}, attack_range=2.)
+        context = make_context(state)
+
+        def plan(objective, action):
+            return CandidatePlan(
+                proposal_id=f"p-{action}", snapshot_id=1,
+                config_fingerprint="t", primary_skill="coordinated_engage",
+                specialization_provider=None, instance_id=None,
+                controlled_actors=("u0",), beneficiaries=(), goal="e0",
+                goal_kind="enemy",
+                goal_data={"target_id": "e0", "objective": objective},
+                current_actions={"u0": action}, expected_effects=[],
+                claims=ResourceClaims(controls=("u0",)),
+                dependencies=(), commitment=Commitment("approaching", 0),
+                features={}, proposed_memory_delta={})
+        slot = {"kind": "contact_point", "position": [9., 1.]}
+        toward_slot = plan(slot, 4)      # east: closer to the slot
+        away_from_slot = plan(slot, 2)   # north: farther from the slot
+        evaluator = Evaluator()
+        _, b1 = evaluator.score_joint(context, [toward_slot], {"u0": 4})
+        _, b2 = evaluator.score_joint(context, [away_from_slot], {"u0": 2})
+        self.assertGreater(b1["progress"], b2["progress"],
+                           "contact-point progress must track the slot, not "
+                           "the enemy centre")
+
+    def test_g3_range_band_inside_band_no_retreat_penalty(self):
+        from skills.tactical_v1.contracts import (CandidatePlan, Commitment,
+                                                  ResourceClaims)
+        state = scene([((1., 0.), "marine")],
+                      enemies={"e0": enemy((6., 0.))}, attack_range=5.)
+        context = make_context(state)
+        objective = {"kind": "range_band", "target": "e0",
+                     "r_min": 4.0, "r_max": 5.0}
+
+        def plan(action):
+            return CandidatePlan(
+                proposal_id=f"p-{action}", snapshot_id=1,
+                config_fingerprint="t", primary_skill="combat_reposition",
+                specialization_provider=None, instance_id=None,
+                controlled_actors=("u0",), beneficiaries=(), goal="e0",
+                goal_kind="enemy", goal_data={"objective": objective},
+                current_actions={"u0": action}, expected_effects=[],
+                claims=ResourceClaims(controls=("u0",)),
+                dependencies=(), commitment=Commitment("repositioning", 0),
+                features={}, proposed_memory_delta={})
+        evaluator = Evaluator()
+        _, hold = evaluator.score_joint(context, [plan(1)], {"u0": 1})
+        self.assertEqual(hold["progress"], 0.0,
+                         "holding inside the band has zero band error")
+
+    def test_g6_spacing_not_penalized_for_leaving_own_position(self):
+        from skills.tactical_v1.contracts import (CandidatePlan, Commitment,
+                                                  ResourceClaims)
+        state = scene([((0., 0.), "zealot"), ((0.6, 0.), "zealot")])
+        context = make_context(state)
+
+        def plan(action):
+            return CandidatePlan(
+                proposal_id=f"p-{action}", snapshot_id=1,
+                config_fingerprint="t", primary_skill="local_formation",
+                specialization_provider=None, instance_id=None,
+                controlled_actors=("u0",), beneficiaries=(),
+                goal="formation", goal_kind="internal",
+                goal_data={"objective": {"kind": "spacing"}},
+                current_actions={"u0": action}, expected_effects=[],
+                claims=ResourceClaims(controls=("u0",)),
+                dependencies=(), commitment=Commitment("adjusting", 0),
+                features={}, proposed_memory_delta={})
+        evaluator = Evaluator()
+        _, spacing = evaluator.score_joint(
+            context, [plan(4)], {"u0": 4, "u1": 1})
+        self.assertEqual(spacing["progress"], 0.0,
+                         "pure decongestion carries no point-target "
+                         "progress; congestion is priced once by physics")
+
+    def test_support_link_direction_invariant(self):
+        from skills.tactical_v1.contracts import (CandidatePlan, Commitment,
+                                                  ResourceClaims)
+        state = scene([((0., 0.), "marine"), ((10., 0.), "marine")])
+        context = make_context(state)
+
+        def plan(a, b, mover, action):
+            return CandidatePlan(
+                proposal_id=f"link-{mover}", snapshot_id=1,
+                config_fingerprint="t", primary_skill="regroup",
+                specialization_provider=None, instance_id=None,
+                controlled_actors=(mover,), beneficiaries=(),
+                goal="merge", goal_kind="group_link",
+                goal_data={"group_a": a, "group_b": b,
+                           "support_radius": 8.0, "scale": 4.0,
+                           "objective": {"kind": "support_link"}},
+                current_actions={mover: action},
+                expected_effects=[],
+                claims=ResourceClaims(controls=(mover,)),
+                dependencies=(), commitment=Commitment("rallying", 0),
+                features={}, proposed_memory_delta={})
+        evaluator = Evaluator()
+        _, ab = evaluator.score_joint(
+            context, [plan(["u0"], ["u1"], "u0", 4)], {"u0": 4, "u1": 1})
+        _, ba = evaluator.score_joint(
+            context, [plan(["u1"], ["u0"], "u1", 5)], {"u0": 4, "u1": 1})
+        self.assertAlmostEqual(ab["link"], ba["link"], 6,
+                               msg="A->B and B->A declarations of the same "
+                                   "relation must score identically")
+        _, both = evaluator.score_joint(
+            context, [plan(["u0"], ["u1"], "u0", 4),
+                      plan(["u1"], ["u0"], "u1", 5)], {"u0": 4, "u1": 1})
+        self.assertAlmostEqual(both["link"], ab["link"], 6,
+                               msg="the same relation is counted exactly "
+                                   "once")
+
+
+class Round5C_Lifecycle(unittest.TestCase):
+    def test_arrival_at_deadline_frame_records_success(self):
+        manager = SkillManager()
+        state = scene([((0., 0.), "marine")], search=(4., 0.))
+        for step in range(12):
+            state["game_loop"] = 80 + step * 8
+            actions, _ = manager.step(with_questions(copy.deepcopy(state)), 1)
+            manager.commit_final_actions(actions)
+            self.assertEqual(manager.memory.visited_search_cells, {})
+        # ARRIVE exactly on the deadline frame: completion, no failure
+        state["allies"]["u0"]["position"] = [4., 0.]
+        state["game_loop"] = 176
+        actions, _ = manager.step(with_questions(copy.deepcopy(state)), 1)
+        manager.commit_final_actions(actions)
+        self.assertTrue(manager.memory.visited_search_cells,
+                        "arrival on the deadline frame is a COMPLETION")
+        key = manager.memory.task_retry_key(
+            "cohesive_search", ["u0"], "position", "waypoint",
+            {"waypoint": (4., 0.)})
+        self.assertFalse(manager.memory.retry_blocked(*key, 176),
+                         "a completed search leaves no failure cooldown")
+
+    def test_not_arrived_at_deadline_records_unreachable_and_retry(self):
+        manager = SkillManager()
+        state = scene([((0., 0.), "marine")], search=(20., 0.))
+        state["movement_candidates"]["u0"] = {}
+        for step in range(14):
+            state["game_loop"] = 80 + step * 8
+            pl = with_questions(copy.deepcopy(state))
+            pl["questions"]["u0"]["criteria"] = {"1": "stop"}
+            actions, _ = manager.step(pl, 1)
+            manager.commit_final_actions(actions)
+        self.assertTrue(manager.memory.retry_records,
+                        "timeout must record a retry under the normalized "
+                        "waypoint-cell key")
+        self.assertTrue(manager.memory.unreachable_search_cells)
+        # next observation: the SAME waypoint task may not silently restart
+        state["game_loop"] = 192
+        pl = with_questions(copy.deepcopy(state))
+        pl["questions"]["u0"]["criteria"] = {"1": "stop"}
+        actions, telemetry = manager.step(pl, 1)
+        manager.commit_final_actions(actions)
+        searching = [i for i in manager.memory.instances.values()
+                     if i.skill == "cohesive_search"
+                     and i.extra.get("waypoint") == (20., 0.)]
+        self.assertFalse(searching,
+                         "the failed waypoint must not be re-tasked during "
+                         "its cooldown")
+
+    def test_new_waypoint_not_blocked_after_failure(self):
+        manager = SkillManager()
+        state = scene([((0., 0.), "marine")], search=(30., 0.))
+        state["movement_candidates"]["u0"] = {}
+        for step in range(14):
+            state["game_loop"] = 80 + step * 8
+            pl = with_questions(copy.deepcopy(state))
+            pl["questions"]["u0"]["criteria"] = {"1": "stop"}
+            actions, _ = manager.step(pl, 1)
+            manager.commit_final_actions(actions)
+        self.assertTrue(manager.memory.retry_records)
+        # keys are per-waypoint cells: a DIFFERENT waypoint stays legal
+        blocked_cells = {key[2] for key in manager.memory.retry_records}
+        self.assertTrue(all("waypoint:" in cell for cell in blocked_cells))
+
+
+class Round5D_FinalConsistency(unittest.TestCase):
+    def test_budget_one_returns_valid_p0(self):
+        from skills.tactical_v1.validator import validate_actions
+        manager = SkillManager()
+        manager.coordinator.max_evaluations = 1
+        state = scene([((0., 0.), "marine"), ((1., 0.), "zealot")],
+                      enemies={"e0": enemy((6., 0.))})
+        pl = with_questions(state)
+        context = Context(build_snapshot(pl, 1))
+        actions, telemetry = manager.step(pl, 2)
+        manager.commit_final_actions(actions)
+        self.assertEqual(validate_actions(actions, context, 2), [])
+        self.assertLessEqual(telemetry["plan_evaluations_used"], 1)
+
+    def test_cache_hit_does_not_import_stale_deltas(self):
+        manager = SkillManager()
+        state = scene([((0., 0.), "marine")], enemies={"e0": enemy((9., 0.))})
+        context = Context(build_snapshot(with_questions(state), 1))
+        from skills.tactical_v1.contracts import (CandidatePlan, Commitment,
+                                                  ResourceClaims)
+
+        def plan(instance_id, delta):
+            return CandidatePlan(
+                proposal_id=f"p-{instance_id or 'new'}", snapshot_id=1,
+                config_fingerprint="t", primary_skill="coordinated_engage",
+                specialization_provider=None, instance_id=instance_id,
+                controlled_actors=("u0",), beneficiaries=(), goal="e0",
+                goal_kind="enemy",
+                goal_data={"objective": {"kind": "range_band",
+                                         "target": "e0", "r_min": 3.5,
+                                         "r_max": 4.5}},
+                current_actions={"u0": 4}, expected_effects=[],
+                claims=ResourceClaims(controls=("u0",)),
+                dependencies=(), commitment=Commitment("approaching", 0),
+                features={}, proposed_memory_delta=delta)
+        coordinator = manager.coordinator
+        coordinator._cache = {}
+        budget = [5]
+        first = coordinator.evaluate_once(
+            context, [plan("inst-A", {"kind": "transition",
+                                      "instance_id": "inst-A",
+                                      "phase": "approaching"})],
+            {"u0": 4}, manager.memory, budget, 1)
+        self.assertIsNotNone(first)
+        second = coordinator.evaluate_once(
+            context, [plan("inst-B", {"kind": "transition",
+                                      "instance_id": "inst-B",
+                                      "phase": "approaching"})],
+            {"u0": 4}, manager.memory, budget, 1)
+        self.assertEqual(second.plans[0].instance_id, "inst-B",
+                         "a cache hit must reuse the score, not the old "
+                         "plan object with its stale instance/delta")
+        self.assertEqual(budget[0], 4, "cache hits consume no new scoring")
+
+    def test_returned_actions_match_plan_attribution(self):
+        manager = SkillManager()
+        state = scene([((0., 0.), "marine"), ((3., 3.), "medivac"),
+                       ((4., 3.), "marine")],
+                      enemies={"e0": enemy((9., 0.))})
+        state["allies"]["u1"]["energy"] = 50.
+        state["allies"]["u2"]["health"] = 30.
+        heal_candidates(state, "u1")
+        actions, telemetry = manager.step(with_questions(state), 3)
+        manager.commit_final_actions(actions)
+        for actor, info in telemetry["units"].items():
+            index = int(actor[1:])
+            if info["plan"] is not None:
+                self.assertEqual(info["action"], actions[index],
+                                 "attribution must match the returned final "
+                                 "actions after any repair/fallback")

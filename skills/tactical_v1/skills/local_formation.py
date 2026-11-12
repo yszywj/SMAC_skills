@@ -126,6 +126,9 @@ class LocalFormationSkill:
                       if a != actor and u.alive and not u.is_flying
                       and distance(u.position, unit.position) <= 6.0]
             if best_action is not None:
+                is_core = (
+                    context.capabilities[actor].specialization
+                    == "splash_fire" and guards)
                 plans.append(make_plan(
                     self.name, {actor: best_action}, "formation",
                     {actor: best_action},
@@ -138,15 +141,20 @@ class LocalFormationSkill:
                     Commitment("adjusting", 0, max_loops=budget),
                     {"switch_cost": 0.1 if attackable else 0.0},
                     snapshot_id, fingerprint,
-                    goal_kind=(
-                        "role" if context.capabilities[actor].specialization == "splash_fire"
-                        and guards else "position"),
+                    goal_kind="role" if is_core else "internal",
                     goal_data=(
                         {"role": "colossus_protected", "actor": actor,
-                         "guards": guards}
-                        if context.capabilities[actor].specialization == "splash_fire"
-                        and guards else {"position": list(role_goal or
-                                                          unit.position)}),
+                         "guards": guards,
+                         "objective": {"kind": "protected_position"}}
+                        if is_core else
+                        {"objective": {"kind": "spacing"}}),
+                    memory_delta=({"kind": "create", "skill": self.name,
+                                   "actors": [actor], "goal": "formation",
+                                   "goal_kind": "internal",
+                                   "phase": "adjusting",
+                                   "max_loops": budget}
+                                  if memory.instance_for(self.name, actor)
+                                  is None else None),
                     rationale=("spread from splash danger" if under_splash
                                else "role/quality position adjustment")))
             # two-unit atomic adjustment: the crowded pair steps apart TOGETHER

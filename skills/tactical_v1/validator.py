@@ -196,9 +196,10 @@ def repair(plans: List[CandidatePlan], context: Context,
            rounds: int = 2, skills=None) -> Tuple[List[CandidatePlan],
                                                   Dict[str, int],
                                                   List[str]]:
-    """Whole-plan atomic release of anything invalid, refill from the
-    context-aware baseline, rescore — bounded rounds (A4)."""
-    from .baseline import baseline_actions
+    """A4/1.4: whole-plan atomic release, then refill every free unit via
+    the SINGLE completion entry (complete_plan with the remaining valid
+    locked plans) — never the old baseline with a stale reserved map."""
+    from .baseline import complete_plan, LockedPlanConflict
     log: List[str] = []
     for _ in range(rounds + 1):
         report = evaluator.effects(context, actions)
@@ -209,16 +210,13 @@ def repair(plans: List[CandidatePlan], context: Context,
         if not problems:
             break
         drop_ids = {p["proposal_id"] for p in problems if p["drop_whole"]}
-        actor_problems = {p["actor"] for p in problems if p["actor"]}
         plans = [p for p in plans if p.proposal_id not in drop_ids]
-        refill = baseline_actions(context, memory, skills,
-                                  reserved=dict(actions),
-                                  reserved_plans=plans)
-        for actor in list(actions):
-            plan = next((p for p in plans if actor in p.controlled_actors), None)
-            if plan is None and actor in actor_problems:
-                actions[actor] = refill.get(actor, actions[actor])
-            elif plan is not None:
-                actions[actor] = plan.current_actions[actor]
+        try:
+            actions = complete_plan(context, memory, skills, plans)
+        except LockedPlanConflict:
+            plans, actions = [], complete_plan(context, memory, skills, [])
+            log.append("repair:locked_conflict_fell_back_to_p0")
+            break
         log.append(f"repair_released:{sorted(drop_ids)}")
+    
     return plans, actions, log

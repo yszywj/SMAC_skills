@@ -85,6 +85,30 @@ class TacticalMemory:
             if self.retry_records[other] < game_loop - self.retry_ttl_loops:
                 del self.retry_records[other]
 
+    @staticmethod
+    def task_retry_key(skill: str, actors, goal_kind: str, goal: str,
+                       goal_data=None) -> tuple:
+        """3.3: the single normalized retry key. goal_kind decides the goal
+        normalization (enemy id / waypoint CELL / undirected group pair /
+        internal purpose) so propose-side checks and finish-time records can
+        never drift apart."""
+        participants = "+".join(sorted(actors))
+        data = goal_data or {}
+        if goal_kind == "enemy":
+            return (skill, participants, f"enemy:{goal}")
+        if goal_kind == "position":
+            waypoint = data.get("waypoint") or data.get("position") or goal
+            cell = f"{int(waypoint[0] // 8)}:{int(waypoint[1] // 8)}" \
+                if isinstance(waypoint, (tuple, list)) and len(waypoint) == 2 \
+                else str(waypoint)
+            return (skill, participants, f"waypoint:{cell}")
+        if goal_kind == "group_link":
+            a = tuple(sorted(data.get("group_a", [])))
+            b = tuple(sorted(data.get("group_b", [])))
+            left, right = sorted((a, b))
+            return (skill, participants, ("link", left, right))
+        return (skill, participants, str(goal))
+
     def record_retry(self, skill: str, actors, goal: str, game_loop: int,
                      cooldown_loops: int) -> None:
         self.retry_records[(skill, "+".join(sorted(actors)), goal)] = \
@@ -128,41 +152,51 @@ class TacticalMemory:
         self.observed_key = key
 
     def update_task_facts(self, snapshot: Snapshot, context) -> List[str]:
-        """Observation-phase fact updates ONLY (C2): arrivals, timeouts,
-        invalidations. Candidates never do this later."""
+        """3.1: the SINGLE ordered observation phase per real game_loop.
+
+        identity/protocol invalid -> observed progress -> completion ->
+        deadline -> no-progress. Completion is ALWAYS judged before the
+        deadline: an instance that arrives on its deadline frame is
+        recorded as ARRIVED, never as a failed timeout."""
         events: List[str] = []
         self.cleanup_retry_records(snapshot.game_loop)
-        events.extend(self.retire_invalid(snapshot))
-        # search arrival confirmation (G7): a search instance whose actor is
-        # within tolerance of its tracked waypoint HAS arrived — write the
-        # visit fact now; a timeout marks the cell temporarily unreachable.
+        events.extend(self.retire_invalid(snapshot))   # identity/protocol
+        # deadlines for every remaining instance, AFTER completion checks
         for instance_id in list(self.instances):
-            instance = self.instances[instance_id]
-            if instance.skill != "cohesive_search" \
-                    or instance.goal_kind != "position":
+            instance = self.instances.get(instance_id)
+            if instance is None:
                 continue
-            waypoint = instance.extra.get("waypoint")
-            if waypoint is None:
-                continue
-            for actor in instance.actors:
-                if actor not in snapshot.allies or \
-                        not snapshot.allies[actor].alive:
-                    continue
-                if distance(snapshot.allies[actor].position, waypoint) \
-                        <= instance.extra.get("arrival_tolerance", 2.0):
-                    # ARRIVAL CONFIRMED FIRST: an instance that both arrived
-                    # and hit its deadline is recorded as arrived (C2)
-                    cell = _cell(waypoint)
-                    self.finish_task(instance_id, "waypoint_reached", snapshot)
-                    events.append(f"search_arrived:{cell}")
-                    break
-                budget = instance.max_loops or (12 * max(snapshot.step_mul, 1))
-                if snapshot.game_loop - instance.start_loop >= budget:
-                    cell = _cell(waypoint)
-                    self.finish_task(instance_id, "waypoint_timeout", snapshot)
-                    events.append(f"search_unreachable:{cell}")
-                    break
+            # completion first (arrival handled in the block below for
+            # search; G4/G1 completions flow through switched/target_lost)
+            self._check_search_completion(instance, snapshot, events)
+            if self.instances.get(instance_id) is None:
+                continue                       # completed this observation
+            if instance.max_loops is not None \
+                    and snapshot.game_loop - instance.start_loop \
+                    >= instance.max_loops:
+                self.finish_task(instance_id, "timeout", snapshot)
+                events.append(f"task_timeout:{instance_id}")
         return events
+
+    def _check_search_completion(self, instance, snapshot, events) -> None:
+        """Arrival confirmation for one search instance (3.1 step 2)."""
+        if instance.skill != "cohesive_search" \
+                or instance.goal_kind != "position":
+            return
+        waypoint = instance.extra.get("waypoint")
+        if waypoint is None:
+            return
+        for actor in instance.actors:
+            if actor not in snapshot.allies or \
+                    not snapshot.allies[actor].alive:
+                continue
+            if distance(snapshot.allies[actor].position, waypoint) \
+                    <= instance.extra.get("arrival_tolerance", 2.0):
+                cell = _cell(waypoint)
+                self.finish_task(instance.instance_id, "waypoint_reached",
+                                 snapshot)
+                events.append(f"search_arrived:{cell}")
+                return
 
     # -- instances ----------------------------------------------------------
     def instance_for(self, skill: str, actor: str) -> Optional[SkillInstance]:
@@ -179,13 +213,17 @@ class TacticalMemory:
                         ally_tags=(), instance_id: str = "",
                         goal_kind: str = "internal",
                         extra: Optional[Dict[str, Any]] = None) -> SkillInstance:
+        extra = dict(extra or {})
+        extra.setdefault(
+            "retry_key", self.task_retry_key(skill, actors, goal_kind, goal,
+                                             extra))
         instance_id = instance_id or f"{skill}:{'+'.join(sorted(actors))}:{goal}:{loop}"
         instance = SkillInstance(
             instance_id=instance_id, skill=skill, actors=tuple(sorted(actors)),
             ally_tags=tuple(ally_tags), goal=goal, goal_kind=goal_kind,
             phase=phase, start_loop=loop, phase_start_loop=loop,
             last_progress_loop=loop, budget_loops=0, executed_steps=0,
-            max_loops=max_loops, extra=dict(extra or {}))
+            max_loops=max_loops, extra=extra)
         self.instances[instance_id] = instance
         return instance
 
@@ -214,16 +252,23 @@ class TacticalMemory:
                 self.visited_search_cells[_cell(waypoint)] = snapshot.game_loop
         elif reason in ("waypoint_timeout", "escape_failed", "timeout",
                         "no_progress"):
-            if instance.skill == "cohesive_search" \
-                    and reason == "waypoint_timeout":
+            # classify by the TASK, not by the caller's string (3.2): a
+            # generic timeout on a search instance is a search timeout and
+            # writes unreachable — never visited
+            search_timeout = (
+                instance.skill == "cohesive_search"
+                and reason in ("waypoint_timeout", "timeout", "no_progress")
+                and instance.extra.get("waypoint") is not None)
+            if search_timeout:
                 waypoint = instance.extra.get("waypoint")
-                if waypoint is not None:
-                    self.unreachable_search_cells[_cell(waypoint)] = \
-                        snapshot.game_loop
-            # retry cooldown keyed by the SAME key propose() checks
-            self.record_retry(instance.skill, instance.actors,
-                              instance.goal, snapshot.game_loop,
-                              self.retry_ttl_loops)
+                self.unreachable_search_cells[_cell(waypoint)] = \
+                    snapshot.game_loop
+            # retry cooldown under the SAME normalized key propose() checks
+            self.retry_records[instance.extra.get(
+                "retry_key") or self.task_retry_key(
+                    instance.skill, instance.actors, instance.goal_kind,
+                    instance.goal, instance.extra)] = \
+                snapshot.game_loop + self.retry_ttl_loops
         elif reason == "switched_or_baseline":
             pass    # normal switch to a better task: no failure penalty
         self.drop_instance(instance_id, reason)
@@ -249,10 +294,8 @@ class TacticalMemory:
                 self.finish_task(instance_id, "target_lost", snapshot)
                 retired.append(instance_id)
                 continue
-            if instance.max_loops is not None \
-                    and snapshot.game_loop - instance.start_loop >= instance.max_loops:
-                self.finish_task(instance_id, "timeout", snapshot)
-                retired.append(instance_id)
+            # deadlines are judged in update_task_facts AFTER completion
+            # checks — never deleted here first (3.1)
         return retired
 
     # -- progress evidence (C1: task-relevant, compared with last record) ---

@@ -165,7 +165,8 @@ class HealSupportSkill:
                         dependencies=(Dependency("member", (actor, patient)),),
                         goal_kind="meeting",
                         goal_data={"healer": actor, "patient": patient,
-                                   "position": list(meet)},
+                                   "position": list(meet),
+                                   "objective": {"kind": "meeting"}},
                         rationale=f"joint approach: {actor} and {patient}"))
             # 4. own danger: shared safe-move escape competes (S2.10)
             risk = context.risk_at(actor, context.snapshot.allies[actor].position)
@@ -207,7 +208,12 @@ class HealSupportSkill:
                                 {}, snapshot_id, fingerprint,
                                 provider="heal_support",
                                 goal_kind="position",
-                                goal_data={"waypoint": list(goal)},
+                                goal_data={"waypoint": list(goal),
+                                           "objective": {
+                                               "kind": "escort_band",
+                                               "position": list(goal),
+                                               "r_min": 1.0,
+                                               "r_max": self.follow_distance}},
                                 rationale="follow effective friendly squad"))
                     else:
                         plans.append(make_plan(

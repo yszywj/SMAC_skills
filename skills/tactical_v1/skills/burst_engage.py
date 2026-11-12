@@ -77,6 +77,11 @@ class BurstEngageSkill:
             for enemy_id in sorted(context.snapshot.enemies):
                 if not context.can_issue_attack(actor, enemy_id):
                     continue
+                if memory.retry_blocked(
+                        *memory.task_retry_key(self.name, [actor], "enemy",
+                                               enemy_id),
+                        context.snapshot.game_loop):
+                    continue
                 contact = context.contact_status(actor, enemy_id)
                 if contact == "out_of_range":
                     continue
@@ -108,8 +113,8 @@ class BurstEngageSkill:
                     instance_id=instance.instance_id if instance else None,
                     memory_delta=({"kind": "create", "skill": self.name,
                                    "actors": [actor], "goal": enemy_id,
-                                   "goal_kind": "enemy",
-                                   "phase": "bursting"}
+                                   "goal_kind": "enemy", "phase": "bursting",
+                                   "max_loops": 2 * context.H}
                                   if instance is None else
                                   {"kind": "retarget",
                                    "instance_id": instance.instance_id,

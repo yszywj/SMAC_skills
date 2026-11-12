@@ -82,7 +82,20 @@ class CombatRepositionSkill:
                     by_class[label] = action
             provider = self.providers.get("splash_fire")
             budget = h_loops(context, 8.0)
-            for label, move in sorted(by_class.items()):
+            relation = context.snapshot.relations[actor][target_id]
+            r_max = relation.native_weapon_range or 5.0
+            # keep one candidate per class, but never fewer than the plain
+            # four directions for the unified evaluator to compare (2.3)
+            seen_actions = set()
+            ordered = sorted(by_class.items())
+            for label, move in ordered:
+                seen_actions.add(move)
+            for action in sorted(context.move_destinations(actor)):
+                if action not in seen_actions and len(ordered) < \
+                        self.max_candidates:
+                    ordered.append((by_class.get(action, "sidestep"), action))
+                    seen_actions.add(action)
+            for label, move in ordered:
                 prediction = context.predict_position(actor, move)
                 if melee and label != "pursuit":
                     after = distance(prediction.position, enemy.position)
@@ -106,8 +119,8 @@ class CombatRepositionSkill:
                                    space=(space_claim(context, actor, move),)),
                     Commitment("repositioning", 0, max_loops=budget,
                                interrupt_on=("weapon_ready", "danger_change")),
-                    # the lost window shot is priced by physics only (D3)
-                    {"progress": coverage * 0.3},
+                    # the lost window shot is priced by physics only
+                    {"switch_cost": 0.0},
                     snapshot_id, fingerprint,
                     provider="splash_fire"
                     if capability.specialization == "splash_fire" and provider
@@ -120,7 +133,12 @@ class CombatRepositionSkill:
                                    "max_loops": budget}
                                   if instance is None else None),
                     goal_kind="enemy",
-                    goal_data={"target_id": target_id},
+                    goal_data={"target_id": target_id,
+                               "objective": {
+                                   "kind": "range_band", "target": target_id,
+                                   "r_min": max(r_max - 1.5, 0.0)
+                                   if not melee else 0.0,
+                                   "r_max": r_max if not melee else 2.0}},
                     rationale=f"{label} during weapon cycle"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

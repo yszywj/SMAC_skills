@@ -47,6 +47,33 @@ class _CompletePlan:
                 for p in self.plans)))
 
 
+class _BudgetSlice:
+    """Remaining-count list wrapper sharing the owner's real used counter."""
+
+    def __init__(self, remaining: int, owner: "Budget"):
+        self._remaining = remaining
+        self._owner = owner
+
+    def __getitem__(self, _index):
+        return self._remaining
+
+    def __setitem__(self, _index, value):
+        self._remaining = value
+
+
+class Budget:
+    """4.3: one counted evaluation budget covering P0, seeds, search and
+    repair. limit=1 -> exactly one full scoring (P0) and no repair reserve."""
+
+    def __init__(self, total: int):
+        self.total = max(total, 1)
+        self.reserve = min(2, max(0, self.total - 1))
+        self.used = 0
+        remaining = self.total if self.total == 1             else max(self.total - self.reserve, 0)
+        self.search_budget = _BudgetSlice(remaining, self)
+        self.repair_budget = _BudgetSlice(self.reserve, self)
+
+
 class Coordinator:
     def __init__(self, config: Dict, evaluator: Optional[Evaluator] = None):
         self.config = config
@@ -67,12 +94,19 @@ class Coordinator:
         key = probe.semantic_key()
         cached = self._cache.get(key)
         if cached is not None:
-            return cached
+            # the cache stores the immutable score/breakdown ONLY; entries
+            # are rebuilt from THIS step's plans so a hit never carries a
+            # stale instance_id or memory_delta (4.2).
+            return _CompletePlan(list(plans), dict(actions), cached.score,
+                                 cached.breakdown)
         if budget[0] <= 0:
             return None                      # BUDGET_EXHAUSTED
-        budget[0] -= 1
+        budget[0] = budget[0] - 1
         score, breakdown = self.evaluator.score_joint(context, plans, actions,
                                                       memory)
+        owner = getattr(budget, "_owner", None)
+        if owner is not None:
+            owner.used += 1
         entry = _CompletePlan(list(plans), dict(actions), score, breakdown)
         if len(entry.actions) != n_agents \
                 or validate_actions([entry.actions[f"u{i}"]
@@ -121,11 +155,12 @@ class Coordinator:
                n_agents: int) -> Tuple[List[int], Dict[str, object], List]:
         started = time.perf_counter()
         self._cache = {}
-        budget = [max(self.max_evaluations - REPAIR_RESERVE, 1)]
-        # ---- A3/D1: P0 built ONCE through the shared completion ----------
+        budget = Budget(self.max_evaluations)
+        # ---- A3/D1: P0 built ONCE through the single completion entry ----
         p0_actions = complete_plan(context, memory, skills)
-        p0 = self.evaluate_once(context, [], p0_actions, memory, budget,
-                                n_agents)
+        p0 = self.evaluate_once(context, [], p0_actions, memory,
+                                budget.search_budget,
+                                len(p0_actions))
         if p0 is None:
             raise RuntimeError(
                 "baseline plan P0 failed validation: "
@@ -150,7 +185,8 @@ class Coordinator:
         # ---- frontier: P0 + validated continuation seeds (D1) -------------
         frontier: List[_CompletePlan] = [p0]
         continuation = self._continuation_plan(context, memory, candidates,
-                                               p0_actions, budget,
+                                               p0_actions,
+                                               budget.search_budget,
                                                len(p0_actions))
         if continuation is not None:
             frontier.append(continuation)
@@ -163,25 +199,26 @@ class Coordinator:
             index = 0
             max_index = max([len(b) for b in by_unit.values()]
                             + [len(atomics)] + [0])
-            while index < max_index and budget[0] > 0:
+            while index < max_index and budget.search_budget[0] > 0:
                 # fair interleave: A's first, B's first, an atomic, then the
                 # next index — later units are never starved (D2)
                 for owner in unit_rotation:
                     bucket = by_unit[owner]
-                    if index < len(bucket) and budget[0] > 0:
+                    if index < len(bucket) and budget.search_budget[0] > 0:
                         self._expand(frontier, bucket[index], context,
-                                     memory, budget, len(p0_actions))
-                if index < len(atomics) and budget[0] > 0:
+                                     memory, budget.search_budget,
+                                     len(p0_actions))
+                if index < len(atomics) and budget.search_budget[0] > 0:
                     self._expand(frontier, atomics[index], context, memory,
-                                 budget, len(p0_actions))
+                                 budget.search_budget, len(p0_actions))
                 index += 1
             if {e.semantic_key() for e in frontier} == round_start_keys:
                 break        # no improvement this round: stop early
         best = min(frontier, key=lambda e: self._rank(e, memory))
-        if budget[0] <= 0:
+        if budget.search_budget[0] <= 0 and self.max_evaluations > 1:
             telemetry.search_budget_events += 1
         # ---- A4: final validation & bounded repair ------------------------
-        repair_budget = [REPAIR_RESERVE]
+        repair_budget = budget.repair_budget
         actions = dict(best.actions)
         plans = list(best.plans)
         plans, actions, repair_log = repair(plans, context, actions, memory,
@@ -189,12 +226,14 @@ class Coordinator:
                                             skills)
         final = self.evaluate_once(context, plans, actions, memory,
                                    repair_budget, len(actions)) or p0
+        # 4.1: ONE final object — actions, plans, score, summary and the
+        # manager's pending commit all come from this single entry.
         summary = self._summary(final, context, telemetry, candidates,
                                 repair_log,
                                 (time.perf_counter() - started) * 1000.0,
                                 len(actions), budget)
-        return [final.actions[f"u{i}"] for i in range(len(actions))], \
-            summary, plans
+        return ([final.actions[f"u{i}"] for i in range(len(actions))],
+                summary, list(final.plans))
 
     def _expand(self, frontier: List[_CompletePlan],
                 candidate: CandidatePlan, context: Context, memory,
@@ -265,8 +304,12 @@ class Coordinator:
                    for a in p.current_actions}
         for actor in released:
             actions[actor] = None
-        fill = complete_plan(context, memory, None,
-                             locked_plans=[*kept, candidate])
+        from .baseline import LockedPlanConflict
+        try:
+            fill = complete_plan(context, memory, None,
+                                 locked_plans=[*kept, candidate])
+        except LockedPlanConflict:
+            return None        # reject the branch; never rewrite a locked task
         for actor in released:
             actions[actor] = fill.get(actor, DEAD_NOOP)
         for actor, action in candidate.current_actions.items():
@@ -331,7 +374,7 @@ class Coordinator:
         summary["joint_score"] = round(final.score, 4)
         summary["score_breakdown"] = {k: round(v, 4)
                                       for k, v in final.breakdown.items()}
-        summary["plan_evaluations_used"] = self.max_evaluations - budget[0]
+        summary["plan_evaluations_used"] = budget.used
         summary["cache_entries"] = len(self._cache)
         summary["skill_usage"] = {k: dict(v) for k, v in
                                   telemetry.usage.items()}

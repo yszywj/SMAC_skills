@@ -96,7 +96,9 @@ class DisengageReenterSkill:
             if not unit.alive or context.capabilities[actor].healer \
                     or context.capabilities[actor].suicide_attack:
                 continue
-            if memory.retry_blocked(self.name, [actor], "safe", loop):
+            if memory.retry_blocked(
+                    *memory.task_retry_key(self.name, [actor], "internal",
+                                           "safe"), loop):
                 continue
             instance = memory.instance_for(self.name, actor)
             active = instance is not None and instance.termination_reason is None
@@ -133,6 +135,8 @@ class DisengageReenterSkill:
                         {}, snapshot_id, fingerprint,
                         instance_id=instance.instance_id if instance else None,
                         memory_delta=self._delta(instance, ESCAPE, actor, context=context),
+                        goal_kind="internal",
+                        goal_data={"objective": {"kind": "escape"}},
                         rationale="escape: risk improvement available"))
                 elif killable is not None:
                     action = context.attack_action(actor, killable)
@@ -199,13 +203,15 @@ class DisengageReenterSkill:
                                    space=(space_claim(context, actor, move),)),
                     Commitment(REENTER, 0, max_loops=h_loops(
                         context, self.reenter_max_h)),
-                    {"progress": move_progress(
-                        context, actor, move,
-                        context.snapshot.enemies[target].position)},
-                    snapshot_id, fingerprint,
+                    {}, snapshot_id, fingerprint,
                     instance_id=instance.instance_id if instance else None,
                     memory_delta=self._delta(instance, REENTER, actor, goal=target,
                                              context=context),
+                    goal_kind="enemy",
+                    goal_data={"target_id": target,
+                               "objective": {"kind": "range_band",
+                                             "target": target,
+                                             "r_min": 0.0, "r_max": 5.0}},
                     rationale=f"re-enter toward {target}"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
