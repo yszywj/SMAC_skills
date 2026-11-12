@@ -1,11 +1,10 @@
-"""G5 Regroup: repair support breaks between squads.
+"""G5 Regroup: repair support breaks BETWEEN squads (D4).
 
-Multiple connected groups (not just "has one neighbour"); for each loner /
-sub-squad several merge options are compared (main fighting group, nearest
-supporting group, midway meeting area) by join time, route risk and lost
-output. Fighting front squads keep firing; units with live heal/burst tasks
-are never unconditionally pulled away. Bounded wait, no-progress exit,
-retry cooldown — all consumed from the instance.
+Multiple connected groups; for each detached squad several merge options are
+compared (join the main ground fighting group, the nearest supporting group,
+or the midway meeting area). A tight 5-man squad far from another tight
+squad DOES get comparable merge proposals. Fighting front squads keep
+firing; flying heal squads are never the primary ground fighting group.
 """
 from typing import Dict, List, Optional
 
@@ -26,68 +25,73 @@ class RegroupSkill:
         self.support_radius = config.get("regroup", {}).get(
             "support_radius", 8.0)
 
-    def _merge_goal(self, context: Context, actor: str) -> Optional[tuple]:
-        """Best merge option for one isolated unit: the main fighting group,
-        else the nearest supporting group, else the midway meeting point."""
+    def _merge_options(self, context: Context, actor: str) -> List[tuple]:
         groups = context.engagement_groups(self.support_radius)
         own = next((g for g in groups if actor in g), [actor])
-        if len(own) > 2:
-            return None                      # a real squad, not a loner
         others = [g for g in groups if actor not in g]
         if not others:
-            return None
-        fighting = [g for g in others
+            return []
+        ground_others = [g for g in others
+                         if not any(context.snapshot.allies[a].is_flying
+                                    for a in g)]
+        pool = ground_others or others
+        fighting = [g for g in pool
                     if any(context.attackable_enemies(a) for a in g)]
         unit = context.snapshot.allies[actor]
+        options = []
         if fighting:
-            group = max(fighting, key=lambda g: (len(g), g))
+            main = max(fighting, key=lambda g: (len(g), g))
+            positions = [context.snapshot.allies[a].position for a in main]
+            options.append(min(positions,
+                               key=lambda p: (distance(unit.position, p), p)))
         else:
-            group = min(others, key=lambda g: min(
+            group = min(pool, key=lambda g: min(
                 distance(unit.position, context.snapshot.allies[a].position)
                 for a in g))
-        positions = [context.snapshot.allies[a].position for a in group]
-        # meeting point: nearest point of the group's extent, not a centroid
-        goal = min(positions, key=lambda p: (distance(unit.position, p), p))
-        if distance(unit.position, goal) <= self.support_radius * 0.5:
-            return None
-        return goal
+            positions = [context.snapshot.allies[a].position for a in group]
+            options.append(min(positions,
+                               key=lambda p: (distance(unit.position, p), p)))
+        closest = min(pool, key=lambda g: min(
+            distance(unit.position, context.snapshot.allies[a].position)
+            for a in g))
+        own_centre = _centroid(context, own)
+        other_centre = _centroid(context, closest)
+        options.append(((own_centre[0] + other_centre[0]) / 2,
+                        (own_centre[1] + other_centre[1]) / 2))
+        return [o for o in options
+                if distance(unit.position, o) > self.support_radius * 0.5]
 
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
         plans: List = []
         loop = context.snapshot.game_loop
+        budget = h_loops(context, self.max_h)
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive:
                 continue
             capability = context.capabilities[actor]
             if capability.healer:
-                continue                      # S2 escort handles supports
+                continue                      # S2 escort owns supports
             if context.attackable_enemies(actor):
                 continue                      # fighting units keep firing
-            # live heal/burst tasks are not pulled away unconditionally
             if capability.suicide_attack and memory.instance_for(
                     "burst_engage", actor):
+                continue                      # live burst task not pulled away
+            if memory.retry_blocked(self.name, [actor], "merge", loop):
                 continue
             instance = memory.instance_for(self.name, actor)
-            if instance is not None:
-                if loop - instance.start_loop > h_loops(context, self.max_h):
-                    memory.drop_instance(instance.instance_id, "timeout")
-                    instance.retry_after_loop = loop + h_loops(
-                        context, self.retry_h)
-                    continue
-                if instance.phase == "cooldown" and instance.retry_after_loop \
-                        and loop < instance.retry_after_loop:
-                    continue
-            goal = self._merge_goal(context, actor)
-            if goal is None:
+            options = self._merge_options(context, actor)
+            if not options:
                 continue
             telemetry.count(self.name, "applicable")
-            move = best_move_toward(context, actor, goal)
-            if move is not None:
-                no_progress = instance is not None and memory.displacement(
-                    actor, h_loops(context, self.no_progress_h),
-                    context.snapshot) < 0.5
+            no_progress = instance is not None and memory.displacement(
+                actor, h_loops(context, self.no_progress_h),
+                context.snapshot) < 0.5
+            for goal in options[:2]:          # comparable alternatives
+                move = best_move_toward(context, actor, goal)
+                if move is None:
+                    continue
                 plans.append(make_plan(
                     self.name, {actor: move}, "merge", {actor: move},
                     [EffectClaim("position", actor,
@@ -96,19 +100,23 @@ class RegroupSkill:
                                  "rally_to_merge_goal")],
                     ResourceClaims(controls=(actor,),
                                    space=(space_claim(context, actor, move),)),
-                    Commitment("rallying", 0, max_loops=h_loops(
-                        context, self.max_h)),
-                    {"switch_cost": 0.1 if no_progress else 0.0,
-                     "progress": abs(move_progress(context, actor, move, goal))},
+                    Commitment("rallying", 0, max_loops=budget),
+                    {"switch_cost": 0.1 if no_progress else 0.0},
                     snapshot_id, fingerprint,
                     instance_id=instance.instance_id if instance else None,
                     memory_delta=({"kind": "create", "skill": self.name,
                                    "actors": [actor], "goal": "merge",
-                                   "phase": "rallying",
-                                   "max_loops": h_loops(context, self.max_h),
-                                   "retry_after_loop": loop + h_loops(
-                                       context, self.retry_h + self.max_h)}
+                                   "goal_kind": "area", "phase": "rallying",
+                                   "max_loops": budget,
+                                   "extra": {"waypoint": goal}}
                                   if instance is None else None),
                     rationale="rally toward merge goal"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
+
+
+def _centroid(context, group):
+    positions = [context.snapshot.allies[a].position for a in group
+                 if a in context.snapshot.allies]
+    n = len(positions) or 1
+    return (sum(p[0] for p in positions) / n, sum(p[1] for p in positions) / n)

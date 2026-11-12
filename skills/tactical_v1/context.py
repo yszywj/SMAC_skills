@@ -318,9 +318,15 @@ class Context:
         unit = self.snapshot.allies[actor]
         semantic = self.decode(actor, action)
         if semantic.kind != "move":
-            return PredictedPosition(unit.position, semantic.kind in
-                                     ("stop", "dead", "attack", "heal",
-                                      "keep_heal"), f"hold:{semantic.kind}")
+            # Attack/heal commands may trigger native auto-approach: certain
+            # stationary ONLY when already in effective contact (B6).
+            if semantic.kind == "attack" and semantic.target in self.snapshot.enemies:
+                contact = self.contact_status(actor, semantic.target)
+                return PredictedPosition(
+                    unit.position, contact == IN_RANGE,
+                    f"attack_command_contact_{contact}")
+            return PredictedPosition(unit.position, True,
+                                     f"hold:{semantic.kind}")
         info = self.snapshot.movement_candidates.get(actor, {}).get(action)
         destination = info.get("destination") if info else None
         if destination is None:

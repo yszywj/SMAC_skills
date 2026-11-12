@@ -1,17 +1,19 @@
-"""S3 BurstEngage: consumption-burst approach, timing and split investment.
+"""S3 BurstEngage: consumption-burst approach, timing and split investment (D9).
 
-Replaces ordinary sustained fire AND the low-HP survival value; keeps the
-shared movement/congestion/search tools. "Attack command issuable" is NOT
-"already detonated": out-of-contact candidates are approach/tracking with
-unknown burst timing. All magnitudes are capped coverage OPPORTUNITY
-proxies; the planned self-consumption is counted ONCE (here, not again as
-ordinary damage-taken).
+Unknown contact/explosion damage never makes the legal attack path vanish:
+`contact_status == unknown` still yields an attack ATTEMPT candidate (no
+claimed detonation or window benefit). Proximity is computed from the
+ACTOR's position. A single remaining enemy still gets a meaningful exchange
+attempt. Self-consumption is a planned FUTURE cost, charged only by the
+effects model for in-contact detonations.
 """
 from typing import Dict, List, Optional
 
 from ..context import Context, STOP, distance
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from .common import best_move_toward, make_plan, move_progress, space_claim
+from .common import best_move_toward, h_loops, make_plan, move_progress, space_claim
+
+CONTACT_UNKNOWN = "unknown"
 
 
 class BurstEngageSkill:
@@ -20,10 +22,10 @@ class BurstEngageSkill:
     def __init__(self, config: Dict):
         self.config = config
         params = config.get("burst_engage", {})
-        self.proxy_radius = params.get("proxy_radius", 2.5)   # proxy, not SC2 truth
+        self.proxy_radius = params.get("proxy_radius", 2.5)
         self.value_per_enemy = params.get("value_per_enemy", 2.0)
         self.min_exchange_value = params.get("min_exchange_value", 2.0)
-        self.self_cost = params.get("self_cost", 1.0)         # fraction scale
+        self.self_cost = params.get("self_cost", 1.0)
         self.lonely_exception = params.get("lonely_enemy_exception", True)
 
     def cluster_value(self, context: Context, center) -> float:
@@ -34,19 +36,20 @@ class BurstEngageSkill:
                 value += self.value_per_enemy * weight
         return value
 
-    def _best_clusters(self, context: Context, current_goal=None) -> List:
-        """Diverse retention: current target, high-coverage, near-approachable."""
-        scored = []
-        for enemy_id, enemy in sorted(context.snapshot.enemies.items()):
-            scored.append((enemy_id, enemy.position,
-                           self.cluster_value(context, enemy.position),
-                           distance((0, 0), enemy.position)))
+    def _regions(self, context: Context, actor: str,
+                 current_goal: Optional[str]) -> List:
+        """Diverse regions: current target, high coverage, near-approachable —
+        proximity measured FROM THE ACTOR, never from (0, 0)."""
+        unit = context.snapshot.allies[actor]
+        scored = [(enemy_id, enemy.position,
+                   self.cluster_value(context, enemy.position),
+                   distance(unit.position, enemy.position))
+                  for enemy_id, enemy in sorted(context.snapshot.enemies.items())]
         if not scored:
             return []
-        by_value = sorted(scored, key=lambda s: (-s[2], s[0]))
+        ordered = sorted(scored, key=lambda s: (s[0] != current_goal, -s[2], s[3]))
         result, seen = [], set()
-        for enemy_id, position, value, _ in sorted(
-                scored, key=lambda s: (s[0] != current_goal, -s[2], s[0])):
+        for enemy_id, position, value, _ in ordered:
             if enemy_id not in seen:
                 result.append((enemy_id, position, value))
                 seen.add(enemy_id)
@@ -66,42 +69,58 @@ class BurstEngageSkill:
         lonely = len(context.snapshot.enemies) == 1 and self.lonely_exception
         for actor in banelings:
             instance = memory.instance_for(self.name, actor)
-            current_goal = instance.goal if instance and \
-                instance.goal.startswith("e") else None
-            # 1. detonation opportunity: issuable AND in physical contact
-            best = None
+            current_goal = instance.goal if instance is not None and \
+                instance.goal_kind == "enemy" else None
+            # 1. detonation ATTEMPT: issuable attack; in-range contact is not
+            #    required (unknown contact keeps the attempt, no fake credit)
+            attempts = []
             for enemy_id in sorted(context.snapshot.enemies):
                 if not context.can_issue_attack(actor, enemy_id):
                     continue
-                if context.contact_status(actor, enemy_id) != "in_range":
-                    continue   # command issuable but not yet in burst contact
+                contact = context.contact_status(actor, enemy_id)
+                if contact == "out_of_range":
+                    continue
                 value = self.cluster_value(
                     context, context.snapshot.enemies[enemy_id].position)
-                if best is None or value > best[0]:
-                    best = (value, enemy_id)
+                attempts.append((value, enemy_id, contact))
+            attempts.sort(reverse=True)
             threshold = 0.0 if lonely else self.min_exchange_value
-            if best is not None and best[0] >= threshold:
-                value, enemy_id = best
+            best = next((a for a in attempts if a[0] >= threshold), None)
+            if best is not None:
+                value, enemy_id, contact = best
                 action = context.attack_action(actor, enemy_id)
+                effects = [EffectClaim(
+                    "coverage", enemy_id, None, max(context.H, 1), HEURISTIC,
+                    "burst_attempt_contact_" + contact)]
+                if contact == "in_range":
+                    # only a genuine in-contact detonation plans the cost;
+                    # the effects model charges it once, never here again
+                    effects.append(EffectClaim(
+                        "loss", actor, self.self_cost, max(context.H, 1),
+                        HEURISTIC, "planned_self_consumption_once"))
                 plans.append(make_plan(
                     self.name, {actor: action}, enemy_id, {actor: action},
-                    [EffectClaim("coverage", enemy_id, None, max(context.H, 1),
-                                 HEURISTIC,
-                                 "in_contact_burst_opportunity_timing_unknown"),
-                     EffectClaim("loss", actor, self.self_cost, max(context.H, 1),
-                                 HEURISTIC, "planned_self_consumption_once")],
+                    effects,
                     ResourceClaims(controls=(actor,)),
-                    Commitment("bursting", 0, max_loops=2 * max(context.H, 1)),
+                    Commitment("bursting", 0, max_loops=2 * context.H),
                     {"urgency": 0.5}, snapshot_id, fingerprint,
                     provider="burst_engage",
                     instance_id=instance.instance_id if instance else None,
-                    rationale=f"burst opportunity at {enemy_id} "
-                              f"(proxy value {value:.1f})"))
+                    memory_delta=({"kind": "create", "skill": self.name,
+                                   "actors": [actor], "goal": enemy_id,
+                                   "goal_kind": "enemy",
+                                   "phase": "bursting"}
+                                  if instance is None else
+                                  {"kind": "retarget",
+                                   "instance_id": instance.instance_id,
+                                   "goal": enemy_id, "goal_kind": "enemy"}
+                                  if instance.goal != enemy_id else None),
+                    rationale=f"burst attempt at {enemy_id} "
+                              f"(contact={contact}, proxy value {value:.1f})"))
                 continue
-            # 2. approach candidates: diverse cluster regions
-            clusters = self._best_clusters(context, current_goal)
-            worthwhile = [c for c in clusters
-                          if c[2] >= threshold or lonely]
+            # 2. approach candidates: diverse regions, signed progress
+            regions = self._regions(context, actor, current_goal)
+            worthwhile = [r for r in regions if r[2] >= threshold or lonely]
             if worthwhile:
                 for enemy_id, position, value in worthwhile[:2]:
                     move = best_move_toward(context, actor, position)
@@ -110,32 +129,36 @@ class BurstEngageSkill:
                     plans.append(make_plan(
                         self.name, {actor: move}, enemy_id, {actor: move},
                         [EffectClaim("position", actor,
-                                     move_progress(context, actor, move, position),
+                                     move_progress(context, actor, move,
+                                                   position),
                                      max(context.H, 1), HEURISTIC,
                                      "approach_burst_region")],
                         ResourceClaims(
                             controls=(actor,),
                             space=(space_claim(context, actor, move),)),
                         Commitment("approaching", 0,
-                                   max_loops=40 * max(context.H, 1),
+                                   max_loops=40 * context.H,
                                    interrupt_on=("no_progress", "danger_change")),
-                        {"progress": abs(move_progress(
-                            context, actor, move, position))},
+                        {"progress": move_progress(context, actor, move,
+                                                   position)},
                         snapshot_id, fingerprint, provider="burst_engage",
                         instance_id=instance.instance_id if instance else None,
                         memory_delta=({"kind": "create", "skill": self.name,
                                        "actors": [actor], "goal": enemy_id,
-                                       "phase": "approaching"}
+                                       "goal_kind": "enemy",
+                                       "phase": "approaching",
+                                       "max_loops": 40 * context.H,
+                                       "extra": {"waypoint": position}}
                                       if instance is None else None),
                         rationale=f"approach burst region {enemy_id}"))
                 continue
-            # 3. nothing worth the trade: hold (declared, not a fake no-op)
+            # 3. nothing worth the trade: hold (declared, real Stop)
             plans.append(make_plan(
                 self.name, {actor: STOP}, "hold", {actor: STOP},
                 [EffectClaim("position", actor, None, max(context.H, 1),
                              HEURISTIC, "declined_low_value_contact")],
                 ResourceClaims(controls=(actor,)),
-                Commitment("declined", 0, max_loops=4 * max(context.H, 1),
+                Commitment("declined", 0, max_loops=4 * context.H,
                            interrupt_on=("danger_change",)),
                 {"hold_value": 0.2}, snapshot_id, fingerprint,
                 provider="burst_engage",

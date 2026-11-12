@@ -1,15 +1,16 @@
-"""G3 CombatReposition: retreat, sidestep, pursuit and hold IN the cycle.
+"""G3 CombatReposition: retreat, sidestep, pursuit and hold IN the cycle (D3).
 
-One comparison over several move classes plus keep-attacking (via G1). The
-movement decision compares the LOST window output (only when a shot could
-actually land) against the risk/congestion change at the predicted
-position. Colossus runs the same flow with S1 impact/coverage hooks.
+Candidates are classified by GEOMETRY against the target/threat directions
+(pursuit = closing on the target, retreat = growing min-threat distance,
+sidestep = neither), so each class is genuinely non-empty. The lost window
+shot is already priced by the physical scoring (attack action earns its
+damage, the move does not); it is NOT charged a second time as switch cost.
 """
 from typing import Dict, List, Optional
 
 from ..context import Context, STOP, distance
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from .common import best_move_away, best_move_toward, make_plan, move_progress, space_claim
+from .common import best_move_toward, h_loops, make_plan, move_progress, space_claim
 
 
 class CombatRepositionSkill:
@@ -20,6 +21,25 @@ class CombatRepositionSkill:
         self.providers = providers or {}
         self.max_candidates = config.get("search", {}).get(
             "max_candidates_per_unit", 6)
+
+    def _classify(self, context: Context, actor: str, action: int,
+                  target_id: str, threats) -> str:
+        unit = context.snapshot.allies[actor]
+        enemy = context.snapshot.enemies[target_id]
+        destination = context.move_destinations(actor).get(action)
+        if destination is None:
+            return "hold"
+        to_target = distance(unit.position, enemy.position) - \
+            distance(destination, enemy.position)
+        if to_target > 0.15:
+            return "pursuit"
+        threat_gains = [distance(context.snapshot.enemies[e].position,
+                                 destination) -
+                        distance(context.snapshot.enemies[e].position,
+                                 unit.position) for e in threats]
+        if threat_gains and min(threat_gains) > 0.15:
+            return "retreat"
+        return "sidestep"
 
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
@@ -39,64 +59,66 @@ class CombatRepositionSkill:
             telemetry.count(self.name, "applicable")
             estimate = context.fire_estimate(actor, attackable[0])
             shot_available = estimate.window_shots >= 1
-            # Opportunity actually lost by moving: a real window shot only
-            # (cooldown > H or out of range => nothing lost this window).
-            lost = estimate.damage_est if shot_available else 0.0
-            lost_norm = min((lost or 0.0) /
-                            max(context.snapshot.enemies[attackable[0]].max_health, 1.0), 1.0)
             risk_now = context.risk_at(actor, unit.position)
-            under_fire = (unit.health_lost + unit.shield_lost > 0
-                          and risk_now.threats) or risk_now.effect_weapon_near
-            cooldown_long = unit.weapon_cooldown_loops > context.H
+            under_pressure = (unit.health_lost + unit.shield_lost > 0
+                              and risk_now.threats) or risk_now.effect_weapon_near
+            cooldown_window = unit.weapon_cooldown_loops > context.H
             melee = capability.combat_class == "melee"
-            worth_moving = (cooldown_long or not shot_available) or \
-                           (under_fire and (melee is False or
-                                            unit.health_fraction < 0.5))
+            # full-health ranged may still reposition inside a valuable
+            # cooldown window; melee only when contact can be kept
+            worth_moving = cooldown_window or not shot_available or \
+                (under_pressure and not melee) or \
+                (under_pressure and melee and unit.health_fraction < 0.5)
             if not worth_moving:
                 continue
             target_id = attackable[0]
             enemy = context.snapshot.enemies[target_id]
-            # candidate classes: retreat, sidestep, pursuit
-            classes: List[tuple] = []
-            retreat = best_move_away(context, actor, list(risk_now.threats))
-            if retreat is not None:
-                classes.append(("retreat", retreat))
+            # one candidate per class, classified by geometry (D3)
+            by_class: Dict[str, int] = {}
             for action in sorted(context.move_destinations(actor)):
-                if action not in (c[1] for c in classes):
-                    classes.append(("sidestep", action))
-            pursuit = best_move_toward(context, actor, enemy.position)
-            if pursuit is not None and pursuit not in (c[1] for c in classes):
-                classes.append(("pursuit", pursuit))
+                label = self._classify(context, actor, action, target_id,
+                                       risk_now.threats)
+                if label not in by_class:
+                    by_class[label] = action
             provider = self.providers.get("splash_fire")
-            for label, move in classes[:self.max_candidates]:
+            budget = h_loops(context, 8.0)
+            for label, move in sorted(by_class.items()):
                 prediction = context.predict_position(actor, move)
-                risk_after = context.risk_at(actor, prediction.position)
-                # melee: leaving the contact face must be paid for explicitly
-                if melee:
+                if melee and label != "pursuit":
                     after = distance(prediction.position, enemy.position)
                     relation = context.snapshot.relations[actor][target_id]
                     if after > (relation.native_weapon_range or 2.0) + 1.0:
-                        continue      # keeps contact or it is a G4 decision
+                        continue      # leaving the contact face is a G4 matter
                 coverage = 0.0
                 if capability.specialization == "splash_fire" \
                         and provider is not None:
                     coverage = min(provider.reposition_coverage(
                         context, actor, move, target_id) / 4.0, 1.0)
+                instance = memory.instance_for(self.name, actor)
                 plans.append(make_plan(
                     self.name, {actor: move}, target_id, {actor: move},
                     [EffectClaim("position", actor,
-                                 move_progress(context, actor, move, enemy.position),
+                                 move_progress(context, actor, move,
+                                               enemy.position),
                                  max(context.H, 1), HEURISTIC,
                                  f"reposition_{label}")],
                     ResourceClaims(controls=(actor,),
                                    space=(space_claim(context, actor, move),)),
-                    Commitment("repositioning", 0, max_loops=8 * max(context.H, 1),
+                    Commitment("repositioning", 0, max_loops=budget,
                                interrupt_on=("weapon_ready", "danger_change")),
-                    {"switch_cost": lost_norm * 0.5,   # bounded lost-output cost
-                     "progress": coverage * 0.3},
+                    # the lost window shot is priced by physics only (D3)
+                    {"progress": coverage * 0.3},
                     snapshot_id, fingerprint,
-                    provider="splash_fire" if capability.specialization == "splash_fire"
-                    and provider else None,
+                    provider="splash_fire"
+                    if capability.specialization == "splash_fire" and provider
+                    else None,
+                    instance_id=instance.instance_id if instance else None,
+                    memory_delta=({"kind": "create", "skill": self.name,
+                                   "actors": [actor], "goal": target_id,
+                                   "goal_kind": "enemy",
+                                   "phase": "repositioning",
+                                   "max_loops": budget}
+                                  if instance is None else None),
                     rationale=f"{label} during weapon cycle"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

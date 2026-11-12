@@ -64,10 +64,21 @@ class SkillManager:
         self.config["_fingerprint"] = config_fingerprint(self.config)
         self.posture = posture
         self.skills = build_skills(self.config)
+        enabled = self.config.get("enabled", {})
+        # real mechanism switches reach the FINAL effect/scoring path (B3)
         self.evaluator = Evaluator(
             self.config.get("weights"),
-            coverage_radius=self.config.get("splash_fire", {}).get(
-                "coverage_radius", 3.0))
+            mechanisms={"splash": bool(enabled.get("splash_fire", True)),
+                        "burst": bool(enabled.get("burst_engage", True))},
+            splash_radius=self.config.get("splash_fire", {}).get(
+                "coverage_radius", 3.0),
+            splash_weight=self.config.get("splash_fire", {}).get(
+                "coverage_weight", 0.5),
+            burst_radius=self.config.get("burst_engage", {}).get(
+                "proxy_radius", 2.5),
+            burst_weight=0.5,
+            burst_self_cost=self.config.get("burst_engage", {}).get(
+                "self_cost", 1.0))
         self.coordinator = Coordinator(self.config, self.evaluator)
         lifecycle = self.config.get("lifecycle", {})
         self.memory = TacticalMemory(
@@ -118,8 +129,13 @@ class SkillManager:
         context = Context(snapshot)
         risk_now = {a: len(context.risk_at(a, snapshot.allies[a].position).threats)
                     for a in snapshot.allies if snapshot.allies[a].alive}
+        # observation phase FIRST: compare with the last committed record,
+        # then update confirmed facts (arrivals, timeouts, invalidations).
+        # Only after this may read-only candidates be generated.
         self.memory.retire_invalid(snapshot)
         self.memory.observe(snapshot, risk_now)
+        for event in self.memory.update_task_facts(snapshot, context):
+            self.telemetry.log(event)
         actions, summary, plans = self.coordinator.decide(
             context, self.skills, self.memory, self.telemetry, n_agents)
         self.stats["steps"] += 1
@@ -137,4 +153,5 @@ class SkillManager:
             return
         snapshot, plans, actions, risk_now = pending
         actions_by_actor = {f"u{i}": a for i, a in enumerate(final_actions)}
-        self.memory.commit(snapshot, actions_by_actor, plans, risk_now)
+        self.memory.commit(snapshot, actions_by_actor, plans, risk_now,
+                           context=Context(snapshot))

@@ -1,55 +1,127 @@
-"""A1: the complete, always-legal baseline plan P0.
-
-Built BEFORE any search from the shared queries, so beam entries are always
-compared against a full executable plan — never an empty 0-score plan.
-Conservative per class: keep/choose legal attacks by window rules, approach,
-search; medivacs heal/follow with occupancy respected (never chase enemies);
-banelings get basic engage/wait (no burst optimization when S3 is off).
+"""A1/A3: the complete, always-legal baseline plan P0 and the context-aware
+refill used by search/repair. Refill knows what is already kept: observed
+heal ownership, this step's kept heal assignments, committed window fire and
+kept contact slots — it never re-assigns an occupied patient or re-creates
+an already-satisfied kill.
 """
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
-from .context import Context, STOP
-from .contracts import CALIBRATED, HEURISTIC
+from .actions import KEEP_HEAL_ORDER
+from .context import Context, STOP, distance
 
 
-def baseline_actions(context: Context, memory, skills) -> Dict[str, int]:
+def baseline_actions(context: Context, memory, skills,
+                     reserved: Optional[Dict[str, int]] = None,
+                     reserved_plans: Iterable = (),
+                     only: Optional[Iterable[str]] = None
+                     ) -> Dict[str, int]:
+    """Conservative complete policy.
+
+    reserved / reserved_plans: already-kept final actions of the joint plan
+    being repaired or substituted. only: compute just these actors (the
+    released ones); default computes everyone (P0).
+    """
     snapshot = context.snapshot
+    targets = set(only) if only is not None else None
+    # -- context from kept actions ------------------------------------------
+    kept_actions = {a: act for a, act in (reserved or {}).items()
+                    if targets is None or a not in targets}
+    heal_taken = _kept_heal_assignments(context, kept_actions)
+    committed_fire = _committed_fire(context, kept_actions)
+    owners = context.heal_occupancy()
     actions: Dict[str, int] = {}
-    search_waypoint = None
-    if not snapshot.enemies:
-        # deterministic shared search direction: toward the map search point
-        search_waypoint = snapshot.search_location
+    search_waypoint = snapshot.search_location if not snapshot.enemies else None
+    # pre-reserve kept healer actions so the WHOLE call shares one capacity
+    for actor, action in kept_actions.items():
+        if actor in context.snapshot.allies                 and context.capabilities.get(actor, object()).healer:
+            semantic = context.decode(actor, action)
+            if semantic.kind in ("heal", KEEP_HEAL_ORDER) and semantic.target:
+                heal_taken.setdefault(semantic.target, actor)
     for actor, unit in sorted(snapshot.allies.items()):
+        if targets is not None and actor not in targets:
+            continue
         if not unit.alive:
             actions[actor] = 0
             continue
         capability = context.capabilities[actor]
         if capability.healer:
-            actions[actor] = _medivac_baseline(context, actor, memory)
+            action = _medivac_baseline(context, actor, memory,
+                                       owners, heal_taken)
+            semantic = context.decode(actor, action)
+            if semantic.kind in ("heal", KEEP_HEAL_ORDER) and semantic.target:
+                heal_taken.setdefault(semantic.target, actor)
+            actions[actor] = action
             continue
         if capability.suicide_attack:
             actions[actor] = _baneling_baseline(context, actor, memory,
-                                                skills)
+                                                skills, committed_fire)
             continue
         actions[actor] = _combat_baseline(context, actor, memory,
-                                          search_waypoint)
+                                          search_waypoint, committed_fire)
     return actions
 
 
+def _committed_fire(context: Context, kept: Dict[str, int]) -> Dict[str, float]:
+    """Window-qualified known damage already committed by kept actions."""
+    totals: Dict[str, float] = {}
+    for actor, action in kept.items():
+        unit = context.snapshot.allies.get(actor)
+        if unit is None or not unit.alive:
+            continue
+        semantic = context.decode(actor, action)
+        if semantic.kind != "attack" or semantic.target not in context.snapshot.enemies:
+            continue
+        estimate = context.fire_estimate(actor, semantic.target)
+        if estimate.window_shots >= 1 and estimate.damage_est:
+            totals[semantic.target] = totals.get(semantic.target, 0.0) \
+                + estimate.damage_est
+    return totals
+
+
+def _kept_heal_assignments(context: Context,
+                           kept: Dict[str, int]) -> Dict[str, str]:
+    assigned: Dict[str, str] = {}
+    for actor, action in kept.items():
+        if actor not in context.snapshot.allies:
+            continue
+        if not context.capabilities.get(actor, object()).healer:
+            continue
+        semantic = context.decode(actor, action)
+        if semantic.kind in ("heal", KEEP_HEAL_ORDER) and semantic.target:
+            assigned.setdefault(semantic.target, actor)
+    return assigned
+
+
+def _urgency(context: Context, patient: Optional[str]) -> float:
+    if patient is None or patient not in context.snapshot.allies:
+        return 0.0
+    unit = context.snapshot.allies[patient]
+    missing = max(unit.max_health - unit.health, 0.0)
+    return missing / max(unit.max_health, 1.0)
+
+
 def _combat_baseline(context: Context, actor: str, memory,
-                     search_waypoint) -> int:
-    # keep a still-valid attack target (instance), else nearest issuable
+                     search_waypoint, committed_fire) -> int:
+    # keep a still-valid attack target (typed goal: enemy), else nearest
+    # issuable target that is NOT already covered by committed fire
     instance = memory.instance_for("focus_fire", actor)
-    if instance and instance.goal.startswith("e") \
+    if instance is not None and instance.goal_kind == "enemy" \
             and instance.goal in context.snapshot.enemies \
             and context.can_issue_attack(actor, instance.goal):
         return context.attack_action(actor, instance.goal)
-    attackable = context.attackable_enemies(actor)
-    if attackable:
-        return context.attack_action(actor, attackable[0])
+    best = None
+    for enemy_id in context.attackable_enemies(actor):
+        enemy = context.snapshot.enemies[enemy_id]
+        if committed_fire.get(enemy_id, 0.0) >= enemy.effective_health:
+            continue      # kept fire already covers this target
+        best = enemy_id
+        break
+    if best is None and context.attackable_enemies(actor):
+        best = context.attackable_enemies(actor)[0]
+    if best is not None:
+        return context.attack_action(actor, best)
     nearest = context.nearest_enemy(actor)
     if nearest is not None:
-        from .context import distance
         move = _move_toward(context, actor,
                             context.snapshot.enemies[nearest].position)
         if move is not None:
@@ -62,11 +134,11 @@ def _combat_baseline(context: Context, actor: str, memory,
         min(context.legal_actions(actor) or {STOP})
 
 
-def _medivac_baseline(context: Context, actor: str, memory) -> int:
+def _medivac_baseline(context: Context, actor: str, memory,
+                      owners, heal_taken) -> int:
     keep = context.keep_heal_action(actor)
     if keep is not None:
         return keep
-    owners = context.heal_occupancy()
     candidates = sorted(context.snapshot.heal_candidates.get(actor, {}).items(),
                         key=lambda item: (-_urgency(context, item[1].get("target")),
                                           item[0]))
@@ -75,14 +147,15 @@ def _medivac_baseline(context: Context, actor: str, memory) -> int:
             continue
         patient = info.get("target")
         if owners.get(patient) not in (None, actor):
-            continue      # observed occupancy: the order still owns this patient
+            continue          # observed order still owns this patient
+        if heal_taken.get(patient, actor) != actor:
+            continue          # this step's capacity: one new source per patient
         return action
-    # approach the neediest unowned patient, else follow the fighting group
-    from .context import distance
     patients = sorted((a for a, u in context.snapshot.allies.items()
                        if u.alive and 0 < u.health < u.max_health
                        and not context.capabilities[a].healer
-                       and owners.get(a) is None),
+                       and owners.get(a) is None
+                       and heal_taken.get(a) is None),
                       key=lambda a: (-_urgency(context, a), a))
     if patients:
         move = _move_toward(context, actor,
@@ -90,7 +163,8 @@ def _medivac_baseline(context: Context, actor: str, memory) -> int:
         if move is not None:
             return move
     fighters = [a for a, u in context.snapshot.allies.items()
-                if u.alive and not context.capabilities[a].healer]
+                if u.alive and not context.capabilities[a].healer
+                and not u.is_flying]
     if fighters:
         centre = (sum(context.snapshot.allies[a].position[0] for a in fighters)
                   / len(fighters),
@@ -103,15 +177,15 @@ def _medivac_baseline(context: Context, actor: str, memory) -> int:
     return STOP
 
 
-def _baneling_baseline(context: Context, actor: str, memory, skills) -> int:
-    burst = skills.get("burst_engage") if skills else None
+def _baneling_baseline(context: Context, actor: str, memory, skills,
+                       committed_fire) -> int:
     instance = memory.instance_for("burst_engage", actor)
-    goal = instance.goal if instance and instance.goal.startswith("e") else None
+    goal = instance.goal if instance is not None and \
+        instance.goal_kind == "enemy" else None
     for enemy_id in sorted(context.snapshot.enemies):
         if goal and enemy_id != goal:
             continue
-        if context.can_issue_attack(actor, enemy_id) \
-                and context.contact_status(actor, enemy_id) == "in_range":
+        if context.can_issue_attack(actor, enemy_id):
             return context.attack_action(actor, enemy_id)
     if goal and goal in context.snapshot.enemies:
         move = _move_toward(context, actor,
@@ -127,18 +201,9 @@ def _baneling_baseline(context: Context, actor: str, memory, skills) -> int:
     return STOP
 
 
-def _urgency(context: Context, patient: Optional[str]) -> float:
-    if patient is None or patient not in context.snapshot.allies:
-        return 0.0
-    unit = context.snapshot.allies[patient]
-    missing = max(unit.max_health - unit.health, 0.0)
-    return missing / max(unit.max_health, 1.0)
-
-
 def _move_toward(context: Context, actor: str, target) -> Optional[int]:
     destinations = context.move_destinations(actor)
     if not destinations:
         return None
-    from .context import distance
     return min(sorted(destinations),
                key=lambda a: (round(distance(destinations[a], target), 3), a))

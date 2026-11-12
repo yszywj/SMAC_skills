@@ -183,6 +183,7 @@ class SkillInstance:
     actors: Tuple[str, ...]
     ally_tags: Tuple[Any, ...]
     goal: str
+    goal_kind: str                  # enemy | ally | position | area | internal
     phase: str
     start_loop: int
     phase_start_loop: int

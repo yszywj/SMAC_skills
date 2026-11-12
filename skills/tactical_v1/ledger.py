@@ -1,11 +1,10 @@
-"""The step resource ledger (R5).
+"""The step resource ledger (A1).
 
-Four separate resource classes. Space claims are structured (actor,
-predicted position, window, collision class, radius, optional hard slot id):
-congestion between DIFFERENT collision classes or without a shared slot is a
-soft penalty evaluated by the evaluator, not a hard exclusion. Release is
-done by REBUILDING from the remaining plans — no error-prone incremental
-subtraction.
+Four separate resource classes. Insertions always use check-then-reserve in
+a deterministic order: a plan is validated against every OTHER plan already
+in the ledger, never against itself. Space claims are structured; only a
+shared contact slot id is a hard exclusion, predicted congestion is a soft
+evaluator penalty. Release rebuilds from the remaining plans.
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
@@ -22,9 +21,13 @@ class Ledger:
 
     @classmethod
     def from_plans(cls, plans: List[CandidatePlan]) -> "Ledger":
+        """Check-then-reserve insertion in deterministic order (A1): a plan
+        conflicting with any OTHER already-reserved plan is skipped, never
+        silently overwriting the occupant table."""
         ledger = cls()
         for plan in sorted(plans, key=lambda p: p.proposal_id):
-            ledger.reserve(plan)
+            if not ledger.conflicts(plan):
+                ledger.reserve(plan)
         return ledger
 
     def clone(self) -> "Ledger":
@@ -33,24 +36,29 @@ class Ledger:
 
     # -- conflict checking --------------------------------------------------
     def conflicts(self, plan: CandidatePlan) -> List[str]:
+        """Conflicts of ``plan`` with every OTHER reserved plan. A plan never
+        conflicts with itself (own proposal_id is excluded)."""
         problems = []
         for actor in plan.controlled_actors:
-            if actor in self.controls:
-                problems.append(f"control:{actor}:{self.controls[actor]}")
+            holder = self.controls.get(actor)
+            if holder is not None and holder != plan.proposal_id:
+                problems.append(f"control:{actor}:{holder}")
         # Hard space exclusions: only identical contact-slot ids clash.
-        claimed_slots = {}
+        claimed_slots: Dict[str, set] = {}
         for existing in self.plans.values():
+            if existing.proposal_id == plan.proposal_id:
+                continue
             for claim in existing.claims.space:
                 if claim.slot_id:
                     claimed_slots.setdefault(claim.slot_id, set()).add(claim.actor)
         for claim in plan.claims.space:
             if claim.slot_id:
-                holders = claimed_slots.get(claim.slot_id, set())
-                outsiders = holders - set(plan.controlled_actors)
+                outsiders = claimed_slots.get(claim.slot_id, set()) \
+                    - set(plan.controlled_actors)
                 if outsiders:
                     problems.append(f"slot:{claim.slot_id}:{sorted(outsiders)}")
-        # Dependencies: every member dependency must be inside this plan or
-        # already controlled by a plan listed as a co-dependency.
+        # Structured dependencies: members must be inside this plan or
+        # already controlled by a co-reserved plan.
         for dependency in plan.dependencies:
             if dependency.kind == "member":
                 missing = [a for a in dependency.refs
@@ -72,7 +80,7 @@ class Ledger:
         self.plans[plan.proposal_id] = plan
 
     def release(self, proposal_id: str) -> None:
-        """Release by rebuilding from the remaining plans (R5)."""
+        """Release by rebuilding from the remaining plans."""
         if proposal_id in self.plans:
             remaining = [p for pid, p in self.plans.items() if pid != proposal_id]
             fresh = Ledger.from_plans(remaining)
