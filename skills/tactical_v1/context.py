@@ -277,9 +277,11 @@ class Context:
             if result is not None:
                 amount_lo, amount_est, amount_hi = result
                 evidence = CALIBRATED
+        # effective_after is the cooldown lower bound; without verified
+        # wind-up/projectile data the arrival time is NOT known exactly.
         return FireEstimate(window_shots, amount_lo, amount_est, amount_hi,
                             evidence, int(cooldown) if cooldown >= 0 else None,
-                            True)
+                            False)
 
     def _damage(self, actor: str, enemy_id: str):
         try:
@@ -338,7 +340,10 @@ class Context:
         reach = speed * horizon / 22.4
         gap = distance(unit.position, destination)
         if reach >= gap:
-            return PredictedPosition(destination, True, "speed_sufficient")
+            # full step reachable, but with no collision/path model the
+            # arrival point stays uncertain (B7)
+            return PredictedPosition(destination, False,
+                                     "speed_sufficient_path_unmodeled")
         fraction = reach / gap if gap > 0 else 1.0
         point = (unit.position[0] + (destination[0] - unit.position[0]) * fraction,
                  unit.position[1] + (destination[1] - unit.position[1]) * fraction)

@@ -16,13 +16,16 @@
     "kill": 2.0,
     "heal": 1.5,
     "coverage": 1.0,
-    "progress": 0.6,
     "risk": 0.8,
     "congestion": 0.2,
     "switch": 0.3,
     "reentry_cost": 0.2,
     "planned_loss": 1.5,
-    "hold_value": 0.3
+    "hold_value": 0.3,
+    "tactic_progress": 0.6,
+    "link": 0.8,
+    "meeting": 0.8,
+    "role": 0.6
   },
   "search": {
     "beam_width": 8,

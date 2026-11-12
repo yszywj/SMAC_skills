@@ -58,17 +58,25 @@ class DisengageReenterSkill:
         if instance.phase == ESCAPE:
             in_escape_long = loop - instance.phase_start_loop >= h_loops(
                 context, self.escape_max_h)
-            if not risk.threats:
+            safe = not risk.threats and not risk.effect_weapon_near
+            if safe:
                 # risk acceptable: stabilize only when waiting really pays
-                # (a healer exists and health is still low); else REENTER now
-                if healers and unit.health_fraction < self.reenter_frac:
+                # (a NEARBY SERVICEABLE healer, not merely "a medivac exists")
+                # and health is still low; else REENTER now (C4)
+                serviceable = any(
+                    a in context.snapshot.allies
+                    and distance(context.snapshot.allies[a].position,
+                                 unit.position) <= 6.0
+                    for a, cap in context.capabilities.items()
+                    if cap.healer and context.snapshot.allies[a].alive)
+                if serviceable and unit.health_fraction < self.reenter_frac:
                     return STABILIZE
                 return REENTER
             if in_escape_long:
                 return "STILL_DANGEROUS"   # compare kill / terminate paths
             return ESCAPE
         if instance.phase == STABILIZE:
-            if risk.threats:
+            if risk.threats or risk.effect_weapon_near:
                 return ESCAPE        # danger returned: flee again, no reset
             waited = loop - instance.phase_start_loop
             if waited >= h_loops(context, self.stabilize_max_h) \
@@ -88,7 +96,7 @@ class DisengageReenterSkill:
             if not unit.alive or context.capabilities[actor].healer \
                     or context.capabilities[actor].suicide_attack:
                 continue
-            if memory.retry_blocked(self.name, [actor], "escape", loop):
+            if memory.retry_blocked(self.name, [actor], "safe", loop):
                 continue
             instance = memory.instance_for(self.name, actor)
             active = instance is not None and instance.termination_reason is None
@@ -124,7 +132,7 @@ class DisengageReenterSkill:
                         Commitment(ESCAPE, 0, max_loops=total_budget),
                         {}, snapshot_id, fingerprint,
                         instance_id=instance.instance_id if instance else None,
-                        memory_delta=self._delta(instance, ESCAPE, actor),
+                        memory_delta=self._delta(instance, ESCAPE, actor, context=context),
                         rationale="escape: risk improvement available"))
                 elif killable is not None:
                     action = context.attack_action(actor, killable)
@@ -136,7 +144,7 @@ class DisengageReenterSkill:
                         Commitment(ESCAPE, 0, max_loops=total_budget),
                         {}, snapshot_id, fingerprint,
                         instance_id=instance.instance_id if instance else None,
-                        memory_delta=self._delta(instance, ESCAPE, actor),
+                        memory_delta=self._delta(instance, ESCAPE, actor, context=context),
                         rationale="no safe improvement; finish the kill"))
                 else:
                     # escape budget spent and still dangerous: terminate with
@@ -152,7 +160,9 @@ class DisengageReenterSkill:
                         memory_delta=({"kind": "drop",
                                        "instance_id": instance.instance_id,
                                        "reason": "escape_failed"}
-                                      if instance else None),
+                                      if instance else
+                                      {"kind": "retry", "skill": self.name,
+                                       "actors": [actor], "goal": "safe"}),
                         rationale="escape exhausted; hold, retry later"))
                 continue
             if phase == STABILIZE:
@@ -166,7 +176,7 @@ class DisengageReenterSkill:
                         context, self.stabilize_max_h)),
                     {"hold_value": 0.3}, snapshot_id, fingerprint,
                     instance_id=instance.instance_id if instance else None,
-                    memory_delta=self._delta(instance, STABILIZE, actor),
+                    memory_delta=self._delta(instance, STABILIZE, actor, context=context),
                     rationale="stabilize (bounded, conditions real)"))
                 continue
             target = context.nearest_enemy(actor)
@@ -194,14 +204,16 @@ class DisengageReenterSkill:
                         context.snapshot.enemies[target].position)},
                     snapshot_id, fingerprint,
                     instance_id=instance.instance_id if instance else None,
-                    memory_delta=self._delta(instance, REENTER, actor,
-                                             goal=target),
+                    memory_delta=self._delta(instance, REENTER, actor, goal=target,
+                                             context=context),
                     rationale=f"re-enter toward {target}"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
 
-    def _delta(self, instance, phase, actor, goal=None):
-        total_budget = int(self.total_max_h * 8)
+    def _delta(self, instance, phase, actor, goal=None, context=None):
+        # H0-based budget: converted from the control window at task creation
+        # (C4) — never a hardcoded loop constant.
+        total_budget = int((context.H if context else 8) * self.total_max_h)
         if instance is None:
             return {"kind": "create", "skill": self.name, "actors": [actor],
                     "goal": goal or "safe", "goal_kind": "internal",

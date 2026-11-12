@@ -172,6 +172,12 @@ class CandidatePlan:
     proposed_memory_delta: Dict[str, Any]  # applied only if selected
     atomic: bool = False                   # multi-unit plans execute whole
     rationale: str = ""
+    # 1.2: real, evaluator-readable goal. goal_kind/goal_data describe WHERE
+    # and WHY; task_key is stable across steps for the same duty + real unit
+    # identities + normalized target (independent of proposal_id/order).
+    goal_kind: str = "internal"            # enemy/ally/position/group_link/meeting/internal
+    goal_data: Dict[str, Any] = field(default_factory=dict)
+    task_key: str = ""
 
 
 @dataclass

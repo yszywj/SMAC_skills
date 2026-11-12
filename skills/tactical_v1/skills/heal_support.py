@@ -116,12 +116,23 @@ class HealSupportSkill:
                                    "instance_id": instance.instance_id,
                                    "goal": patient, "goal_kind": "ally"}
                                   if instance.goal != patient else None),
+                    goal_kind="ally",
+                    goal_data={"target_id": patient},
                     rationale=f"heal {patient}" +
                               (" (owned by observed order)" if taken else "")))
-            # 3. joint medivac+patient move (atomic, few): both step closer
-            if patients:
+            # 3. joint medivac+patient move (atomic, few). POTENTIAL
+            # patients: wounded allies NOT yet in a legal heal position —
+            # exactly the set a meeting is FOR (E3), plus the neediest legal
+            # patient when a safer spot genuinely helps.
+            potential = [a for a, u in sorted(context.snapshot.allies.items())
+                         if u.alive and not context.capabilities[a].healer
+                         and 0 < u.health < u.max_health
+                         and owners.get(a) in (None, actor)]
+            meet_pool = [p for p in potential if p not in patients]
+            meet_pool += [p for p in patients[:1]]
+            if meet_pool:
                 joint_budget = 2
-                for patient in patients[:joint_budget]:
+                for patient in meet_pool[:joint_budget]:
                     goal = context.snapshot.allies[patient].position
                     meet = ((goal[0] + context.snapshot.allies[actor].position[0]) / 2,
                             (goal[1] + context.snapshot.allies[actor].position[1]) / 2)
@@ -152,6 +163,9 @@ class HealSupportSkill:
                         atomic=True,
                         beneficiaries=(patient,),
                         dependencies=(Dependency("member", (actor, patient)),),
+                        goal_kind="meeting",
+                        goal_data={"healer": actor, "patient": patient,
+                                   "position": list(meet)},
                         rationale=f"joint approach: {actor} and {patient}"))
             # 4. own danger: shared safe-move escape competes (S2.10)
             risk = context.risk_at(actor, context.snapshot.allies[actor].position)
@@ -192,6 +206,8 @@ class HealSupportSkill:
                                 Commitment("escort", 0, max_loops=6 * context.H),
                                 {}, snapshot_id, fingerprint,
                                 provider="heal_support",
+                                goal_kind="position",
+                                goal_data={"waypoint": list(goal)},
                                 rationale="follow effective friendly squad"))
                     else:
                         plans.append(make_plan(

@@ -163,6 +163,8 @@ class CoordinatedEngageSkill:
                     snapshot_id, fingerprint,
                     instance_id=instance.instance_id if instance else None,
                     dependencies=(Dependency("target_valid", (target_id,)),),
+                    goal_kind="enemy",
+                    goal_data={"target_id": target_id, "waypoint": goal},
                     memory_delta=({"kind": "create", "skill": self.name,
                                    "actors": [actor], "goal": target_id,
                                    "goal_kind": "enemy",
@@ -185,6 +187,13 @@ class CoordinatedEngageSkill:
                     Commitment("waiting", 0, max_loops=h_loops(
                         context, self.wait_max_h)),
                     {"hold_value": 0.3}, snapshot_id, fingerprint,
+                    goal_kind="enemy",
+                    goal_data={"target_id": target_id, "waypoint": goal},
+                    memory_delta={"kind": "create", "skill": self.name,
+                                  "actors": [actor], "goal": target_id,
+                                  "goal_kind": "enemy", "phase": "waiting",
+                                  "max_loops": h_loops(context,
+                                                       self.wait_max_h)},
                     rationale="bounded wait for squad contact"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

@@ -122,6 +122,9 @@ class LocalFormationSkill:
                                 - distance(prediction.position, role_goal), 2.0)
                 if gain > best_gain:
                     best_action, best_gain = action, gain
+            guards = [a for a, u in sorted(context.snapshot.allies.items())
+                      if a != actor and u.alive and not u.is_flying
+                      and distance(u.position, unit.position) <= 6.0]
             if best_action is not None:
                 plans.append(make_plan(
                     self.name, {actor: best_action}, "formation",
@@ -135,6 +138,15 @@ class LocalFormationSkill:
                     Commitment("adjusting", 0, max_loops=budget),
                     {"switch_cost": 0.1 if attackable else 0.0},
                     snapshot_id, fingerprint,
+                    goal_kind=(
+                        "role" if context.capabilities[actor].specialization == "splash_fire"
+                        and guards else "position"),
+                    goal_data=(
+                        {"role": "colossus_protected", "actor": actor,
+                         "guards": guards}
+                        if context.capabilities[actor].specialization == "splash_fire"
+                        and guards else {"position": list(role_goal or
+                                                          unit.position)}),
                     rationale=("spread from splash danger" if under_splash
                                else "role/quality position adjustment")))
             # two-unit atomic adjustment: the crowded pair steps apart TOGETHER

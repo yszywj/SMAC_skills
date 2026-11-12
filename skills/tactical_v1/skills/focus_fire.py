@@ -144,6 +144,8 @@ class FocusFireSkill:
                     snapshot_id, fingerprint, provider=provider,
                     instance_id=instance.instance_id if instance else None,
                     memory_delta=delta,
+                    goal_kind="enemy",
+                    goal_data={"target_id": enemy_id},
                     rationale=f"attack {enemy_id}"))
         plans.extend(self._joint_interceptions(
             context, memory, telemetry, attackers, fingerprint, snapshot_id))
@@ -205,6 +207,8 @@ class FocusFireSkill:
                                                          self.kill_window_h)),
                             {"urgency": self.urgency_value},
                             snapshot_id, fingerprint, atomic=True,
+                            goal_kind="enemy",
+                            goal_data={"target_id": enemy_id},
                             dependencies=(Dependency("member",
                                                      tuple(sorted(members))),
                                          Dependency("target_valid", (enemy_id,)),

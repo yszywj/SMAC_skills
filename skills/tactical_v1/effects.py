@@ -178,8 +178,10 @@ def physical_effects(context: Context, actions: Dict[str, int],
                 continue
             primary = snapshot.enemies[enemy_id]
             for other_id, other in sorted(snapshot.enemies.items()):
-                if other.is_flying and not _can_hit_ground(capability):
-                    continue   # domain-compatible targets only
+                # colossus/baneling mechanisms are GROUND-domain in this
+                # roster: flying neighbours never enter coverage (B7)
+                if other.is_flying:
+                    continue
                 if other_id == enemy_id and report.damage_known.get(enemy_id, 0.0) > 0:
                     continue   # known single-target damage is not re-packaged
                 if distance(other.position, primary.position) <= radius:
@@ -207,7 +209,3 @@ def physical_effects(context: Context, actions: Dict[str, int],
     return report
 
 
-def _can_hit_ground(capability) -> bool:
-    # splash/burst mechanisms in this roster are ground-domain; kept explicit
-    # so the domain check stays visible when flying targets appear.
-    return True

@@ -61,6 +61,18 @@ class RegroupSkill:
         return [o for o in options
                 if distance(unit.position, o) > self.support_radius * 0.5]
 
+    def _link_pairs(self, context: Context, actor: str):
+        """The comparable (own group, other group) pairs for this actor,
+        FIXED for the whole search from the current visible state (B3)."""
+        groups = context.engagement_groups(self.support_radius)
+        own = next((g for g in groups if actor in g), [actor])
+        pairs = []
+        for other in groups:
+            if other == own:
+                continue
+            pairs.append((own, other))
+        return own, pairs
+
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
@@ -88,10 +100,18 @@ class RegroupSkill:
             no_progress = instance is not None and memory.displacement(
                 actor, h_loops(context, self.no_progress_h),
                 context.snapshot) < 0.5
+            own, pairs = self._link_pairs(context, actor)
             for goal in options[:2]:          # comparable alternatives
                 move = best_move_toward(context, actor, goal)
                 if move is None:
                     continue
+                # the REAL evaluator goal: which support link this closes
+                other = min((p[1] for p in pairs),
+                            key=lambda g: min(
+                                distance(unit.position,
+                                         context.snapshot.allies[a].position)
+                                for a in g if a in context.snapshot.allies),
+                            default=None)
                 plans.append(make_plan(
                     self.name, {actor: move}, "merge", {actor: move},
                     [EffectClaim("position", actor,
@@ -110,6 +130,14 @@ class RegroupSkill:
                                    "max_loops": budget,
                                    "extra": {"waypoint": goal}}
                                   if instance is None else None),
+                    goal_kind="group_link",
+                    goal_data={
+                        "group_a": sorted(own),
+                        "group_b": sorted(other) if other else [],
+                        "support_radius": self.support_radius,
+                        "scale": 4.0, "position": list(goal)},
+                    task_key="|".join(("regroup", ",".join(sorted(own)),
+                                       ",".join(sorted(other or [])))),
                     rationale="rally toward merge goal"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

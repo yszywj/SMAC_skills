@@ -85,9 +85,9 @@ class BurstEngageSkill:
                 attempts.append((value, enemy_id, contact))
             attempts.sort(reverse=True)
             threshold = 0.0 if lonely else self.min_exchange_value
-            best = next((a for a in attempts if a[0] >= threshold), None)
-            if best is not None:
-                value, enemy_id, contact = best
+            viable = [a for a in attempts if a[0] >= threshold][:2]
+            if viable:
+              for value, enemy_id, contact in viable:
                 action = context.attack_action(actor, enemy_id)
                 effects = [EffectClaim(
                     "coverage", enemy_id, None, max(context.H, 1), HEURISTIC,
@@ -117,7 +117,7 @@ class BurstEngageSkill:
                                   if instance.goal != enemy_id else None),
                     rationale=f"burst attempt at {enemy_id} "
                               f"(contact={contact}, proxy value {value:.1f})"))
-                continue
+              continue
             # 2. approach candidates: diverse regions, signed progress
             regions = self._regions(context, actor, current_goal)
             worthwhile = [r for r in regions if r[2] >= threshold or lonely]
@@ -150,6 +150,9 @@ class BurstEngageSkill:
                                        "max_loops": 40 * context.H,
                                        "extra": {"waypoint": position}}
                                       if instance is None else None),
+                        goal_kind="enemy",
+                        goal_data={"target_id": enemy_id,
+                                   "waypoint": list(position)},
                         rationale=f"approach burst region {enemy_id}"))
                 continue
             # 3. nothing worth the trade: hold (declared, real Stop)

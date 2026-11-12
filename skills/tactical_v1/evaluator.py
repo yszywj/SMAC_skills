@@ -1,11 +1,13 @@
-"""Unified full-plan evaluation (A3/B5).
+"""Unified full-plan evaluation (A3/B1-B6).
 
 score_joint reads the FINAL action list, rebuilds physical effects, and
 scores them on shared normalized scales. Per-source damage aggregation: a
 cooling or unknown source never cancels another source's known
-contribution. Intent value (signed progress toward the task goal) is a
-separate capped term; physical value never depends on the skill label.
+contribution. Tactical opportunity (progress toward a declared goal,
+support links, meetings, role positions) is recomputed here from final
+predicted positions — never added up from self-reported features.
 """
+import math
 from typing import Dict, List, Optional, Tuple
 
 from .context import Context, distance
@@ -18,16 +20,35 @@ DEFAULT_WEIGHTS = {
     "kill": 2.0,            # once per target, conservative feasibility only
     "heal": 2.0,            # per bounded heal OPPORTUNITY (uncalibrated proxy)
     "coverage": 1.0,        # saturated opportunity proxy per enemy
-    "progress": 0.6,        # signed intent progress toward the task goal
     "risk": 0.8,            # threats able to reach the FINAL position
     "congestion": 0.2,      # predicted overlaps between same-class movers
     "switch": 0.3,          # abandoning a live instance task
     "reentry_cost": 0.2,
     "planned_loss": 1.5,    # planned in-contact self-consumption, once
     "hold_value": 0.3,      # bounded wait/hold intent value
+    # bounded TACTICAL opportunity terms (B1-B5; engineering starts, not
+    # calibrated game facts)
+    "tactic_progress": 0.6,  # signed approach-to-goal progress per task
+    "link": 0.8,             # support-link closure (G5), once per pair key
+    "meeting": 0.8,          # FUTURE heal opportunity from closing a pair
+    "role": 0.6,             # role-position quality change (G6)
 }
 
 RISK_NORM = 3.0
+
+
+def _dist(a, b) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _clip(value: float) -> float:
+    return max(min(float(value), 1.0), -1.0)
+
+
+def _cap(value: Optional[float], limit: float = 1.0) -> float:
+    if value is None:
+        return 0.0
+    return max(min(float(value), limit), -limit)
 
 
 class Evaluator:
@@ -51,6 +72,172 @@ class Evaluator:
         return physical_effects(context, actions, self.mechanisms,
                                 **self.effect_params)
 
+    # ---------------------------------------------------- B1-B5 tactical terms
+    def _move_scale(self, context: Context, actor: str) -> float:
+        """L: plausible distance inside one window; speed-derived when known,
+        else a flagged conservative constant (no path simulation)."""
+        speed = context.speed(actor)
+        return max(speed * context.H / 22.4, 0.5) if speed else 1.0
+
+    def task_quality(self, context: Context, actions: Dict[str, int],
+                     plans: List[CandidatePlan],
+                     report: EffectsReport) -> Tuple[float, Dict[str, float]]:
+        """Bounded tactical opportunity recomputed from FINAL predicted
+        positions and each task's declared goal; aggregated per normalized
+        task_key so packaging never changes value (B6)."""
+        w = self.weights
+        snapshot = context.snapshot
+        breakdown = {"progress": 0.0, "link": 0.0, "meeting": 0.0,
+                     "role": 0.0}
+        seen_tasks, link_pairs = set(), set()
+        for plan in plans:
+            if plan.task_key and plan.task_key in seen_tasks:
+                continue
+            seen_tasks.add(plan.task_key)
+            kind = plan.goal_kind
+            if kind in ("enemy", "ally", "position"):
+                goal = self._goal_position(context, plan)
+                if goal is None:
+                    continue
+                for actor in plan.controlled_actors:
+                    if actor not in snapshot.allies:
+                        continue
+                    z = report.positions.get(
+                        actor, (snapshot.allies[actor].position, True))[0]
+                    x = snapshot.allies[actor].position
+                    gain = _clip((_dist(x, goal) - _dist(z, goal))
+                                 / self._move_scale(context, actor))
+                    breakdown["progress"] += w["tactic_progress"] * gain
+            elif kind == "group_link":
+                if plan.task_key in link_pairs:
+                    continue
+                link_pairs.add(plan.task_key)
+                breakdown["link"] += w["link"] * self._link_gain(
+                    context, actions, plan, report)
+            elif kind == "meeting":
+                breakdown["meeting"] += w["meeting"] * self._meeting_gain(
+                    context, actions, plan, report)
+            elif kind == "role":
+                breakdown["role"] += w["role"] * self._role_gain(
+                    context, actions, plan, report)
+        total = (breakdown["progress"] + breakdown["link"]
+                 + breakdown["meeting"] + breakdown["role"])
+        return total, breakdown
+
+    def _goal_position(self, context: Context, plan: CandidatePlan):
+        data = plan.goal_data or {}
+        if plan.goal_kind == "enemy":
+            enemy = context.snapshot.enemies.get(plan.goal)
+            return enemy.position if enemy else None
+        if plan.goal_kind == "ally":
+            ally = context.snapshot.allies.get(plan.goal)
+            return ally.position if ally else None
+        position = data.get("position") or data.get("waypoint")
+        return tuple(position) if position else None
+
+    def _link_gain(self, context: Context, actions: Dict[str, int],
+                   plan: CandidatePlan, report: EffectsReport) -> float:
+        """B3: support-gap potential between the two FIXED groups declared in
+        goal_data; gain = current gap minus the plan's final gap. Moving to a
+        'nominal rally point' FARTHER from the other group scores negative."""
+        data = plan.goal_data or {}
+        group_a, group_b = data.get("group_a", []), data.get("group_b", [])
+        radius = data.get("support_radius", 8.0)
+        scale = data.get("scale", 4.0)
+        units = context.snapshot.allies
+        if not group_a or not group_b:
+            return 0.0
+
+        def phi(pa, pb):
+            gaps = [max(0.0, min(_dist(a, b) for b in pb) - radius)
+                    for a in pa]
+            gaps += [max(0.0, min(_dist(b, a) for a in pa) - radius)
+                     for b in pb]
+            return sum(gaps) / len(gaps) if gaps else 0.0
+
+        current_a = [units[a].position for a in group_a if a in units]
+        current_b = [units[b].position for b in group_b if b in units]
+        final_a = [report.positions.get(a, (units[a].position, True))[0]
+                   for a in group_a if a in units]
+        final_b = [report.positions.get(b, (units[b].position, True))[0]
+                   for b in group_b if b in units]
+        if not current_a or not current_b:
+            return 0.0
+        return _clip((phi(current_a, current_b) - phi(final_a, final_b))
+                     / scale)
+
+    def _meeting_gain(self, context: Context, actions: Dict[str, int],
+                      plan: CandidatePlan, report: EffectsReport) -> float:
+        """B5: FUTURE heal opportunity from closing a healer-patient pair.
+        Relative-gap proxy (service range uncalibrated); never a heal amount
+        credited this window."""
+        data = plan.goal_data or {}
+        healer, patient = data.get("healer"), data.get("patient")
+        units = context.snapshot.allies
+        if not healer or not patient or healer not in units \
+                or patient not in units:
+            return 0.0
+        gap_now = _dist(units[healer].position, units[patient].position)
+        gap_after = _dist(
+            report.positions.get(healer, (units[healer].position, True))[0],
+            report.positions.get(patient, (units[patient].position, True))[0])
+        unit = units[patient]
+        need = min(max(unit.max_health - unit.health, 0.0)
+                   / max(unit.max_health, 1.0), 1.0)
+        return need * _clip((gap_now - gap_after)
+                            / (2.0 * self._move_scale(context, healer)))
+
+    def _role_gain(self, context: Context, actions: Dict[str, int],
+                   plan: CandidatePlan, report: EffectsReport) -> float:
+        """B4: bounded role-position quality change. Colossus: behind a REAL
+        front line while keeping output range. Medivac: closer to the wounded
+        without entering domain danger. Current-vs-final potential."""
+        data = plan.goal_data or {}
+        actor = data.get("actor")
+        units = context.snapshot.allies
+        if not actor or actor not in units:
+            return 0.0
+        unit = units[actor]
+        z = report.positions.get(actor, (unit.position, True))[0]
+        if data.get("role") == "colossus_protected":
+            enemies = list(context.snapshot.enemies.values())
+            guards = data.get("guards") or []
+            if not enemies or not guards:
+                return 0.0
+            centre = (sum(e.position[0] for e in enemies) / len(enemies),
+                      sum(e.position[1] for e in enemies) / len(enemies))
+            guard_positions = [units[g].position for g in guards
+                               if g in units]
+            if not guard_positions:
+                return 0.0
+
+            def quality(position):
+                range_error = max(abs(_dist(position, e.position) - 6.0)
+                                  for e in enemies[:3])
+                front = min(_dist(g, centre) for g in guard_positions)
+                behind = max(_dist(position, centre) - front, 0.0)
+                support = max(_dist(position, g) for g in guard_positions)
+                return -(range_error + 0.5 * behind + 0.3 * support)
+
+            return _clip((quality(z) - quality(unit.position)) / 6.0)
+        if data.get("role") == "medivac_support":
+            wounded = [u for u in units.values()
+                       if u.alive and 0 < u.health < u.max_health]
+            risk_now = context.risk_at(actor, unit.position)
+            risk_after = context.risk_at(actor, z)
+
+            def quality(position, risk):
+                if not wounded:
+                    return 0.0
+                nearest = min(_dist(position, w.position) for w in wounded)
+                return -min(nearest, 8.0) - 2.0 * (
+                    len(risk.threats) + len(risk.effect_weapon_near))
+
+            return _clip((quality(z, risk_after)
+                          - quality(unit.position, risk_now)) / 8.0)
+        return 0.0
+
+    # ------------------------------------------------------------ main scoring
     def score_joint(self, context: Context, plans: List[CandidatePlan],
                     actions: Dict[str, int],
                     memory=None) -> Tuple[float, Dict[str, float]]:
@@ -111,14 +298,17 @@ class Evaluator:
                     congestion += 1.0
         breakdown["congestion"] = -w["congestion"] * min(congestion, 4.0)
 
-        # -- intent terms: signed, capped, aggregated per TASK ---------------
-        progress = hold = switch = reentry = 0.0
+        # -- tactical terms: recomputed from FINAL positions and declared
+        # goals; a displacement is counted ONCE here, never again from
+        # self-reported features (B2). Packaging-independent (B6).
+        tactic, tactic_breakdown = self.task_quality(context, actions, plans,
+                                                     report)
+        breakdown.update(tactic_breakdown)
+        hold = switch = reentry = 0.0
         for plan in plans:
-            progress += w["progress"] * _cap(plan.features.get("progress", 0.0))
             hold += w["hold_value"] * _cap(plan.features.get("hold_value", 0.0))
             switch += w["switch"] * _cap(plan.features.get("switch_cost", 0.0))
             reentry += w["reentry_cost"] * _cap(plan.features.get("reentry_cost", 0.0))
-        breakdown["progress"] = progress
         breakdown["hold_value"] = hold
         breakdown["switch"] = -switch
         breakdown["reentry_cost"] = -reentry
@@ -126,13 +316,7 @@ class Evaluator:
         breakdown["planned_loss"] = -planned
 
         total = (damage_score + kill_score + heal_score + breakdown["coverage"]
-                 + progress + hold - risk_score + breakdown["congestion"]
+                 + tactic + hold - risk_score + breakdown["congestion"]
                  - switch - reentry - planned)
         breakdown["total"] = total
         return total, breakdown
-
-
-def _cap(value: Optional[float], limit: float = 1.0) -> float:
-    if value is None:
-        return 0.0
-    return max(min(float(value), limit), -limit)

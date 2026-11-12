@@ -87,20 +87,36 @@ def validate_plans(plans: List[CandidatePlan], context: Context,
                     problems.append(_problem("heal_target_mismatch", True,
                                              plan.proposal_id, actor,
                                              semantic.target))
-        # atomic completeness: every declared member is in THIS plan with the
-        # task's action (real check, not list-membership tautology)
-        if plan.atomic:
-            for dependency in plan.dependencies:
-                if dependency.kind != "member":
+        # A1: member dependency is GENERIC — "execute together", not "all
+        # attack". Joint kill (both attack), joint meeting (both move) and
+        # joint yield (one moves, one stops) must all validate; attack
+        # specifics live ONLY in the fire_window dependency.
+        for dependency in plan.dependencies:
+            if dependency.kind != "member":
+                continue
+            for actor in dependency.refs:
+                if actor not in plan.controlled_actors:
+                    problems.append(_problem("atomic_member_missing", True,
+                                             plan.proposal_id, actor))
                     continue
-                for actor in dependency.refs:
-                    if actor not in plan.controlled_actors:
-                        problems.append(_problem("atomic_member_missing", True,
-                                                 plan.proposal_id, actor))
-                    elif context.decode(actor, plan.current_actions.get(
-                            actor, DEAD_NOOP)).kind != "attack":
-                        problems.append(_problem("atomic_member_not_attacking",
-                                                 True, plan.proposal_id, actor))
+                unit = context.snapshot.allies.get(actor)
+                if unit is None or not unit.alive:
+                    problems.append(_problem("member_dead", True,
+                                             plan.proposal_id, actor))
+                    continue
+                action = plan.current_actions.get(actor)
+                if action is None:
+                    problems.append(_problem("member_action_missing", True,
+                                             plan.proposal_id, actor))
+                    continue
+                if action not in context.legal_actions(actor):
+                    problems.append(_problem("member_action_illegal", True,
+                                             plan.proposal_id, actor,
+                                             str(action)))
+                    continue
+                if actions.get(actor) != action:
+                    problems.append(_problem("member_action_lost", True,
+                                             plan.proposal_id, actor))
         # structured dependencies (A4)
         for dependency in plan.dependencies:
             if dependency.kind not in KNOWN_DEPENDENCY_KINDS:
@@ -108,14 +124,7 @@ def validate_plans(plans: List[CandidatePlan], context: Context,
                                          plan.proposal_id,
                                          target=dependency.kind))
             elif dependency.kind == "member":
-                for actor in dependency.refs:
-                    if actor not in context.snapshot.allies \
-                            or not context.snapshot.allies[actor].alive:
-                        problems.append(_problem("member_dead", True,
-                                                 plan.proposal_id, actor))
-                    elif actions.get(actor) != plan.current_actions.get(actor):
-                        problems.append(_problem("member_action_lost", True,
-                                                 plan.proposal_id, actor))
+                pass    # fully handled by the generic block above
             elif dependency.kind == "target_valid":
                 for enemy_id in dependency.refs:
                     if enemy_id not in context.snapshot.enemies:
@@ -123,20 +132,34 @@ def validate_plans(plans: List[CandidatePlan], context: Context,
                                                  plan.proposal_id,
                                                  target=enemy_id))
             elif dependency.kind == "fire_window":
-                # every promised fire member is window-qualified NOW; the
-                # total is re-derived from the physical report, not strings
+                # attack-specific: members decode to the target, are
+                # window-qualified NOW, and the plan's OWN declared sources
+                # conservatively suffice — free third-party fire is never
+                # borrowed to pass an insufficient interception (A1).
                 for enemy_id in dependency.refs:
-                    qualified = (report.window_sources.get(enemy_id, [])
-                                 if report else [])
-                    promised = [a for a in plan.controlled_actors
-                                if plan.current_actions.get(a) is not None
-                                and context.decode(
-                                    a, plan.current_actions[a]).target == enemy_id]
-                    missing = [a for a in promised if a not in qualified]
+                    enemy = context.snapshot.enemies.get(enemy_id)
+                    declared_total = 0.0
+                    missing = []
+                    for actor in plan.controlled_actors:
+                        action = plan.current_actions.get(actor)
+                        if action is None:
+                            continue
+                        semantic = context.decode(actor, action)
+                        if semantic.target != enemy_id:
+                            continue
+                        estimate = context.fire_estimate(actor, enemy_id)
+                        if estimate.window_shots < 1:
+                            missing.append(actor)
+                            continue
+                        declared_total += estimate.damage_est or 0.0
                     if missing:
                         problems.append(_problem("fire_window_not_met", True,
                                                  plan.proposal_id,
                                                  target=",".join(missing)))
+                    elif enemy is not None and declared_total <                             enemy.effective_health:
+                        problems.append(_problem(
+                            "fire_window_total_insufficient", True,
+                            plan.proposal_id, target=enemy_id))
             elif dependency.kind == "heal_owner":
                 patient, healer = dependency.refs[0], dependency.refs[1]
                 owners = context.heal_occupancy()

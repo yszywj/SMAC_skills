@@ -106,6 +106,8 @@ class CohesiveSearchSkill:
                     continue                   # arrival handled in observation
                 move = best_move_toward(context, actor, goal)
                 if move is None:
+                    # stuck searcher: STILL a real bounded task so its budget
+                    # is consumed and a timeout writes unreachable/retry (C5)
                     plans.append(make_plan(
                         self.name, {actor: STOP}, "waypoint", {actor: STOP},
                         [EffectClaim("position", actor, None, max(context.H, 1),
@@ -113,6 +115,17 @@ class CohesiveSearchSkill:
                         ResourceClaims(controls=(actor,)),
                         Commitment("searching", 0, max_loops=budget),
                         {"hold_value": 0.1}, snapshot_id, fingerprint,
+                        goal_kind="position",
+                        goal_data={"waypoint": list(goal)},
+                        instance_id=instance.instance_id if instance else None,
+                        memory_delta=({"kind": "create", "skill": self.name,
+                                       "actors": [actor], "goal": "waypoint",
+                                       "goal_kind": "position",
+                                       "phase": "searching", "max_loops": budget,
+                                       "extra": {"waypoint": goal,
+                                                 "arrival_tolerance":
+                                                     self.arrival_tolerance}}
+                                      if instance is None else None),
                         rationale="no improving search move"))
                     continue
                 plans.append(make_plan(
@@ -126,6 +139,8 @@ class CohesiveSearchSkill:
                     Commitment("searching", 0, max_loops=budget),
                     {"progress": move_progress(context, actor, move, goal)},
                     snapshot_id, fingerprint,
+                    goal_kind="position",
+                    goal_data={"waypoint": list(goal)},
                     instance_id=instance.instance_id if instance else None,
                     memory_delta=({"kind": "create", "skill": self.name,
                                    "actors": [actor], "goal": "waypoint",

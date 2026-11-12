@@ -119,6 +119,8 @@ class CombatRepositionSkill:
                                    "phase": "repositioning",
                                    "max_loops": budget}
                                   if instance is None else None),
+                    goal_kind="enemy",
+                    goal_data={"target_id": target_id},
                     rationale=f"{label} during weapon cycle"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

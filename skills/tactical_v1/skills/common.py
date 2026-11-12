@@ -76,13 +76,24 @@ def best_move_away(context: Context, actor: str, threats: List[str]) -> Optional
     return min(sorted(destinations), key=score)
 
 
+def task_key_for(skill: str, actors, goal_kind: str, goal: str,
+                 extra: str = "") -> str:
+    """Stable duty key: skill + sorted actors + normalized goal (1.2).
+    Independent of proposal_id and call order."""
+    return "|".join((skill, ",".join(sorted(actors)), goal_kind, str(goal),
+                     extra))
+
+
 def make_plan(primary_skill: str, actors, goal: str, actions: Dict[str, int],
               effects: List[EffectClaim], claims: ResourceClaims,
               commitment: Commitment, features: Dict[str, float],
               snapshot_id: int, fingerprint: str,
               provider: Optional[str] = None, instance_id: Optional[str] = None,
               beneficiaries=(), dependencies=(), memory_delta=None,
-              atomic: bool = False, rationale: str = "") -> CandidatePlan:
+              atomic: bool = False, rationale: str = "",
+              goal_kind: str = "internal",
+              goal_data: Optional[Dict] = None,
+              task_key: str = "") -> CandidatePlan:
     named = {k: float(v) for k, v in features.items()}
     if set(named) - {"progress", "hold_value", "switch_cost", "reentry_cost",
                      "urgency"}:
@@ -99,7 +110,10 @@ def make_plan(primary_skill: str, actors, goal: str, actions: Dict[str, int],
         current_actions=dict(actions), expected_effects=effects, claims=claims,
         dependencies=tuple(dependencies), commitment=commitment,
         features=named, proposed_memory_delta=memory_delta or {},
-        atomic=atomic, rationale=rationale)
+        atomic=atomic, rationale=rationale, goal_kind=goal_kind,
+        goal_data=dict(goal_data or {}),
+        task_key=task_key or task_key_for(
+            primary_skill, actors, goal_kind, goal))
 
 
 def h_loops(context: Context, multiple: float) -> int:

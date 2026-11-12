@@ -10,18 +10,32 @@ from .actions import KEEP_HEAL_ORDER
 from .context import Context, STOP, distance
 
 
+def complete_plan(context: Context, memory, skills,
+                  locked_plans: Iterable = ()) -> Dict[str, int]:
+    """A3: ONE shared-resource completion for P0, neighborhood replacement
+    and repair. locked_plans' actions are protected verbatim; every free
+    actor is filled in a single resource context (observed heal ownership,
+    this step's new heal capacity, committed window fire, and necessary
+    space reservations grow as each action is assigned)."""
+    return baseline_actions(context, memory, skills,
+                            reserved_plans=tuple(locked_plans))
+
+
 def baseline_actions(context: Context, memory, skills,
                      reserved: Optional[Dict[str, int]] = None,
                      reserved_plans: Iterable = (),
                      only: Optional[Iterable[str]] = None
                      ) -> Dict[str, int]:
-    """Conservative complete policy.
+    """Conservative complete policy (used by complete_plan and repair).
 
     reserved / reserved_plans: already-kept final actions of the joint plan
     being repaired or substituted. only: compute just these actors (the
     released ones); default computes everyone (P0).
     """
     snapshot = context.snapshot
+    if reserved is None and reserved_plans:
+        reserved = {a: p.current_actions[a] for p in reserved_plans
+                    for a in p.current_actions}
     targets = set(only) if only is not None else None
     # -- context from kept actions ------------------------------------------
     kept_actions = {a: act for a, act in (reserved or {}).items()

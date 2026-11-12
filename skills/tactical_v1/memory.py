@@ -74,17 +74,16 @@ class TacticalMemory:
 
     def retry_blocked(self, skill: str, actors, goal: str,
                       game_loop: int) -> bool:
-        key = (skill, "+".join(sorted(actors)), goal)
-        until = self.retry_records.get(key)
-        if until is not None and game_loop < until:
-            return True
-        if until is not None:
-            del self.retry_records[key]
-        # TTL housekeeping
+        """PURE query (C3): never deletes or mutates retry records."""
+        until = self.retry_records.get(
+            (skill, "+".join(sorted(actors)), goal))
+        return until is not None and game_loop < until
+
+    def cleanup_retry_records(self, game_loop: int) -> None:
+        """TTL housekeeping — observation phase only (C3)."""
         for other in list(self.retry_records):
             if self.retry_records[other] < game_loop - self.retry_ttl_loops:
                 del self.retry_records[other]
-        return False
 
     def record_retry(self, skill: str, actors, goal: str, game_loop: int,
                      cooldown_loops: int) -> None:
@@ -121,14 +120,18 @@ class TacticalMemory:
                  if snapshot.game_loop - loop > self.observation_ttl_loops]
         for enemy_id in stale:
             del self.enemy_last_seen[enemy_id]
+        # C1: the risk BASELINE stays untouched here; commit() compares
+        # progress against the PREVIOUS step's records first and only then
+        # installs this observation as the new baseline.
         if risk_by_actor is not None:
-            self.committed_risk = dict(risk_by_actor)
+            self.observed_risk = dict(risk_by_actor)
         self.observed_key = key
 
     def update_task_facts(self, snapshot: Snapshot, context) -> List[str]:
         """Observation-phase fact updates ONLY (C2): arrivals, timeouts,
         invalidations. Candidates never do this later."""
         events: List[str] = []
+        self.cleanup_retry_records(snapshot.game_loop)
         events.extend(self.retire_invalid(snapshot))
         # search arrival confirmation (G7): a search instance whose actor is
         # within tolerance of its tracked waypoint HAS arrived — write the
@@ -147,19 +150,16 @@ class TacticalMemory:
                     continue
                 if distance(snapshot.allies[actor].position, waypoint) \
                         <= instance.extra.get("arrival_tolerance", 2.0):
+                    # ARRIVAL CONFIRMED FIRST: an instance that both arrived
+                    # and hit its deadline is recorded as arrived (C2)
                     cell = _cell(waypoint)
-                    self.visited_search_cells[cell] = snapshot.game_loop
-                    self.drop_instance(instance_id, "waypoint_reached")
+                    self.finish_task(instance_id, "waypoint_reached", snapshot)
                     events.append(f"search_arrived:{cell}")
                     break
                 budget = instance.max_loops or (12 * max(snapshot.step_mul, 1))
                 if snapshot.game_loop - instance.start_loop >= budget:
                     cell = _cell(waypoint)
-                    self.unreachable_search_cells[cell] = snapshot.game_loop
-                    self.record_retry("cohesive_search", instance.actors,
-                                      instance.goal, snapshot.game_loop,
-                                      self.search_revisit_cooldown_loops)
-                    self.drop_instance(instance_id, "waypoint_timeout")
+                    self.finish_task(instance_id, "waypoint_timeout", snapshot)
                     events.append(f"search_unreachable:{cell}")
                     break
         return events
@@ -195,6 +195,39 @@ class TacticalMemory:
             instance.termination_reason = reason or "dropped"
         self.instances.pop(instance_id, None)
 
+    def finish_task(self, instance_id: str, reason: str,
+                    snapshot: Snapshot) -> None:
+        """C2: the ONE termination entry point. Writes the observed result
+        facts (visited / unreachable / retry) BEFORE releasing the instance —
+        never delete first and lose the arrival fact. Idempotent per
+        instance+reason."""
+        instance = self.instances.get(instance_id)
+        if instance is None:
+            return
+        if instance.extra.get("finished_reason") == reason:
+            return
+        instance.extra["finished_reason"] = reason
+        instance.extra["finished_loop"] = snapshot.game_loop
+        if reason == "waypoint_reached":
+            waypoint = instance.extra.get("waypoint")
+            if waypoint is not None:
+                self.visited_search_cells[_cell(waypoint)] = snapshot.game_loop
+        elif reason in ("waypoint_timeout", "escape_failed", "timeout",
+                        "no_progress"):
+            if instance.skill == "cohesive_search" \
+                    and reason == "waypoint_timeout":
+                waypoint = instance.extra.get("waypoint")
+                if waypoint is not None:
+                    self.unreachable_search_cells[_cell(waypoint)] = \
+                        snapshot.game_loop
+            # retry cooldown keyed by the SAME key propose() checks
+            self.record_retry(instance.skill, instance.actors,
+                              instance.goal, snapshot.game_loop,
+                              self.retry_ttl_loops)
+        elif reason == "switched_or_baseline":
+            pass    # normal switch to a better task: no failure penalty
+        self.drop_instance(instance_id, reason)
+
     def retire_invalid(self, snapshot: Snapshot) -> List[str]:
         """Death, tag change, typed target loss, loop-budget exhaustion."""
         retired = []
@@ -203,28 +236,29 @@ class TacticalMemory:
             actors_alive = [a for a in instance.actors
                             if a in snapshot.allies and snapshot.allies[a].alive]
             if not actors_alive or len(actors_alive) != len(instance.actors):
-                self.drop_instance(instance_id, "member_lost")
+                self.finish_task(instance_id, "member_lost", snapshot)
                 retired.append(instance_id)
                 continue
             tags = tuple(snapshot.allies[a].tag for a in instance.actors)
             if instance.ally_tags and tags != instance.ally_tags:
-                self.drop_instance(instance_id, "tag_changed")
+                self.finish_task(instance_id, "tag_changed", snapshot)
                 retired.append(instance_id)
                 continue
             if instance.goal_kind == "enemy" and instance.goal \
                     and instance.goal not in snapshot.enemies:
-                self.drop_instance(instance_id, "target_lost")
+                self.finish_task(instance_id, "target_lost", snapshot)
                 retired.append(instance_id)
                 continue
             if instance.max_loops is not None \
                     and snapshot.game_loop - instance.start_loop >= instance.max_loops:
-                self.drop_instance(instance_id, "timeout")
+                self.finish_task(instance_id, "timeout", snapshot)
                 retired.append(instance_id)
         return retired
 
     # -- progress evidence (C1: task-relevant, compared with last record) ---
     def task_progress(self, snapshot: Snapshot, instance: SkillInstance,
-                      context, previous_positions=None) -> bool:
+                      context, previous_positions=None,
+                      previous_risk=None) -> bool:
         previous = previous_positions if previous_positions is not None             else self.committed_positions
         progressed = False
         for actor in instance.actors:
@@ -250,7 +284,8 @@ class TacticalMemory:
                 else:
                     progressed = True
             risk = len(context.threats_to(actor)) if context else 0
-            if self.committed_risk.get(actor, 0) > risk:
+            risk_previous = previous_risk if previous_risk is not None                 else self.committed_risk
+            if risk_previous.get(actor, 0) > risk:
                 progressed = True
         return progressed
 
@@ -268,6 +303,8 @@ class TacticalMemory:
                 "conflicting commit at the same decision step: "
                 f"{self.last_committed_actions} vs {actions}")
         previous_positions = dict(self.committed_positions)   # C1: compare FIRST
+        previous_risk = dict(self.committed_risk)
+        previous_risk = dict(self.committed_risk)
         self.committed = True
         self.last_committed_actions = dict(actions)
         for actor, action in actions.items():
@@ -288,8 +325,11 @@ class TacticalMemory:
                     snapshot.game_loop - instance.start_loop,
                     instance.budget_loops)
                 if context is not None and self.task_progress(
-                        snapshot, instance, context, previous_positions):
+                        snapshot, instance, context, previous_positions,
+                        previous_risk):
                     instance.last_progress_loop = snapshot.game_loop
+        self.committed_risk = dict(getattr(self, "observed_risk", {})
+                                   or self.committed_risk)
         self._retire_switched(snapshot, accepted_plans, actions)
 
     def _retire_switched(self, snapshot, accepted_plans, actions) -> None:
@@ -306,7 +346,8 @@ class TacticalMemory:
                 plan = selected.get(actor)
                 if plan is None or plan.primary_skill != instance.skill:
                     # unit fell to baseline or another task: end the old one
-                    self.drop_instance(instance_id, "switched_or_baseline")
+                    self.finish_task(instance_id, "switched_or_baseline",
+                                     snapshot)
                     break
 
     # -- unified task deltas (C3: create/continue/retarget/transition/...) --
@@ -342,8 +383,11 @@ class TacticalMemory:
                 instance.goal = delta["goal"]
                 instance.goal_kind = delta.get("goal_kind") or instance.goal_kind
         elif kind == "drop":
-            self.drop_instance(delta["instance_id"],
-                               delta.get("reason", "dropped"))
+            reason = delta.get("reason", "dropped")
+            if reason in ("escape_failed", "timeout", "no_progress"):
+                self.finish_task(delta["instance_id"], reason, snapshot)
+            else:
+                self.drop_instance(delta["instance_id"], reason)
         elif kind == "retry":
             self.record_retry(delta["skill"], delta["actors"],
                               delta.get("goal", ""), snapshot.game_loop,
