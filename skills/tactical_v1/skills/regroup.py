@@ -24,9 +24,27 @@ class RegroupSkill:
         self.retry_h = lifecycle.get("retry_cooldown_h", 2.0)
         self.support_radius = config.get("regroup", {}).get(
             "support_radius", 8.0)
+        self.joint_assessment = config.get("common_combat", {}).get(
+            "joint_assessment_enabled", True)
+
+    @staticmethod
+    def _fire_support(context, actor, group):
+        """Potential shared firing frontage, not merely a larger body count."""
+        values = []
+        for other in group:
+            if context.capabilities[other].healer or context.capabilities[other].suicide_attack:
+                continue
+            ready = [e for e in context.attackable_enemies(other)
+                     if context.contact_status(other, e) == 'in_range'
+                     and context.effective_attack_reach(actor, e) is not None
+                     and context.effective_attack_reach(actor, e) >= 0.]
+            if ready:
+                values.append(1. if any(context.fire_estimate(other, e).window_shots
+                                       for e in ready) else .5)
+        return sum(values)
 
     def _merge_options(self, context: Context, actor: str) -> List[tuple]:
-        groups = context.engagement_groups(self.support_radius)
+        groups = context.support_groups(self.support_radius)
         own = next((g for g in groups if actor in g), [actor])
         others = [g for g in groups if actor not in g]
         if not others:
@@ -35,14 +53,15 @@ class RegroupSkill:
                          if not any(context.snapshot.allies[a].is_flying
                                     for a in g)]
         pool = ground_others or others
-        fighting = [g for g in pool
-                    if any(context.attackable_enemies(a) for a in g)]
+        fighting = [g for g in pool if (self._fire_support(context, actor, g) > 0
+                    if self.joint_assessment else any(context.attackable_enemies(a) for a in g))]
         unit = context.snapshot.allies[actor]
         options = []
         # each option carries its REAL target group: the declared
         # group_b is exactly the group the waypoint serves (2.5)
         if fighting:
-            main = max(fighting, key=lambda g: (len(g), g))
+            main = max(fighting, key=lambda g: (
+                self._fire_support(context, actor, g) if self.joint_assessment else len(g), g))
             positions = [context.snapshot.allies[a].position for a in main]
             options.append((main, min(positions,
                                       key=lambda p: (distance(unit.position,
@@ -68,7 +87,7 @@ class RegroupSkill:
     def _link_pairs(self, context: Context, actor: str):
         """The comparable (own group, other group) pairs for this actor,
         FIXED for the whole search from the current visible state (B3)."""
-        groups = context.engagement_groups(self.support_radius)
+        groups = context.support_groups(self.support_radius)
         own = next((g for g in groups if actor in g), [actor])
         pairs = []
         for other in groups:
@@ -89,24 +108,35 @@ class RegroupSkill:
             capability = context.capabilities[actor]
             if capability.healer:
                 continue                      # S2 escort owns supports
-            if context.attackable_enemies(actor):
-                continue                      # fighting units keep firing
+            own, _pairs = self._link_pairs(context, actor)
+            attackable = context.attackable_enemies(actor)
+            if attackable and (len(own) > 1 or not context.threats_to(actor)):
+                continue                      # supported front keeps firing
             if capability.suicide_attack and memory.instance_for(
                     "burst_engage", actor):
                 continue                      # live burst task not pulled away
+            if self.joint_assessment and capability.suicide_attack and any(
+                    not enemy.is_flying for enemy in context.snapshot.enemies.values()):
+                continue  # S3 handles visible burst targets; targetless units may regroup
             if memory.retry_blocked(
                     *memory.task_retry_key(self.name, [actor], "internal",
                                            "merge"), loop):
                 continue
             instance = memory.instance_for(self.name, actor)
             options = self._merge_options(context, actor)
+            if attackable:
+                # An isolated combatant may repair a real support gap even
+                # with a legal attack. Do not pull it toward another singleton.
+                options = [(group, point) for group, point in options
+                           if len(group) > len(own)
+                           and all(not context.snapshot.allies[a].is_flying
+                                   for a in group)]
             if not options:
                 continue
             telemetry.count(self.name, "applicable")
             no_progress = instance is not None and memory.displacement(
                 actor, h_loops(context, self.no_progress_h),
                 context.snapshot) < 0.5
-            own, _pairs = self._link_pairs(context, actor)
             for other, goal in options[:2]:          # comparable alternatives
                 move = best_move_toward(context, actor, goal)
                 if move is None:
@@ -128,7 +158,9 @@ class RegroupSkill:
                                    "goal_kind": "area", "phase": "rallying",
                                    "max_loops": budget,
                                    "extra": {"waypoint": goal}}
-                                  if instance is None else None),
+                                  if instance is None else
+                                  {"kind": "continue", "instance_id": instance.instance_id,
+                                   "extra": {"waypoint": goal}}),
                     goal_kind="group_link",
                     goal_data={
                         "group_a": sorted(own),

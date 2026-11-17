@@ -14,6 +14,8 @@ from typing import Dict, List, Optional, Tuple
 from .actions import KEEP_HEAL_ORDER
 from .context import Context, IN_RANGE, distance
 from .contracts import CALIBRATED, HEURISTIC
+from .healing import healing_opportunity
+from .burst import BurstOutcome, affects, damage as burst_damage
 
 
 @dataclass(frozen=True)
@@ -53,16 +55,24 @@ class EffectsReport:
     heal_capacity_conflicts: Dict[str, Tuple[str, str]] = field(default_factory=dict)
     # enemy -> saturated coverage opportunity in [0, 1]
     coverage: Dict[str, float] = field(default_factory=dict)
+    coverage_raw: Dict[str, float] = field(default_factory=dict)
     coverage_sources: Dict[str, List[str]] = field(default_factory=dict)
     positions: Dict[str, Tuple[Tuple[float, float], bool]] = field(default_factory=dict)
     planned_loss: Dict[str, float] = field(default_factory=dict)  # in-contact detonation only
+    burst_outcomes: Dict[str, BurstOutcome] = field(default_factory=dict)
+    # Potential effect opportunities, never ordinary confirmed fire windows.
+    burst_damage_potential: Dict[str, float] = field(default_factory=dict)
+    burst_unknown_sources: Dict[str, List[str]] = field(default_factory=dict)
+    enemy_death_burst: Dict[str, float] = field(default_factory=dict)
+    enemy_death_burst_unknown: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def physical_effects(context: Context, actions: Dict[str, int],
                      mechanisms: Optional[Dict[str, bool]] = None,
                      splash_radius: float = 3.0, splash_weight: float = 0.5,
                      burst_radius: float = 2.5, burst_weight: float = 0.5,
-                     burst_self_cost: float = 1.0) -> EffectsReport:
+                     burst_self_cost: float = 1.0,
+                     splash_reliability: float = 1.0) -> EffectsReport:
     mechanisms = mechanisms or {"splash": True, "burst": True}
     snapshot = context.snapshot
     report = EffectsReport()
@@ -73,6 +83,9 @@ def physical_effects(context: Context, actions: Dict[str, int],
             continue
         prediction = context.predict_position(actor, action)
         report.positions[actor] = (prediction.position, prediction.certain)
+        if context.capabilities[actor].suicide_attack:
+            from .burst import action_position as burst_position
+            report.positions[actor] = (burst_position(context, actor, action), False)
     # ---- 2. attack sources, per actor (B2) --------------------------------
     seen_attack = set()
     for actor, action in actions.items():
@@ -88,6 +101,10 @@ def physical_effects(context: Context, actions: Dict[str, int],
             continue
         seen_attack.add(key)
         report.attack_commands.setdefault(enemy_id, []).append(actor)
+        if context.capabilities[actor].suicide_attack:
+            # An empty native weapon list is handled by the one-use effect
+            # model below. Never also count it as an ordinary volley.
+            continue
         estimate = context.fire_estimate(actor, enemy_id)
         if estimate.window_shots >= 1:
             report.window_sources.setdefault(enemy_id, []).append(actor)
@@ -121,7 +138,8 @@ def physical_effects(context: Context, actions: Dict[str, int],
             continue
         patient = semantic.target
         target = snapshot.allies.get(patient)
-        if target is None or not (0 < target.health < target.max_health):
+        opportunity_data = healing_opportunity(context, actor, patient, report.positions)
+        if opportunity_data is None:
             continue
         # protocol capacity: observed orders keep ownership until a later
         # observation confirms release; at most ONE active source per patient
@@ -135,24 +153,9 @@ def physical_effects(context: Context, actions: Dict[str, int],
             report.heal_capacity_conflicts[patient] = (assigned[patient], actor)
             continue
         assigned[patient] = actor
-        # need: missing HEALTH only — 1 missing and 40 missing differ
-        need = min((target.max_health - target.health)
-                   / max(target.max_health, 1.0), 1.0)
-        # sustain: relative predicted position of healer vs patient (B4)
-        healer_pos = report.positions.get(actor, (unit.position, True))[0]
-        patient_action = actions.get(patient)
-        patient_moving_away = False
-        if patient_action is not None:
-            patient_pred = report.positions.get(patient,
-                                                 (target.position, True))[0]
-            gap_now = distance(unit.position, target.position)
-            gap_after = distance(healer_pos, patient_pred)
-            patient_moving_away = gap_after > gap_now + 0.25
-        sustain = 0.35 if patient_moving_away else 0.6
-        pressure = len(context.threats_to(patient))
-        urgency = min(0.6 * need + (0.2 if target.health_lost > 0 else 0.0)
-                      + 0.1 * min(pressure, 2), 1.0)
-        opportunity = need * sustain * (0.5 + 0.5 * urgency)
+        # Same energy, biological eligibility, final-position exposure and
+        # capability-retention model as S2. This remains opportunity, not HP.
+        need, sustain, urgency, opportunity, patient_moving_away = opportunity_data
         if patient in report.heal:     # keep vs re-issue: same base opportunity
             existing = report.heal[patient]
             report.heal[patient] = HealOpportunity(
@@ -172,8 +175,8 @@ def physical_effects(context: Context, actions: Dict[str, int],
                 continue
             if capability.specialization == "splash_fire" and mechanisms["splash"]:
                 radius, weight = splash_radius, splash_weight
-            elif capability.suicide_attack and mechanisms["burst"]:
-                radius, weight = burst_radius, burst_weight
+                raw_weight = weight
+                weight *= max(0., min(1., splash_reliability))
             else:
                 continue
             primary = snapshot.enemies[enemy_id]
@@ -192,20 +195,58 @@ def physical_effects(context: Context, actions: Dict[str, int],
                     report.coverage_sources.setdefault(other_id, []).append(actor)
                     report.coverage[other_id] = min(
                         1.0, report.coverage.get(other_id, 0.0) + weight)
+                    report.coverage_raw[other_id] = min(
+                        1.0, report.coverage_raw.get(other_id, 0.0) + raw_weight)
     for enemy_id in list(report.coverage):
         if report.damage_known.get(enemy_id, 0.0) >= \
                 snapshot.enemies[enemy_id].effective_health:
             report.coverage[enemy_id] *= 0.3   # ordinary fire already suffices
-    # ---- 5. planned self-consumption: only an in-contact detonation (D9) --
+            report.coverage_raw[enemy_id] *= 0.3
+    # ---- 5. one-use effects at actual/projected source centers (D9) ------
     for actor, action in actions.items():
         unit = snapshot.allies.get(actor)
         capability = context.capabilities.get(actor)
-        if unit is None or capability is None or not capability.suicide_attack:
+        if unit is None or not unit.alive or capability is None \
+                or not capability.suicide_attack or not mechanisms["burst"]:
             continue
-        semantic = context.decode(actor, action)
-        if semantic.kind == "attack" and semantic.target in snapshot.enemies \
-                and context.contact_status(actor, semantic.target) == IN_RANGE:
-            report.planned_loss[actor] = burst_self_cost   # future planned cost, once
+        outcome = context.burst_outcome(actor, action, report.positions[actor][0])
+        report.burst_outcomes[actor] = outcome
+        if outcome.opportunity <= 0.:
+            continue
+        report.planned_loss[actor] = burst_self_cost * outcome.opportunity
+        for enemy_id, amount in outcome.damage_potential.items():
+            if amount is None:
+                report.burst_unknown_sources.setdefault(enemy_id, []).append(actor)
+            else:
+                report.burst_damage_potential[enemy_id] = (
+                    report.burst_damage_potential.get(enemy_id, 0.)
+                    + amount * outcome.opportunity)
+    # Killing an enemy Baneling does not erase the same local explosion.
+    # A potential combined burst kill also carries conditional retaliation.
+    # It remains discounted exposure, never ordinary damage or a known kill.
+    effect_profile = context.burst_profile()
+    for enemy_id, enemy in snapshot.enemies.items():
+        if not context.enemy_capabilities[enemy_id].suicide_attack:
+            continue
+        ordinary = report.damage_known.get(enemy_id, 0.)
+        potential = sum(max(0., result.damage_potential.get(enemy_id) or 0.)
+                        for result in report.burst_outcomes.values() if result.opportunity > 0.)
+        if ordinary + potential < enemy.effective_health:
+            continue
+        weight = min(1., (ordinary + report.burst_damage_potential.get(enemy_id, 0.))
+                     / max(enemy.effective_health, 1.))
+        for actor, (position, _) in report.positions.items():
+            ally = snapshot.allies[actor]
+            if ally.is_flying:
+                continue
+            radius = effect_profile.blast_radius if effect_profile.geometry_known else 0.
+            if distance(position, enemy.position) > radius + ally.radius:
+                continue
+            amount = burst_damage(context, actor, enemy_target=False)
+            if amount is None:
+                report.enemy_death_burst_unknown.setdefault(actor, []).append(enemy_id)
+            else:
+                report.enemy_death_burst[actor] = report.enemy_death_burst.get(actor, 0.) + amount * weight
     return report
 
 

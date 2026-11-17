@@ -30,7 +30,10 @@ WEAPONS = {
 
 
 def type_profiles():
-    profiles = {}
+    # Native Medivac catalog observed in the Terran benchmark. Explicit speed
+    # makes rescue ETA testable; no weapon or healing rate is fabricated.
+    profiles = {"54": {"known": True, "movement_speed_native": 2.5,
+                        "armor": 1., "attributes": [2, 4], "weapons": []}}
     for name, (damage, hits, target, reach) in WEAPONS.items():
         profiles[str(UNIT_IDS[name])] = {
             "known": True, "movement_speed_native": 2.25, "armor": 0.,
@@ -48,7 +51,7 @@ def ally(position, name="marine", **extra):
             "radius": .5, "is_flying": name == "medivac",
             "health": 45., "shield": 0., "max_health": 45., "max_shield": 0.,
             "weapon_cooldown_loops": 0., "weapon_ready": True,
-            "effective_health": 45., "energy": None,
+            "effective_health": 45., "energy": 50. if name == "medivac" else None,
             "attack_upgrade_level": 0., "armor_upgrade_level": 0.}
     unit.update(extra)
     return unit

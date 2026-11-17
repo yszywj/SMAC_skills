@@ -1,19 +1,16 @@
-"""S3 BurstEngage: consumption-burst approach, timing and split investment (D9).
+"""S3: bounded approach to a real, one-use ground explosion opportunity.
 
-Unknown contact/explosion damage never makes the legal attack path vanish:
-`contact_status == unknown` still yields an attack ATTEMPT candidate (no
-claimed detonation or window benefit). Proximity is computed from the
-ACTOR's position. A single remaining enemy still gets a meaningful exchange
-attempt. Self-consumption is a planned FUTURE cost, charged only by the
-effects model for in-contact detonations.
+Commands never claim that a Baneling exploded. Region allocation uses the
+projected source center and residual health. Effects recomputes final joint
+actions, including death-triggered explosions, independently of plan labels.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List
 
-from ..context import Context, STOP, distance
+from ..burst import (action_region, action_value, candidate_actions, outcome,
+                     useful_area_value, cover_window)
+from ..context import Context, STOP
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
-from .common import best_move_toward, h_loops, make_plan, move_progress, space_claim
-
-CONTACT_UNKNOWN = "unknown"
+from .common import make_plan, space_claim
 
 
 class BurstEngageSkill:
@@ -21,155 +18,102 @@ class BurstEngageSkill:
 
     def __init__(self, config: Dict):
         self.config = config
-        params = config.get("burst_engage", {})
-        self.proxy_radius = params.get("proxy_radius", 2.5)
-        self.value_per_enemy = params.get("value_per_enemy", 2.0)
-        self.min_exchange_value = params.get("min_exchange_value", 2.0)
-        self.self_cost = params.get("self_cost", 1.0)
-        self.lonely_exception = params.get("lonely_enemy_exception", True)
 
     def cluster_value(self, context: Context, center) -> float:
-        value = 0.0
-        for enemy in context.snapshot.enemies.values():
-            if distance(enemy.position, center) <= self.proxy_radius + enemy.radius:
-                weight = 0.4 if enemy.type_name == "baneling" else 1.0
-                value += self.value_per_enemy * weight
-        return value
+        return useful_area_value(context, center)
 
-    def _regions(self, context: Context, actor: str,
-                 current_goal: Optional[str]) -> List:
-        """Diverse regions: current target, high coverage, near-approachable —
-        proximity measured FROM THE ACTOR, never from (0, 0)."""
-        unit = context.snapshot.allies[actor]
-        scored = [(enemy_id, enemy.position,
-                   self.cluster_value(context, enemy.position),
-                   distance(unit.position, enemy.position))
-                  for enemy_id, enemy in sorted(context.snapshot.enemies.items())]
-        if not scored:
-            return []
-        ordered = sorted(scored, key=lambda s: (s[0] != current_goal, -s[2], s[3]))
-        result, seen = [], set()
-        for enemy_id, position, value, _ in ordered:
-            if enemy_id not in seen:
-                result.append((enemy_id, position, value))
-                seen.add(enemy_id)
-            if len(result) >= 3:
-                break
-        return result
+    def _delta(self, context, instance, actor, enemy_id, phase, center):
+        progress = getattr(context, 'burst_progress', None)
+        record = progress.records.get(actor) if progress is not None else None
+        if record and record.get('deadline_expired'):
+            # A new one-window proposal must not recreate the expired
+            # persistent approach under another goal or phase.
+            return ({'kind': 'drop', 'instance_id': instance.instance_id,
+                     'reason': 'approach_deadline_expired'} if instance else None)
+        data = {"goal": enemy_id, "goal_kind": "enemy", "phase": phase,
+                "extra": {"waypoint": center,
+                          "target_start_position": context.snapshot.enemies[enemy_id].position,
+                          "no_progress_loops": 3 * context.H}}
+        if phase == 'staging':
+            data['extra']['burst_wait_started'] = (
+                instance.extra.get('burst_wait_started', context.snapshot.game_loop)
+                if instance else context.snapshot.game_loop)
+        if instance is None:
+            data.update(kind="create", skill=self.name, actors=[actor],
+                        max_loops=6 * context.H)
+        elif instance.goal != enemy_id:
+            data.update(kind="retarget", instance_id=instance.instance_id)
+        elif instance.phase != phase:
+            data.update(kind="transition", instance_id=instance.instance_id)
+        else:
+            return None
+        return data
 
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
-        snapshot_id = context.snapshot.snapshot_id
-        plans: List = []
-        banelings = [a for a, cap in sorted(context.capabilities.items())
-                     if cap.suicide_attack and context.snapshot.allies[a].alive]
-        if not banelings:
-            return plans
-        telemetry.count(self.name, "applicable", len(banelings))
-        lonely = len(context.snapshot.enemies) == 1 and self.lonely_exception
-        for actor in banelings:
+        plans = []
+        actors = [actor for actor, cap in sorted(context.capabilities.items())
+                  if cap.suicide_attack and context.snapshot.allies[actor].alive]
+        telemetry.count(self.name, "applicable", len(actors))
+        for actor in actors:
             instance = memory.instance_for(self.name, actor)
-            current_goal = instance.goal if instance is not None and \
-                instance.goal_kind == "enemy" else None
-            # 1. detonation ATTEMPT: issuable attack; in-range contact is not
-            #    required (unknown contact keeps the attempt, no fake credit)
-            attempts = []
-            for enemy_id in sorted(context.snapshot.enemies):
-                if not context.can_issue_attack(actor, enemy_id):
+            progress = getattr(context, 'burst_progress', None)
+            execution = progress.execution(context, actor) if progress is not None else None
+            allow_wait = progress is not None and progress.wait_available(context, actor)
+            options = candidate_actions(context, actor, allow_wait=allow_wait,
+                                        weights=self.config.get('weights'))
+            proposed = 0
+            for action in options:
+                region = action_region(context, actor, action)
+                if region is None:
                     continue
-                if memory.retry_blocked(
-                        *memory.task_retry_key(self.name, [actor], "enemy",
-                                               enemy_id),
-                        context.snapshot.game_loop):
+                enemy_id, center = region.target_id, region.position
+                if memory.retry_blocked(*memory.task_retry_key(self.name, [actor], 'enemy', enemy_id),
+                                        context.snapshot.game_loop) and not (
+                        execution and execution['required'] and action in execution['actions']):
                     continue
-                contact = context.contact_status(actor, enemy_id)
-                if contact == "out_of_range":
-                    continue
-                value = self.cluster_value(
-                    context, context.snapshot.enemies[enemy_id].position)
-                attempts.append((value, enemy_id, contact))
-            attempts.sort(reverse=True)
-            threshold = 0.0 if lonely else self.min_exchange_value
-            viable = [a for a in attempts if a[0] >= threshold][:2]
-            if viable:
-              for value, enemy_id, contact in viable:
-                action = context.attack_action(actor, enemy_id)
-                effects = [EffectClaim(
-                    "coverage", enemy_id, None, max(context.H, 1), HEURISTIC,
-                    "burst_attempt_contact_" + contact)]
-                if contact == "in_range":
-                    # only a genuine in-contact detonation plans the cost;
-                    # the effects model charges it once, never here again
-                    effects.append(EffectClaim(
-                        "loss", actor, self.self_cost, max(context.H, 1),
-                        HEURISTIC, "planned_self_consumption_once"))
+                result = outcome(context, actor, action)
+                semantic = context.decode(actor, action)
+                productive = result.opportunity > 0. and useful_area_value(context, result.position) > 0.
+                phase = ('bursting' if productive
+                         else 'staging' if semantic.kind == 'stop' else 'approaching')
+                value = action_value(context, actor, action, weights=self.config.get('weights'))
+                effects = [EffectClaim("coverage", enemy_id, None, context.H,
+                            HEURISTIC, "one_use_trigger_opportunity_not_observed_hit")]
+                if semantic.kind == 'attack' and semantic.target != enemy_id:
+                    # A projected death burst can favor a different victim
+                    # than the native attack order. Declare that order too;
+                    # all actual damage remains final-action recomputation.
+                    effects.append(EffectClaim("coverage", semantic.target, None,
+                        context.H, HEURISTIC, "native_attack_attempt_not_observed_hit"))
                 plans.append(make_plan(
-                    self.name, {actor: action}, enemy_id, {actor: action},
-                    effects,
-                    ResourceClaims(controls=(actor,)),
-                    Commitment("bursting", 0, max_loops=2 * context.H),
-                    {"urgency": 0.5}, snapshot_id, fingerprint,
-                    provider="burst_engage",
-                    instance_id=instance.instance_id if instance else None,
-                    memory_delta=({"kind": "create", "skill": self.name,
-                                   "actors": [actor], "goal": enemy_id,
-                                   "goal_kind": "enemy", "phase": "bursting",
-                                   "max_loops": 2 * context.H}
-                                  if instance is None else
-                                  {"kind": "retarget",
-                                   "instance_id": instance.instance_id,
-                                   "goal": enemy_id, "goal_kind": "enemy"}
-                                  if instance.goal != enemy_id else None),
-                    rationale=f"burst attempt at {enemy_id} "
-                              f"(contact={contact}, proxy value {value:.1f})"))
-              continue
-            # 2. approach candidates: diverse regions, signed progress
-            regions = self._regions(context, actor, current_goal)
-            worthwhile = [r for r in regions if r[2] >= threshold or lonely]
-            if worthwhile:
-                for enemy_id, position, value in worthwhile[:2]:
-                    move = best_move_toward(context, actor, position)
-                    if move is None:
-                        continue
-                    plans.append(make_plan(
-                        self.name, {actor: move}, enemy_id, {actor: move},
-                        [EffectClaim("position", actor,
-                                     move_progress(context, actor, move,
-                                                   position),
-                                     max(context.H, 1), HEURISTIC,
-                                     "approach_burst_region")],
-                        ResourceClaims(
-                            controls=(actor,),
-                            space=(space_claim(context, actor, move),)),
-                        Commitment("approaching", 0,
-                                   max_loops=40 * context.H,
-                                   interrupt_on=("no_progress", "danger_change")),
-                        {"progress": move_progress(context, actor, move,
-                                                   position)},
-                        snapshot_id, fingerprint, provider="burst_engage",
-                        instance_id=instance.instance_id if instance else None,
-                        memory_delta=({"kind": "create", "skill": self.name,
-                                       "actors": [actor], "goal": enemy_id,
-                                       "goal_kind": "enemy",
-                                       "phase": "approaching",
-                                       "max_loops": 40 * context.H,
-                                       "extra": {"waypoint": position}}
-                                      if instance is None else None),
+                        self.name, [actor], enemy_id, {actor: action},
+                        effects,
+                        ResourceClaims(controls=(actor,),
+                                       space=(space_claim(context, actor, action),)),
+                        Commitment(phase, context.H, max_loops=6 * context.H,
+                                   interrupt_on=("target_lost", "illegal", "no_progress", "danger_change")),
+                        {}, context.snapshot.snapshot_id, fingerprint,
+                        provider=self.name,
+                        instance_id=(instance.instance_id if instance and not (
+                            progress and progress.records.get(actor, {}).get('deadline_expired')) else None),
+                        memory_delta=self._delta(context, instance, actor, enemy_id, phase, center),
                         goal_kind="enemy",
-                        goal_data={"target_id": enemy_id,
-                                   "waypoint": list(position)},
-                        rationale=f"approach burst region {enemy_id}"))
-                continue
-            # 3. nothing worth the trade: hold (declared, real Stop)
-            plans.append(make_plan(
-                self.name, {actor: STOP}, "hold", {actor: STOP},
-                [EffectClaim("position", actor, None, max(context.H, 1),
-                             HEURISTIC, "declined_low_value_contact")],
-                ResourceClaims(controls=(actor,)),
-                Commitment("declined", 0, max_loops=4 * context.H,
-                           interrupt_on=("danger_change",)),
-                {"hold_value": 0.2}, snapshot_id, fingerprint,
-                provider="burst_engage",
-                rationale="low-value contact declined; wait for a cluster"))
+                        goal_data={"target_id": enemy_id, "waypoint": list(center),
+                                   "objective": {"kind": "burst_region"},
+                                   "burst_region": list(center),
+                                   "trigger_position": list(result.position),
+                                   "trigger_opportunity": result.trigger,
+                                   "ready_cover": cover_window(context, actor, enemy_id)[0],
+                                   "execution_duty": execution,
+                                   "approach_deadline_due": bool(progress and progress.overdue(context, actor))},
+                        rationale=f"{phase} one-use region {enemy_id}; native residual value={value:.3f}"))
+                proposed += 1
+            if not proposed and (not context.snapshot.enemies or not context.burst_profile().geometry_known):
+                plans.append(make_plan(
+                    self.name, [actor], "hold", {actor: STOP}, [],
+                    ResourceClaims(controls=(actor,)), Commitment("declined", 0,
+                    max_loops=context.H), {}, context.snapshot.snapshot_id, fingerprint,
+                    provider=self.name, rationale="no visible compatible unblocked ground region"))
         telemetry.count(self.name, "proposed", len(plans))
         return plans

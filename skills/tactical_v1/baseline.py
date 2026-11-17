@@ -193,16 +193,23 @@ def _combat_baseline(context: Context, actor: str, memory,
 
 def _medivac_baseline(context: Context, actor: str, memory,
                       resources: _Resources) -> int:
+    from .healing import energy_ready, eligible_patient, observed_patient, rescue_priority
+    if not energy_ready(context, actor):
+        return STOP
     keep = context.keep_heal_action(actor)
     if keep is not None:
         return keep
+    previous = observed_patient(context, actor)
     candidates = sorted(context.snapshot.heal_candidates.get(actor, {}).items(),
-                        key=lambda item: (-_urgency(context, item[1].get("target")),
+                        key=lambda item: (item[1].get("target") != previous,
+                                          -rescue_priority(context, item[1].get("target")),
                                           item[0]))
     for action, info in candidates:
         if action not in context.legal_actions(actor):
             continue
         patient = info.get("target")
+        if not eligible_patient(context, patient):
+            continue
         if resources.heal_taken.get(patient, actor) != actor:
             continue    # observed order or an earlier free healer owns it
         return action
@@ -233,26 +240,24 @@ def _medivac_baseline(context: Context, actor: str, memory,
 
 def _baneling_baseline(context: Context, actor: str, memory, skills,
                        resources: _Resources) -> int:
+    from .burst import action_region, action_value, candidate_actions
     instance = memory.instance_for("burst_engage", actor)
     goal = instance.goal if instance is not None and \
         instance.goal_kind == "enemy" else None
-    for enemy_id in sorted(context.snapshot.enemies):
-        if goal and enemy_id != goal:
-            continue
-        if context.can_issue_attack(actor, enemy_id):
-            return context.attack_action(actor, enemy_id)
-    if goal and goal in context.snapshot.enemies:
-        move = _move_toward(context, actor,
-                            context.snapshot.enemies[goal].position)
-        if move is not None:
-            return move
-    nearest = context.nearest_enemy(actor)
-    if nearest is not None:
-        move = _move_toward(context, actor,
-                            context.snapshot.enemies[nearest].position)
-        if move is not None:
-            return move
-    return STOP
+    wait_start = instance.extra.get('burst_wait_started') if instance else None
+    # Baseline cannot start an unrecorded wait that refreshes forever. Only
+    # an explicitly committed S3 staging task owns this short waiting budget.
+    allow_wait = wait_start is not None and context.snapshot.game_loop - wait_start < 2 * context.H
+    config = getattr((skills or {}).get('burst_engage'), 'config', {})
+    remaining = {enemy_id: max(0., enemy.effective_health - resources.fire.get(enemy_id, 0.))
+                 for enemy_id, enemy in context.snapshot.enemies.items()}
+    options = [action for action in candidate_actions(context, actor, allow_wait=allow_wait,
+                   weights=config.get('weights'), remaining=remaining)
+               if not memory.retry_blocked(*memory.task_retry_key('burst_engage', [actor],
+                   'enemy', action_region(context, actor, action).target_id), context.snapshot.game_loop)]
+    return min(options, key=lambda action: (
+        -action_value(context, actor, action, remaining, config.get('weights')),
+        action_region(context, actor, action).target_id != goal, action)) if options else STOP
 
 
 def _move_toward(context: Context, actor: str, target) -> Optional[int]:

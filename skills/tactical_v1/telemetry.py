@@ -3,7 +3,8 @@ from typing import Any, Dict, List, Optional
 
 SKILL_NAMES = ("focus_fire", "coordinated_engage", "combat_reposition",
                "disengage_reenter", "regroup", "local_formation",
-               "cohesive_search", "splash_fire", "heal_support", "burst_engage")
+               "cohesive_search", "precombat_rally", "combat_rejoin",
+               "splash_fire", "heal_support", "burst_engage")
 
 USAGE_COUNTERS = ("applicable", "proposed", "selected", "continued", "exited")
 
@@ -25,6 +26,13 @@ class Telemetry:
     def count(self, skill: str, counter: str, amount: int = 1) -> None:
         if skill in self.usage and counter in self.usage[skill]:
             self.usage[skill][counter] += amount
+
+    def sync_lifecycle(self, counts) -> None:
+        """Lifecycle facts come from memory's actual commits and exits."""
+        for skill, row in counts.items():
+            if skill in self.usage:
+                for counter in ("continued", "exited"):
+                    self.usage[skill][counter] = int(row.get(counter, 0))
 
     def log(self, event: str, **fields: Any) -> None:
         row = {"event": event}
@@ -51,7 +59,10 @@ class Telemetry:
                 for p in chosen],
             "top_alternates": [
                 {"id": p.get("id"), "skill": p.get("skill"),
-                 "rationale": p.get("rationale")}
+                 "rationale": p.get("rationale"), "score": p.get("score"),
+                 "actions": dict(p.get("actions", {})),
+                 "score_breakdown": dict(p.get("score_breakdown", {})),
+                 "plans": list(p.get("plans", []))}
                 for p in alternates[:self.top_k]],
             "repairs": repairs,
             "events": self.events[-20:] if self.debug else [],

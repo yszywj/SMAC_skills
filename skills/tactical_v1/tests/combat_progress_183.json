@@ -1,0 +1,3549 @@
+{
+  "scope": "Actual6Z4S seed183 steps29-32; only u0 and engaged peer u6 retained. All visible enemies and native profiles/relations for retained actors unchanged. No replay or counterfactual win claim.",
+  "source": "runs\\tactical_protoss_10v10_3x40_sustained_20261114\\current\\6z4s\\events.jsonl",
+  "frames": [
+    {
+      "step": 29,
+      "payload": {
+        "model": "jev-1.13.0",
+        "state": {
+          "objective": "Eliminate all opposing units before the episode step limit.",
+          "schema_version": 6,
+          "interface_version": "smacv2-p0-v1",
+          "action_contract": {
+            "attack_candidate_rule": "Use supplied legal criteria from SMACv2 masks and team visibility.",
+            "candidate_center_distance_by_type": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "range_estimate": "Native weapon range plus unit radii is an estimate, not proof of firing.",
+            "attack_order": "Accepted is not fired. Cooldown and movement affect actual attacks.",
+            "abilities_enabled": false,
+            "actions": "0 dead only; 1 Stop cancels order; 2/3/4/5 N/S/E/W; 6+j attacks e{j}."
+          },
+          "map": "10gen_protoss",
+          "episode": 14,
+          "game_loop": 234,
+          "step_mul": 8,
+          "steps_remaining": 171,
+          "visibility": "shared allied team vision; unseen enemies are unknown, not dead",
+          "coordinate_system": "SC2 world coordinates: north=+y, east=+x",
+          "search_location": [
+            16.0,
+            16.0
+          ],
+          "allies": {
+            "u0": {
+              "tag": "4295229441",
+              "type": "Zealot",
+              "alive": true,
+              "health": 62.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 62.0,
+              "unit_type_id": 73,
+              "position": [
+                8.102,
+                18.976
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 3.85,
+              "weapon_ready": false,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    7.227,
+                    18.976
+                  ]
+                }
+              ]
+            },
+            "u6": {
+              "tag": "4296802305",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                6.497,
+                15.818
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 17.5,
+              "weapon_ready": false,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                }
+              ]
+            }
+          },
+          "visible_enemies": {
+            "e0": {
+              "tag": "4297588737",
+              "type": "Zealot",
+              "alive": true,
+              "health": 88.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 88.0,
+              "unit_type_id": 73,
+              "position": [
+                10.203,
+                16.491
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e1": {
+              "tag": "4297850881",
+              "type": "Zealot",
+              "alive": true,
+              "health": 64.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 64.0,
+              "unit_type_id": 73,
+              "position": [
+                9.895,
+                19.821
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e3": {
+              "tag": "4298637313",
+              "type": "Zealot",
+              "alive": true,
+              "health": 100.0,
+              "max_health": 100.0,
+              "shield": 42.0,
+              "max_shield": 50.0,
+              "effective_health": 142.0,
+              "unit_type_id": 73,
+              "position": [
+                11.115,
+                17.829
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e5": {
+              "tag": "4299423745",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.44,
+                14.566
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e6": {
+              "tag": "4299685889",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.565,
+                21.755
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e7": {
+              "tag": "4299948033",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.841,
+                20.524
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e8": {
+              "tag": "4299161601",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.958,
+                15.635
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            }
+          },
+          "unit_type_profiles": {
+            "73": {
+              "known": true,
+              "movement_speed_native": 2.25,
+              "armor": 1.0,
+              "attributes": [
+                1,
+                3
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "ground",
+                  "range": 0.1,
+                  "base_damage": 8.0,
+                  "hits_per_attack": 2,
+                  "damage_bonus": []
+                }
+              ]
+            },
+            "74": {
+              "known": true,
+              "movement_speed_native": 2.953125,
+              "armor": 1.0,
+              "attributes": [
+                2,
+                4
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "any",
+                  "range": 6.0,
+                  "base_damage": 13.0,
+                  "hits_per_attack": 1,
+                  "damage_bonus": [
+                    {
+                      "attribute": 2,
+                      "bonus": 5.0
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "previous_action_ids": {
+            "u0": "5",
+            "u6": "7"
+          },
+          "last_action_result": {
+            "from_game_loop": 226,
+            "to_game_loop": 234,
+            "meaning": "SC2 accepted/rejected submitted commands; acceptance does not prove firing or healing. Observation errors occurred during this interval, possibly on an existing order. Current observed orders are in allies/team_core.",
+            "actors": {
+              "u0": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    7.227,
+                    18.976
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 0
+              },
+              "u1": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 1
+              },
+              "u2": {
+                "requested_action_id": "8",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4298375169",
+                  "target_unit": null,
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 2
+              },
+              "u3": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    5.79,
+                    19.96
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 3
+              },
+              "u4": {
+                "requested_action_id": "6",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297588737",
+                  "target_unit": "e0",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 4
+              },
+              "u5": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u6": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 5
+              },
+              "u7": {
+                "requested_action_id": "8",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4298375169",
+                  "target_unit": null,
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 6
+              },
+              "u8": {
+                "requested_action_id": "8",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4298375169",
+                  "target_unit": null,
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 7
+              },
+              "u9": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 8
+              }
+            },
+            "unmatched_observation_errors": [],
+            "response_mapping": "exact",
+            "raw_response_results": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "relations": {
+            "u0": {
+              "e0": {
+                "distance": 3.25,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e1": {
+                "distance": 1.98,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": true,
+                "approach_needed": true
+              },
+              "e3": {
+                "distance": 3.22,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e5": {
+                "distance": 8.56,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 7.96,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 7.89,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 8.54,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            },
+            "u6": {
+              "e0": {
+                "distance": 3.77,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e1": {
+                "distance": 5.25,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e3": {
+                "distance": 5.04,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e5": {
+                "distance": 9.03,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 10.84,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 10.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 9.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            }
+          },
+          "movement_candidates": {
+            "u0": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  8.102,
+                  20.976
+                ],
+                "distance_to_search_location": 9.33,
+                "distances_to_visible_enemies": {
+                  "e0": 4.95,
+                  "e1": 2.13,
+                  "e3": 4.36,
+                  "e5": 9.74,
+                  "e6": 7.5,
+                  "e7": 7.75,
+                  "e8": 9.5
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  8.102,
+                  16.976
+                ],
+                "distance_to_search_location": 7.96,
+                "distances_to_visible_enemies": {
+                  "e0": 2.16,
+                  "e1": 3.36,
+                  "e3": 3.13,
+                  "e5": 7.72,
+                  "e6": 8.86,
+                  "e7": 8.51,
+                  "e8": 7.97
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  10.102,
+                  18.976
+                ],
+                "distance_to_search_location": 6.61,
+                "distances_to_visible_enemies": {
+                  "e0": 2.49,
+                  "e1": 0.87,
+                  "e3": 1.53,
+                  "e5": 6.92,
+                  "e6": 6.13,
+                  "e7": 5.94,
+                  "e8": 6.74
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  6.102,
+                  18.976
+                ],
+                "distance_to_search_location": 10.34,
+                "distances_to_visible_enemies": {
+                  "e0": 4.8,
+                  "e1": 3.89,
+                  "e3": 5.14,
+                  "e5": 10.33,
+                  "e6": 9.86,
+                  "e7": 9.86,
+                  "e8": 10.41
+                }
+              }
+            },
+            "u6": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  6.497,
+                  17.818
+                ],
+                "distance_to_search_location": 9.68,
+                "distances_to_visible_enemies": {
+                  "e0": 3.94,
+                  "e1": 3.94,
+                  "e3": 4.62,
+                  "e5": 9.52,
+                  "e6": 9.89,
+                  "e7": 9.73,
+                  "e8": 9.71
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  6.497,
+                  13.818
+                ],
+                "distance_to_search_location": 9.75,
+                "distances_to_visible_enemies": {
+                  "e0": 4.57,
+                  "e1": 6.9,
+                  "e3": 6.12,
+                  "e5": 8.97,
+                  "e6": 12.05,
+                  "e7": 11.5,
+                  "e8": 9.63
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  8.497,
+                  15.818
+                ],
+                "distance_to_search_location": 7.51,
+                "distances_to_visible_enemies": {
+                  "e0": 1.83,
+                  "e1": 4.24,
+                  "e3": 3.3,
+                  "e5": 7.05,
+                  "e6": 9.23,
+                  "e7": 8.72,
+                  "e8": 7.46
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  4.497,
+                  15.818
+                ],
+                "distance_to_search_location": 11.5,
+                "distances_to_visible_enemies": {
+                  "e0": 5.75,
+                  "e1": 6.72,
+                  "e3": 6.92,
+                  "e5": 11.01,
+                  "e6": 12.56,
+                  "e7": 12.28,
+                  "e8": 11.46
+                }
+              }
+            }
+          },
+          "heal_candidates": {},
+          "scenario_brief": {
+            "scenario_id": "protoss_10_vs_10",
+            "map": "10gen_protoss",
+            "n_agents": 10,
+            "n_enemies": 10,
+            "distribution": {
+              "n_units": 10,
+              "n_enemies": 10,
+              "team_gen": {
+                "dist_type": "weighted_teams",
+                "unit_types": [
+                  "stalker",
+                  "zealot",
+                  "colossus"
+                ],
+                "weights": [
+                  0.45,
+                  0.45,
+                  0.1
+                ],
+                "observe": true
+              },
+              "start_positions": {
+                "dist_type": "surrounded_and_reflect",
+                "p": 0.5,
+                "map_x": 32,
+                "map_y": 32
+              }
+            },
+            "map_size": [
+              32,
+              32
+            ],
+            "step_mul": 8,
+            "move_amount": 2,
+            "difficulty": "7",
+            "use_unit_ranges": true,
+            "min_attack_range": 2,
+            "candidate_ranges": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "visibility": "centralized union of living allies' SMACv2 observations",
+            "scope": "Public generation rules; no sampled enemy positions or initial snapshot.",
+            "skills": "off",
+            "realtime": false,
+            "unit_balance": "native",
+            "unit_control_note": "Both owners use identical native Protoss unit definitions, including native automatic acquisition. Controllers and observation restrictions still differ."
+          }
+        },
+        "questions": {
+          "u0": {
+            "type": "choice",
+            "instructions": "Control ONLY u0, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 3.85 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [8.102, 20.976]. See state.movement_candidates.u0.2 for distances.",
+              "3": "Move south by 2 world units toward [8.102, 16.976]. See state.movement_candidates.u0.3 for distances.",
+              "4": "Move east by 2 world units toward [10.102, 18.976]. See state.movement_candidates.u0.4 for distances.",
+              "5": "Move west by 2 world units toward [6.102, 18.976]. See state.movement_candidates.u0.5 for distances.",
+              "7": "Attack e1; range=out_of_range."
+            }
+          },
+          "u6": {
+            "type": "choice",
+            "instructions": "Control ONLY u6, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 17.5 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [6.497, 17.818]. See state.movement_candidates.u6.2 for distances.",
+              "3": "Move south by 2 world units toward [6.497, 13.818]. See state.movement_candidates.u6.3 for distances.",
+              "4": "Move east by 2 world units toward [8.497, 15.818]. See state.movement_candidates.u6.4 for distances.",
+              "5": "Move west by 2 world units toward [4.497, 15.818]. See state.movement_candidates.u6.5 for distances.",
+              "6": "Attack e0; range=in_range.",
+              "7": "Attack e1; range=in_range.",
+              "9": "Attack e3; range=in_range."
+            }
+          }
+        }
+      },
+      "actions": {
+        "u0": 7,
+        "u6": 7
+      }
+    },
+    {
+      "step": 30,
+      "payload": {
+        "model": "jev-1.13.0",
+        "state": {
+          "objective": "Eliminate all opposing units before the episode step limit.",
+          "schema_version": 6,
+          "interface_version": "smacv2-p0-v1",
+          "action_contract": {
+            "attack_candidate_rule": "Use supplied legal criteria from SMACv2 masks and team visibility.",
+            "candidate_center_distance_by_type": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "range_estimate": "Native weapon range plus unit radii is an estimate, not proof of firing.",
+            "attack_order": "Accepted is not fired. Cooldown and movement affect actual attacks.",
+            "abilities_enabled": false,
+            "actions": "0 dead only; 1 Stop cancels order; 2/3/4/5 N/S/E/W; 6+j attacks e{j}."
+          },
+          "map": "10gen_protoss",
+          "episode": 14,
+          "game_loop": 242,
+          "step_mul": 8,
+          "steps_remaining": 170,
+          "visibility": "shared allied team vision; unseen enemies are unknown, not dead",
+          "coordinate_system": "SC2 world coordinates: north=+y, east=+x",
+          "search_location": [
+            16.0,
+            16.0
+          ],
+          "allies": {
+            "u0": {
+              "tag": "4295229441",
+              "type": "Zealot",
+              "alive": true,
+              "health": 62.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 62.0,
+              "unit_type_id": 73,
+              "position": [
+                8.466,
+                18.717
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 0.0,
+              "weapon_ready": true,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                }
+              ]
+            },
+            "u6": {
+              "tag": "4296802305",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                6.497,
+                15.818
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 9.5,
+              "weapon_ready": false,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                }
+              ]
+            }
+          },
+          "visible_enemies": {
+            "e0": {
+              "tag": "4297588737",
+              "type": "Zealot",
+              "alive": true,
+              "health": 88.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 88.0,
+              "unit_type_id": 73,
+              "position": [
+                10.082,
+                17.46
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e1": {
+              "tag": "4297850881",
+              "type": "Zealot",
+              "alive": true,
+              "health": 57.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 57.0,
+              "unit_type_id": 73,
+              "position": [
+                9.895,
+                19.821
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e3": {
+              "tag": "4298637313",
+              "type": "Zealot",
+              "alive": true,
+              "health": 100.0,
+              "max_health": 100.0,
+              "shield": 42.0,
+              "max_shield": 50.0,
+              "effective_health": 142.0,
+              "unit_type_id": 73,
+              "position": [
+                11.115,
+                17.829
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e5": {
+              "tag": "4299423745",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.44,
+                14.566
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e6": {
+              "tag": "4299685889",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.565,
+                21.755
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e7": {
+              "tag": "4299948033",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.841,
+                20.524
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e8": {
+              "tag": "4299161601",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.958,
+                15.635
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            }
+          },
+          "unit_type_profiles": {
+            "73": {
+              "known": true,
+              "movement_speed_native": 2.25,
+              "armor": 1.0,
+              "attributes": [
+                1,
+                3
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "ground",
+                  "range": 0.1,
+                  "base_damage": 8.0,
+                  "hits_per_attack": 2,
+                  "damage_bonus": []
+                }
+              ]
+            },
+            "74": {
+              "known": true,
+              "movement_speed_native": 2.953125,
+              "armor": 1.0,
+              "attributes": [
+                2,
+                4
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "any",
+                  "range": 6.0,
+                  "base_damage": 13.0,
+                  "hits_per_attack": 1,
+                  "damage_bonus": [
+                    {
+                      "attribute": 2,
+                      "bonus": 5.0
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "previous_action_ids": {
+            "u0": "7",
+            "u6": "7"
+          },
+          "last_action_result": {
+            "from_game_loop": 234,
+            "to_game_loop": 242,
+            "meaning": "SC2 accepted/rejected submitted commands; acceptance does not prove firing or healing. Observation errors occurred during this interval, possibly on an existing order. Current observed orders are in allies/team_core.",
+            "actors": {
+              "u0": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 0
+              },
+              "u1": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 1
+              },
+              "u2": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    8.407,
+                    18.529
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 2
+              },
+              "u3": {
+                "requested_action_id": "4",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    8.665,
+                    19.96
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 3
+              },
+              "u4": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u5": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u6": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 4
+              },
+              "u7": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    3.648,
+                    16.827
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 5
+              },
+              "u8": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    4.867,
+                    17.988
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 6
+              },
+              "u9": {
+                "requested_action_id": "6",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297588737",
+                  "target_unit": "e0",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 7
+              }
+            },
+            "unmatched_observation_errors": [],
+            "response_mapping": "exact",
+            "raw_response_results": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "relations": {
+            "u0": {
+              "e0": {
+                "distance": 2.05,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e1": {
+                "distance": 1.81,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": true,
+                "approach_needed": true
+              },
+              "e3": {
+                "distance": 2.79,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e5": {
+                "distance": 8.12,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 7.72,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 7.59,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 8.1,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            },
+            "u6": {
+              "e0": {
+                "distance": 3.94,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e1": {
+                "distance": 5.25,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e3": {
+                "distance": 5.04,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e5": {
+                "distance": 9.03,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 10.84,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 10.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 9.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            }
+          },
+          "movement_candidates": {
+            "u0": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  8.466,
+                  20.717
+                ],
+                "distance_to_search_location": 8.89,
+                "distances_to_visible_enemies": {
+                  "e0": 3.64,
+                  "e1": 1.69,
+                  "e3": 3.92,
+                  "e5": 9.3,
+                  "e6": 7.17,
+                  "e7": 7.38,
+                  "e8": 9.05
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  8.466,
+                  16.717
+                ],
+                "distance_to_search_location": 7.57,
+                "distances_to_visible_enemies": {
+                  "e0": 1.78,
+                  "e1": 3.42,
+                  "e3": 2.87,
+                  "e5": 7.3,
+                  "e6": 8.71,
+                  "e7": 8.3,
+                  "e8": 7.57
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  10.466,
+                  18.717
+                ],
+                "distance_to_search_location": 6.17,
+                "distances_to_visible_enemies": {
+                  "e0": 1.31,
+                  "e1": 1.24,
+                  "e3": 1.1,
+                  "e5": 6.48,
+                  "e6": 5.94,
+                  "e7": 5.67,
+                  "e8": 6.3
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  6.466,
+                  18.717
+                ],
+                "distance_to_search_location": 9.91,
+                "distances_to_visible_enemies": {
+                  "e0": 3.83,
+                  "e1": 3.6,
+                  "e3": 4.73,
+                  "e5": 9.89,
+                  "e6": 9.59,
+                  "e7": 9.55,
+                  "e8": 9.98
+                }
+              }
+            },
+            "u6": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  6.497,
+                  17.818
+                ],
+                "distance_to_search_location": 9.68,
+                "distances_to_visible_enemies": {
+                  "e0": 3.6,
+                  "e1": 3.94,
+                  "e3": 4.62,
+                  "e5": 9.52,
+                  "e6": 9.89,
+                  "e7": 9.73,
+                  "e8": 9.71
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  6.497,
+                  13.818
+                ],
+                "distance_to_search_location": 9.75,
+                "distances_to_visible_enemies": {
+                  "e0": 5.11,
+                  "e1": 6.9,
+                  "e3": 6.12,
+                  "e5": 8.97,
+                  "e6": 12.05,
+                  "e7": 11.5,
+                  "e8": 9.63
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  8.497,
+                  15.818
+                ],
+                "distance_to_search_location": 7.51,
+                "distances_to_visible_enemies": {
+                  "e0": 2.28,
+                  "e1": 4.24,
+                  "e3": 3.3,
+                  "e5": 7.05,
+                  "e6": 9.23,
+                  "e7": 8.72,
+                  "e8": 7.46
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  4.497,
+                  15.818
+                ],
+                "distance_to_search_location": 11.5,
+                "distances_to_visible_enemies": {
+                  "e0": 5.82,
+                  "e1": 6.72,
+                  "e3": 6.92,
+                  "e5": 11.01,
+                  "e6": 12.56,
+                  "e7": 12.28,
+                  "e8": 11.46
+                }
+              }
+            }
+          },
+          "heal_candidates": {},
+          "scenario_brief": {
+            "scenario_id": "protoss_10_vs_10",
+            "map": "10gen_protoss",
+            "n_agents": 10,
+            "n_enemies": 10,
+            "distribution": {
+              "n_units": 10,
+              "n_enemies": 10,
+              "team_gen": {
+                "dist_type": "weighted_teams",
+                "unit_types": [
+                  "stalker",
+                  "zealot",
+                  "colossus"
+                ],
+                "weights": [
+                  0.45,
+                  0.45,
+                  0.1
+                ],
+                "observe": true
+              },
+              "start_positions": {
+                "dist_type": "surrounded_and_reflect",
+                "p": 0.5,
+                "map_x": 32,
+                "map_y": 32
+              }
+            },
+            "map_size": [
+              32,
+              32
+            ],
+            "step_mul": 8,
+            "move_amount": 2,
+            "difficulty": "7",
+            "use_unit_ranges": true,
+            "min_attack_range": 2,
+            "candidate_ranges": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "visibility": "centralized union of living allies' SMACv2 observations",
+            "scope": "Public generation rules; no sampled enemy positions or initial snapshot.",
+            "skills": "off",
+            "realtime": false,
+            "unit_balance": "native",
+            "unit_control_note": "Both owners use identical native Protoss unit definitions, including native automatic acquisition. Controllers and observation restrictions still differ."
+          }
+        },
+        "questions": {
+          "u0": {
+            "type": "choice",
+            "instructions": "Control ONLY u0, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 0.0 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [8.466, 20.717]. See state.movement_candidates.u0.2 for distances.",
+              "3": "Move south by 2 world units toward [8.466, 16.717]. See state.movement_candidates.u0.3 for distances.",
+              "4": "Move east by 2 world units toward [10.466, 18.717]. See state.movement_candidates.u0.4 for distances.",
+              "5": "Move west by 2 world units toward [6.466, 18.717]. See state.movement_candidates.u0.5 for distances.",
+              "7": "Attack e1; range=out_of_range."
+            }
+          },
+          "u6": {
+            "type": "choice",
+            "instructions": "Control ONLY u6, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 9.5 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [6.497, 17.818]. See state.movement_candidates.u6.2 for distances.",
+              "3": "Move south by 2 world units toward [6.497, 13.818]. See state.movement_candidates.u6.3 for distances.",
+              "4": "Move east by 2 world units toward [8.497, 15.818]. See state.movement_candidates.u6.4 for distances.",
+              "5": "Move west by 2 world units toward [4.497, 15.818]. See state.movement_candidates.u6.5 for distances.",
+              "6": "Attack e0; range=in_range.",
+              "7": "Attack e1; range=in_range.",
+              "9": "Attack e3; range=in_range."
+            }
+          }
+        }
+      },
+      "actions": {
+        "u6": 7,
+        "u0": 2
+      }
+    },
+    {
+      "step": 31,
+      "payload": {
+        "model": "jev-1.13.0",
+        "state": {
+          "objective": "Eliminate all opposing units before the episode step limit.",
+          "schema_version": 6,
+          "interface_version": "smacv2-p0-v1",
+          "action_contract": {
+            "attack_candidate_rule": "Use supplied legal criteria from SMACv2 masks and team visibility.",
+            "candidate_center_distance_by_type": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "range_estimate": "Native weapon range plus unit radii is an estimate, not proof of firing.",
+            "attack_order": "Accepted is not fired. Cooldown and movement affect actual attacks.",
+            "abilities_enabled": false,
+            "actions": "0 dead only; 1 Stop cancels order; 2/3/4/5 N/S/E/W; 6+j attacks e{j}."
+          },
+          "map": "10gen_protoss",
+          "episode": 14,
+          "game_loop": 250,
+          "step_mul": 8,
+          "steps_remaining": 169,
+          "visibility": "shared allied team vision; unseen enemies are unknown, not dead",
+          "coordinate_system": "SC2 world coordinates: north=+y, east=+x",
+          "search_location": [
+            16.0,
+            16.0
+          ],
+          "allies": {
+            "u0": {
+              "tag": "4295229441",
+              "type": "Zealot",
+              "alive": true,
+              "health": 62.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 62.0,
+              "unit_type_id": 73,
+              "position": [
+                7.943,
+                19.35
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 0.0,
+              "weapon_ready": true,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    8.365,
+                    19.131
+                  ]
+                }
+              ]
+            },
+            "u6": {
+              "tag": "4296802305",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                6.497,
+                15.818
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 1.5,
+              "weapon_ready": false,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                }
+              ]
+            }
+          },
+          "visible_enemies": {
+            "e0": {
+              "tag": "4297588737",
+              "type": "Zealot",
+              "alive": true,
+              "health": 88.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 88.0,
+              "unit_type_id": 73,
+              "position": [
+                10.082,
+                17.46
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e1": {
+              "tag": "4297850881",
+              "type": "Zealot",
+              "alive": true,
+              "health": 50.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 50.0,
+              "unit_type_id": 73,
+              "position": [
+                9.895,
+                19.821
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e3": {
+              "tag": "4298637313",
+              "type": "Zealot",
+              "alive": true,
+              "health": 100.0,
+              "max_health": 100.0,
+              "shield": 42.0,
+              "max_shield": 50.0,
+              "effective_health": 142.0,
+              "unit_type_id": 73,
+              "position": [
+                10.78,
+                18.202
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e5": {
+              "tag": "4299423745",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.44,
+                14.566
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e6": {
+              "tag": "4299685889",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.565,
+                21.755
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e7": {
+              "tag": "4299948033",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.841,
+                20.524
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e8": {
+              "tag": "4299161601",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.958,
+                15.635
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            }
+          },
+          "unit_type_profiles": {
+            "73": {
+              "known": true,
+              "movement_speed_native": 2.25,
+              "armor": 1.0,
+              "attributes": [
+                1,
+                3
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "ground",
+                  "range": 0.1,
+                  "base_damage": 8.0,
+                  "hits_per_attack": 2,
+                  "damage_bonus": []
+                }
+              ]
+            },
+            "74": {
+              "known": true,
+              "movement_speed_native": 2.953125,
+              "armor": 1.0,
+              "attributes": [
+                2,
+                4
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "any",
+                  "range": 6.0,
+                  "base_damage": 13.0,
+                  "hits_per_attack": 1,
+                  "damage_bonus": [
+                    {
+                      "attribute": 2,
+                      "bonus": 5.0
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "previous_action_ids": {
+            "u0": "2",
+            "u6": "7"
+          },
+          "last_action_result": {
+            "from_game_loop": 242,
+            "to_game_loop": 250,
+            "meaning": "SC2 accepted/rejected submitted commands; acceptance does not prove firing or healing. Observation errors occurred during this interval, possibly on an existing order. Current observed orders are in allies/team_core.",
+            "actors": {
+              "u0": {
+                "requested_action_id": "2",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    8.466,
+                    20.717
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 0
+              },
+              "u1": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 1
+              },
+              "u2": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    7.539,
+                    18.393
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 2
+              },
+              "u3": {
+                "requested_action_id": "2",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    7.79,
+                    21.96
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 3
+              },
+              "u4": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u5": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u6": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 4
+              },
+              "u7": {
+                "requested_action_id": "2",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    4.172,
+                    18.827
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 5
+              },
+              "u8": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 6
+              },
+              "u9": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 7
+              }
+            },
+            "unmatched_observation_errors": [],
+            "response_mapping": "exact",
+            "raw_response_results": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "relations": {
+            "u0": {
+              "e0": {
+                "distance": 2.85,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e1": {
+                "distance": 2.01,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e3": {
+                "distance": 3.06,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e5": {
+                "distance": 8.89,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 7.99,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 7.98,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 8.83,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            },
+            "u6": {
+              "e0": {
+                "distance": 3.94,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e1": {
+                "distance": 5.25,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e3": {
+                "distance": 4.9,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e5": {
+                "distance": 9.03,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 10.84,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 10.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 9.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            }
+          },
+          "movement_candidates": {
+            "u0": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  7.943,
+                  21.35
+                ],
+                "distance_to_search_location": 9.67,
+                "distances_to_visible_enemies": {
+                  "e0": 4.44,
+                  "e1": 2.48,
+                  "e3": 4.24,
+                  "e5": 10.11,
+                  "e6": 7.63,
+                  "e7": 7.94,
+                  "e8": 9.84
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  7.943,
+                  17.35
+                ],
+                "distance_to_search_location": 8.17,
+                "distances_to_visible_enemies": {
+                  "e0": 2.14,
+                  "e1": 3.15,
+                  "e3": 2.96,
+                  "e5": 8.0,
+                  "e6": 8.8,
+                  "e7": 8.51,
+                  "e8": 8.2
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  9.943,
+                  19.35
+                ],
+                "distance_to_search_location": 6.92,
+                "distances_to_visible_enemies": {
+                  "e0": 1.9,
+                  "e1": 0.47,
+                  "e3": 1.42,
+                  "e5": 7.29,
+                  "e6": 6.11,
+                  "e7": 6.01,
+                  "e8": 7.07
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  5.943,
+                  19.35
+                ],
+                "distance_to_search_location": 10.6,
+                "distances_to_visible_enemies": {
+                  "e0": 4.55,
+                  "e1": 3.98,
+                  "e3": 4.97,
+                  "e5": 10.63,
+                  "e6": 9.92,
+                  "e7": 9.97,
+                  "e8": 10.68
+                }
+              }
+            },
+            "u6": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  6.497,
+                  17.818
+                ],
+                "distance_to_search_location": 9.68,
+                "distances_to_visible_enemies": {
+                  "e0": 3.6,
+                  "e1": 3.94,
+                  "e3": 4.3,
+                  "e5": 9.52,
+                  "e6": 9.89,
+                  "e7": 9.73,
+                  "e8": 9.71
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  6.497,
+                  13.818
+                ],
+                "distance_to_search_location": 9.75,
+                "distances_to_visible_enemies": {
+                  "e0": 5.11,
+                  "e1": 6.9,
+                  "e3": 6.13,
+                  "e5": 8.97,
+                  "e6": 12.05,
+                  "e7": 11.5,
+                  "e8": 9.63
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  8.497,
+                  15.818
+                ],
+                "distance_to_search_location": 7.51,
+                "distances_to_visible_enemies": {
+                  "e0": 2.28,
+                  "e1": 4.24,
+                  "e3": 3.3,
+                  "e5": 7.05,
+                  "e6": 9.23,
+                  "e7": 8.72,
+                  "e8": 7.46
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  4.497,
+                  15.818
+                ],
+                "distance_to_search_location": 11.5,
+                "distances_to_visible_enemies": {
+                  "e0": 5.82,
+                  "e1": 6.72,
+                  "e3": 6.72,
+                  "e5": 11.01,
+                  "e6": 12.56,
+                  "e7": 12.28,
+                  "e8": 11.46
+                }
+              }
+            }
+          },
+          "heal_candidates": {},
+          "scenario_brief": {
+            "scenario_id": "protoss_10_vs_10",
+            "map": "10gen_protoss",
+            "n_agents": 10,
+            "n_enemies": 10,
+            "distribution": {
+              "n_units": 10,
+              "n_enemies": 10,
+              "team_gen": {
+                "dist_type": "weighted_teams",
+                "unit_types": [
+                  "stalker",
+                  "zealot",
+                  "colossus"
+                ],
+                "weights": [
+                  0.45,
+                  0.45,
+                  0.1
+                ],
+                "observe": true
+              },
+              "start_positions": {
+                "dist_type": "surrounded_and_reflect",
+                "p": 0.5,
+                "map_x": 32,
+                "map_y": 32
+              }
+            },
+            "map_size": [
+              32,
+              32
+            ],
+            "step_mul": 8,
+            "move_amount": 2,
+            "difficulty": "7",
+            "use_unit_ranges": true,
+            "min_attack_range": 2,
+            "candidate_ranges": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "visibility": "centralized union of living allies' SMACv2 observations",
+            "scope": "Public generation rules; no sampled enemy positions or initial snapshot.",
+            "skills": "off",
+            "realtime": false,
+            "unit_balance": "native",
+            "unit_control_note": "Both owners use identical native Protoss unit definitions, including native automatic acquisition. Controllers and observation restrictions still differ."
+          }
+        },
+        "questions": {
+          "u0": {
+            "type": "choice",
+            "instructions": "Control ONLY u0, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 0.0 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [7.943, 21.35]. See state.movement_candidates.u0.2 for distances.",
+              "3": "Move south by 2 world units toward [7.943, 17.35]. See state.movement_candidates.u0.3 for distances.",
+              "4": "Move east by 2 world units toward [9.943, 19.35]. See state.movement_candidates.u0.4 for distances.",
+              "5": "Move west by 2 world units toward [5.943, 19.35]. See state.movement_candidates.u0.5 for distances."
+            }
+          },
+          "u6": {
+            "type": "choice",
+            "instructions": "Control ONLY u6, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 1.5 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [6.497, 17.818]. See state.movement_candidates.u6.2 for distances.",
+              "3": "Move south by 2 world units toward [6.497, 13.818]. See state.movement_candidates.u6.3 for distances.",
+              "4": "Move east by 2 world units toward [8.497, 15.818]. See state.movement_candidates.u6.4 for distances.",
+              "5": "Move west by 2 world units toward [4.497, 15.818]. See state.movement_candidates.u6.5 for distances.",
+              "6": "Attack e0; range=in_range.",
+              "7": "Attack e1; range=in_range.",
+              "9": "Attack e3; range=in_range."
+            }
+          }
+        }
+      },
+      "actions": {
+        "u6": 7,
+        "u0": 5
+      }
+    },
+    {
+      "step": 32,
+      "payload": {
+        "model": "jev-1.13.0",
+        "state": {
+          "objective": "Eliminate all opposing units before the episode step limit.",
+          "schema_version": 6,
+          "interface_version": "smacv2-p0-v1",
+          "action_contract": {
+            "attack_candidate_rule": "Use supplied legal criteria from SMACv2 masks and team visibility.",
+            "candidate_center_distance_by_type": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "range_estimate": "Native weapon range plus unit radii is an estimate, not proof of firing.",
+            "attack_order": "Accepted is not fired. Cooldown and movement affect actual attacks.",
+            "abilities_enabled": false,
+            "actions": "0 dead only; 1 Stop cancels order; 2/3/4/5 N/S/E/W; 6+j attacks e{j}."
+          },
+          "map": "10gen_protoss",
+          "episode": 14,
+          "game_loop": 258,
+          "step_mul": 8,
+          "steps_remaining": 168,
+          "visibility": "shared allied team vision; unseen enemies are unknown, not dead",
+          "coordinate_system": "SC2 world coordinates: north=+y, east=+x",
+          "search_location": [
+            16.0,
+            16.0
+          ],
+          "allies": {
+            "u0": {
+              "tag": "4295229441",
+              "type": "Zealot",
+              "alive": true,
+              "health": 62.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 62.0,
+              "unit_type_id": 73,
+              "position": [
+                6.818,
+                19.35
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 0.0,
+              "weapon_ready": true,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    5.943,
+                    19.35
+                  ]
+                }
+              ]
+            },
+            "u6": {
+              "tag": "4296802305",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                6.497,
+                15.818
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0,
+              "weapon_cooldown_loops": 23.02,
+              "weapon_ready": false,
+              "energy": 0.0,
+              "max_energy": 0.0,
+              "health_status": "healthy_or_damaged",
+              "health_lost_since_previous_decision": 0,
+              "shield_lost_since_previous_decision": 0,
+              "orders": [
+                {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                }
+              ]
+            }
+          },
+          "visible_enemies": {
+            "e0": {
+              "tag": "4297588737",
+              "type": "Zealot",
+              "alive": true,
+              "health": 88.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 88.0,
+              "unit_type_id": 73,
+              "position": [
+                9.919,
+                17.69
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e1": {
+              "tag": "4297850881",
+              "type": "Zealot",
+              "alive": true,
+              "health": 26.0,
+              "max_health": 100.0,
+              "shield": 0.0,
+              "max_shield": 50.0,
+              "effective_health": 26.0,
+              "unit_type_id": 73,
+              "position": [
+                9.895,
+                19.821
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e3": {
+              "tag": "4298637313",
+              "type": "Zealot",
+              "alive": true,
+              "health": 100.0,
+              "max_health": 100.0,
+              "shield": 42.0,
+              "max_shield": 50.0,
+              "effective_health": 142.0,
+              "unit_type_id": 73,
+              "position": [
+                10.057,
+                18.897
+              ],
+              "radius": 0.5,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e5": {
+              "tag": "4299423745",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                14.668,
+                15.069
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e6": {
+              "tag": "4299685889",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.565,
+                21.755
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e7": {
+              "tag": "4299948033",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.841,
+                20.524
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            },
+            "e8": {
+              "tag": "4299161601",
+              "type": "Stalker",
+              "alive": true,
+              "health": 80.0,
+              "max_health": 80.0,
+              "shield": 80.0,
+              "max_shield": 80.0,
+              "effective_health": 160.0,
+              "unit_type_id": 74,
+              "position": [
+                15.958,
+                15.635
+              ],
+              "radius": 0.625,
+              "is_flying": false,
+              "attack_upgrade_level": 0,
+              "armor_upgrade_level": 0,
+              "shield_upgrade_level": 0
+            }
+          },
+          "unit_type_profiles": {
+            "73": {
+              "known": true,
+              "movement_speed_native": 2.25,
+              "armor": 1.0,
+              "attributes": [
+                1,
+                3
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "ground",
+                  "range": 0.1,
+                  "base_damage": 8.0,
+                  "hits_per_attack": 2,
+                  "damage_bonus": []
+                }
+              ]
+            },
+            "74": {
+              "known": true,
+              "movement_speed_native": 2.953125,
+              "armor": 1.0,
+              "attributes": [
+                2,
+                4
+              ],
+              "shield_armor_base": 0.0,
+              "shield_armor_source": "native_protoss_zero_upgrade_prior",
+              "weapons": [
+                {
+                  "target_type": "any",
+                  "range": 6.0,
+                  "base_damage": 13.0,
+                  "hits_per_attack": 1,
+                  "damage_bonus": [
+                    {
+                      "attribute": 2,
+                      "bonus": 5.0
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "previous_action_ids": {
+            "u0": "5",
+            "u6": "7"
+          },
+          "last_action_result": {
+            "from_game_loop": 250,
+            "to_game_loop": 258,
+            "meaning": "SC2 accepted/rejected submitted commands; acceptance does not prove firing or healing. Observation errors occurred during this interval, possibly on an existing order. Current observed orders are in allies/team_core.",
+            "actors": {
+              "u0": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    5.943,
+                    19.35
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 0
+              },
+              "u1": {
+                "requested_action_id": "4",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    10.856,
+                    19.93
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 1
+              },
+              "u2": {
+                "requested_action_id": "2",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    8.616,
+                    20.69
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 2
+              },
+              "u3": {
+                "requested_action_id": "5",
+                "command": {
+                  "ability_id": 16,
+                  "kind": "move",
+                  "target_tag": null,
+                  "target_unit": null,
+                  "target_position": [
+                    5.79,
+                    21.085
+                  ]
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 3
+              },
+              "u4": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u5": {
+                "requested_action_id": "0",
+                "command": null,
+                "submission": "dead_noop",
+                "response": null,
+                "observation_errors": []
+              },
+              "u6": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 4
+              },
+              "u7": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 5
+              },
+              "u8": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 6
+              },
+              "u9": {
+                "requested_action_id": "7",
+                "command": {
+                  "ability_id": 23,
+                  "kind": "attack",
+                  "target_tag": "4297850881",
+                  "target_unit": "e1",
+                  "target_position": null
+                },
+                "submission": "accepted",
+                "response": {
+                  "code": 1,
+                  "name": "Success"
+                },
+                "observation_errors": [],
+                "command_index": 7
+              }
+            },
+            "unmatched_observation_errors": [],
+            "response_mapping": "exact",
+            "raw_response_results": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          "relations": {
+            "u0": {
+              "e0": {
+                "distance": 3.52,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e1": {
+                "distance": 3.11,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e3": {
+                "distance": 3.27,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e5": {
+                "distance": 8.94,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 9.07,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 9.1,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 9.87,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 0.10009765625,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 2,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            },
+            "u6": {
+              "e0": {
+                "distance": 3.9,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e1": {
+                "distance": 5.25,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e3": {
+                "distance": 4.71,
+                "in_weapon_range": true,
+                "weapon_range_status": "in_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": true,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": true,
+                "approach_needed": false
+              },
+              "e5": {
+                "distance": 8.2,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e6": {
+                "distance": 10.84,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e7": {
+                "distance": 10.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              },
+              "e8": {
+                "distance": 9.46,
+                "in_weapon_range": false,
+                "weapon_range_status": "out_of_range",
+                "native_weapon_range": 6.0,
+                "in_enemy_weapon_range": false,
+                "enemy_weapon_range_status": "out_of_range",
+                "smac_attack_available": false,
+                "smac_attack_distance_limit": 6,
+                "smac_center_distance_allowed": false,
+                "approach_needed": true
+              }
+            }
+          },
+          "movement_candidates": {
+            "u0": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  6.818,
+                  21.35
+                ],
+                "distance_to_search_location": 10.63,
+                "distances_to_visible_enemies": {
+                  "e0": 4.8,
+                  "e1": 3.44,
+                  "e3": 4.06,
+                  "e5": 10.05,
+                  "e6": 8.76,
+                  "e7": 9.06,
+                  "e8": 10.78
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  6.818,
+                  17.35
+                ],
+                "distance_to_search_location": 9.28,
+                "distances_to_visible_enemies": {
+                  "e0": 3.12,
+                  "e1": 3.95,
+                  "e3": 3.59,
+                  "e5": 8.17,
+                  "e6": 9.79,
+                  "e7": 9.56,
+                  "e8": 9.3
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  8.818,
+                  19.35
+                ],
+                "distance_to_search_location": 7.92,
+                "distances_to_visible_enemies": {
+                  "e0": 1.99,
+                  "e1": 1.18,
+                  "e3": 1.32,
+                  "e5": 7.25,
+                  "e6": 7.16,
+                  "e7": 7.12,
+                  "e8": 8.05
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  4.818,
+                  19.35
+                ],
+                "distance_to_search_location": 11.67,
+                "distances_to_visible_enemies": {
+                  "e0": 5.36,
+                  "e1": 5.1,
+                  "e3": 5.26,
+                  "e5": 10.74,
+                  "e6": 11.01,
+                  "e7": 11.09,
+                  "e8": 11.74
+                }
+              }
+            },
+            "u6": {
+              "2": {
+                "direction": "north",
+                "destination": [
+                  6.497,
+                  17.818
+                ],
+                "distance_to_search_location": 9.68,
+                "distances_to_visible_enemies": {
+                  "e0": 3.42,
+                  "e1": 3.94,
+                  "e3": 3.72,
+                  "e5": 8.62,
+                  "e6": 9.89,
+                  "e7": 9.73,
+                  "e8": 9.71
+                }
+              },
+              "3": {
+                "direction": "south",
+                "destination": [
+                  6.497,
+                  13.818
+                ],
+                "distance_to_search_location": 9.75,
+                "distances_to_visible_enemies": {
+                  "e0": 5.17,
+                  "e1": 6.9,
+                  "e3": 6.2,
+                  "e5": 8.27,
+                  "e6": 12.05,
+                  "e7": 11.5,
+                  "e8": 9.63
+                }
+              },
+              "4": {
+                "direction": "east",
+                "destination": [
+                  8.497,
+                  15.818
+                ],
+                "distance_to_search_location": 7.51,
+                "distances_to_visible_enemies": {
+                  "e0": 2.35,
+                  "e1": 4.24,
+                  "e3": 3.45,
+                  "e5": 6.22,
+                  "e6": 9.23,
+                  "e7": 8.72,
+                  "e8": 7.46
+                }
+              },
+              "5": {
+                "direction": "west",
+                "destination": [
+                  4.497,
+                  15.818
+                ],
+                "distance_to_search_location": 11.5,
+                "distances_to_visible_enemies": {
+                  "e0": 5.74,
+                  "e1": 6.72,
+                  "e3": 6.36,
+                  "e5": 10.2,
+                  "e6": 12.56,
+                  "e7": 12.28,
+                  "e8": 11.46
+                }
+              }
+            }
+          },
+          "heal_candidates": {},
+          "scenario_brief": {
+            "scenario_id": "protoss_10_vs_10",
+            "map": "10gen_protoss",
+            "n_agents": 10,
+            "n_enemies": 10,
+            "distribution": {
+              "n_units": 10,
+              "n_enemies": 10,
+              "team_gen": {
+                "dist_type": "weighted_teams",
+                "unit_types": [
+                  "stalker",
+                  "zealot",
+                  "colossus"
+                ],
+                "weights": [
+                  0.45,
+                  0.45,
+                  0.1
+                ],
+                "observe": true
+              },
+              "start_positions": {
+                "dist_type": "surrounded_and_reflect",
+                "p": 0.5,
+                "map_x": 32,
+                "map_y": 32
+              }
+            },
+            "map_size": [
+              32,
+              32
+            ],
+            "step_mul": 8,
+            "move_amount": 2,
+            "difficulty": "7",
+            "use_unit_ranges": true,
+            "min_attack_range": 2,
+            "candidate_ranges": {
+              "zealot": 2,
+              "stalker": 6,
+              "colossus": 7
+            },
+            "visibility": "centralized union of living allies' SMACv2 observations",
+            "scope": "Public generation rules; no sampled enemy positions or initial snapshot.",
+            "skills": "off",
+            "realtime": false,
+            "unit_balance": "native",
+            "unit_control_note": "Both owners use identical native Protoss unit definitions, including native automatic acquisition. Controllers and observation restrictions still differ."
+          }
+        },
+        "questions": {
+          "u0": {
+            "type": "choice",
+            "instructions": "Control ONLY u0, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 0.0 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [6.818, 21.35]. See state.movement_candidates.u0.2 for distances.",
+              "3": "Move south by 2 world units toward [6.818, 17.35]. See state.movement_candidates.u0.3 for distances.",
+              "4": "Move east by 2 world units toward [8.818, 19.35]. See state.movement_candidates.u0.4 for distances.",
+              "5": "Move west by 2 world units toward [4.818, 19.35]. See state.movement_candidates.u0.5 for distances."
+            }
+          },
+          "u6": {
+            "type": "choice",
+            "instructions": "Control ONLY u6, identified in state.allies. Choose its next complete action to win this StarCraft II micro battle on 10gen_protoss. Each surviving ally receives one action at this same game loop. Use the observed health, weapon cooldown, shields, weapon profiles, distances, recent damage and previous actions. Eliminate enemies efficiently while preserving allies. Attack orders can remain active during weapon cooldown; movement can interrupt firing. A stop command cancels the current order; it is NOT a no-op. Enemies outside team vision are unknown. If none are visible, the map center is a search location, not a known enemy position. Range null means unknown. SMACv2 attack candidates use per-unit distance thresholds in action_contract, independent of native range and cooldown. last_action_result reports SC2 acknowledgements, not proof of firing. In batches, team_core preserves every ally's core fields in named columns; allies entries outside the batch point to those rows. No pending team choices are known. Select only a supplied action ID. Current weapon cooldown: 23.02 loops.",
+            "criteria": {
+              "1": "Stop: cancel this unit's current order at its current position.",
+              "2": "Move north by 2 world units toward [6.497, 17.818]. See state.movement_candidates.u6.2 for distances.",
+              "3": "Move south by 2 world units toward [6.497, 13.818]. See state.movement_candidates.u6.3 for distances.",
+              "4": "Move east by 2 world units toward [8.497, 15.818]. See state.movement_candidates.u6.4 for distances.",
+              "5": "Move west by 2 world units toward [4.497, 15.818]. See state.movement_candidates.u6.5 for distances.",
+              "6": "Attack e0; range=in_range.",
+              "7": "Attack e1; range=in_range.",
+              "9": "Attack e3; range=in_range."
+            }
+          }
+        }
+      },
+      "actions": {
+        "u6": 6,
+        "u0": 4
+      }
+    }
+  ]
+}

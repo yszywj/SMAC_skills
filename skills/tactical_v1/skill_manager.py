@@ -40,7 +40,8 @@ def config_fingerprint(config: Dict[str, Any]) -> str:
     """Whole package source (recursive, tests excluded) + the actually
     reused shared modules + the effective configuration."""
     parts = []
-    for path in sorted(_HERE.parent.rglob("*.py")):
+    for path in sorted(p for p in _HERE.parent.rglob("*")
+                       if p.suffix in (".py", ".json")):
         if "tests" in path.parts or "__pycache__" in path.parts:
             continue
         parts.append(path.read_bytes())
@@ -78,13 +79,24 @@ class SkillManager:
                 "proxy_radius", 2.5),
             burst_weight=0.5,
             burst_self_cost=self.config.get("burst_engage", {}).get(
-                "self_cost", 1.0))
+                "self_cost", 1.0),
+            forecast_config=self.config.get("forecasting"),
+            urgency_value=self.config.get("focus_fire", {}).get(
+                "urgency_value", 0.5),
+            target_planning_enabled=self.config.get("focus_fire", {}).get(
+                "target_planning_enabled", True),
+            common_combat=self.config.get("common_combat"),
+            splash_reliability=self.config.get("splash_fire", {}).get(
+                "coverage_reliability", 0.5))
         self.coordinator = Coordinator(self.config, self.evaluator)
         lifecycle = self.config.get("lifecycle", {})
         self.memory = TacticalMemory(
             observation_ttl_loops=int(lifecycle.get("observation_ttl_loops", 240)),
             search_revisit_cooldown_loops=int(
-                lifecycle.get("search_revisit_cooldown_loops", 160)))
+                lifecycle.get("search_revisit_cooldown_loops", 160)),
+            retry_cooldown_h=lifecycle.get("retry_cooldown_h", 2.0),
+            no_progress_window_h=lifecycle.get("no_progress_window_h", 3.0),
+            encounter_config=self.config)
         self.telemetry = Telemetry(top_k_candidates=int(
             self.config.get("telemetry", {}).get("top_k_candidates", 3)))
         self._snapshot_counter = 0
@@ -103,7 +115,11 @@ class SkillManager:
     def reset(self) -> None:
         self.memory = TacticalMemory(
             observation_ttl_loops=self.memory.observation_ttl_loops,
-            search_revisit_cooldown_loops=self.memory.search_revisit_cooldown_loops)
+            search_revisit_cooldown_loops=self.memory.search_revisit_cooldown_loops,
+            retry_ttl_loops=self.memory.retry_ttl_loops,
+            retry_cooldown_h=self.memory.retry_cooldown_h,
+            no_progress_window_h=self.memory.no_progress_window_h,
+            encounter_config=self.config)
         self.telemetry = Telemetry(top_k_candidates=self.telemetry.top_k)
         self._snapshot_counter = 0
         self._cache = None
@@ -135,10 +151,22 @@ class SkillManager:
         self.memory.observe(snapshot, risk_now)
         for event in self.memory.update_task_facts(snapshot, context):
             self.telemetry.log(event)
+        previous_budget_events = self.telemetry.search_budget_events
         actions, summary, plans = self.coordinator.decide(
             context, self.skills, self.memory, self.telemetry, n_agents)
+        summary["battle_intent"] = self.memory.battle_state(context)
+        provider = self.skills.get("splash_fire")
+        if provider is not None and hasattr(provider, "coverage_model"):
+            summary["splash_model"] = provider.coverage_model()
         self.stats["steps"] += 1
-        self.stats["search_budget_events"] = self.telemetry.search_budget_events
+        self.stats["episodes"] += self._snapshot_counter == 1
+        # Telemetry resets per episode; run statistics accumulate deltas.
+        self.stats["search_budget_events"] += (
+            self.telemetry.search_budget_events - previous_budget_events)
+        self.stats["repairs"] += len(summary.get("repairs", ()))
+        self.stats["baseline_units"] += sum(
+            row["skill"] == "baseline" and snapshot.allies[actor].alive
+            for actor, row in summary.get("units", {}).items())
         self._cache = (digest, list(actions), copy.deepcopy(summary), plans,
                        snapshot)
         self._pending_commit = (snapshot, plans, list(actions), risk_now)

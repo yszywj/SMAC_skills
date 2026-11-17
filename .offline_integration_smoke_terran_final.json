@@ -1,0 +1,628 @@
+{
+  "kind": "final Terran S2 six-payload interface smoke; no native execution; actions allowed to change",
+  "selection": "same first-episode steps 0 and 20 for three Terran groups as previous 18-frame smoke; intermediate frames not replayed",
+  "previous_record": ".offline_integration_smoke_18_cached.json",
+  "source_hashes": {
+    "skills\\tactical_v1\\actions.py": "a1713b2ddb15759e67297d115ed1d093c0629450758d41563c6cfe3cb0d69a78",
+    "skills\\tactical_v1\\baseline.py": "cc9f5d54de180921bc6d0a3a525f3762ce9163a882949dd0163f4a3a21959951",
+    "skills\\tactical_v1\\battle_intent.py": "51b67052cbec8b148e81979a83e8574fe23381e12989003e1a5f063fad4b76f3",
+    "skills\\tactical_v1\\battle_pressure.py": "f687a0145e0fd8a6bcacc9c5027c7586ed48722af178a67da830327937255278",
+    "skills\\tactical_v1\\burst.py": "979fc06e64b598293012835b489e8b40730957baa7dd134058bf0608fc66e476",
+    "skills\\tactical_v1\\burst_native_profile.json": "686f9fb113228f06c67a410511169978e1c5a96bc50de9bf5f75b2b8d6dd73d8",
+    "skills\\tactical_v1\\capabilities.py": "59ae0da12635e18b6ed62bc1f9bb3a15d2294254882506455eb977eed57579f6",
+    "skills\\tactical_v1\\combat_exchange.py": "92be9d99f7a6296c6f0d6d6fcd07be25cf2efc4a3019e9b84020776b28b48e09",
+    "skills\\tactical_v1\\combat_groups.py": "6436cfde38314357d82b5a6c0de3dd4e535924dabb96dd27f76d277bdc12a259",
+    "skills\\tactical_v1\\combat_progress.py": "d80e622e7b8b3295cc09adaa3dfa25d1d32d0137431496ef629370b742046693",
+    "skills\\tactical_v1\\config.py": "680f367169c507ac4165d60a536e8362a350e4995bd30a6851892a477acacfb4",
+    "skills\\tactical_v1\\context.py": "dffe2384c492c8e4c6dadd8a2fc0e3be08da75fc20800627a16bbcc0bfafcc60",
+    "skills\\tactical_v1\\contracts.py": "2581e962860579e5bfda3e1903324ca38d0720db3b3a20810a09f66206cd43e8",
+    "skills\\tactical_v1\\coordinator.py": "d4341c27ee8b5f3be302ebc25618af03d2b2e97886355e85cdfe8912f4f56067",
+    "skills\\tactical_v1\\defaults.json": "a4e871bf1a77fc06bbda21af0de0af03b3a66db9dd364b56a2bd9fcaca6fef28",
+    "skills\\tactical_v1\\effects.py": "03d5edb3e2128847a2a3de46ea2c932b531bae8bf822f7f8c7b54913560f8b25",
+    "skills\\tactical_v1\\encounters.py": "e48b5de6121d8bba791091d1e5186fc01ad94200f0eafde705e161d05e26c162",
+    "skills\\tactical_v1\\evaluator.py": "dec6c2eeeb3f54c717febd53d6e0e115f59c6fe04a711eafbf68e6f0f1030f15",
+    "skills\\tactical_v1\\healing.py": "aec7f7deb0e0efe8c51973b359547a3e5ddad0bb0680af077be2f77aca6a7f25",
+    "skills\\tactical_v1\\joint_combat.py": "ee7c4ced8cf508186a1628317555077b8d039245bd22a738c7f0611c6342f95b",
+    "skills\\tactical_v1\\ledger.py": "e22f3929197341651642536829b5a149016a16b234c2ed23f2fb0880a0281ff3",
+    "skills\\tactical_v1\\memory.py": "a4d4e75b585599ad8b8008cb75f459273828096c49b341a11fad27e974a7b006",
+    "skills\\tactical_v1\\recovery.py": "11fccdaf43a694b218b4447223b9fc36e380cbd8024f313a03666e1f20e8cb01",
+    "skills\\tactical_v1\\registry.py": "c986083bbe74ba010c2d702d6c3b591e0d5dd44d30b44479f60c7aa69fabe2eb",
+    "skills\\tactical_v1\\skill_manager.py": "91097cb6d3eb3fdd33c7bd24262a8d0be1bad9c40da14c2c0312574e3ba9acba",
+    "skills\\tactical_v1\\targeting.py": "d6edafcb1120d09799633033fb21630294dfb937e1db8a7601e3b7ae3babcfec",
+    "skills\\tactical_v1\\telemetry.py": "88983734d0733d1f1e6904c18bcd6852a3a883e11b2a7cf6dbe2d26d41e1d102",
+    "skills\\tactical_v1\\validator.py": "c01c1d106342b516c5e8f8d41d87a44de66a215819a94a0be86c9d6fbafd7c02",
+    "skills\\tactical_v1\\__init__.py": "022534fac344ccab3dc3d4200c3601a375260df9ff1715704c5971408cce0189",
+    "skills\\tactical_v1\\skills\\burst_engage.py": "704d49427f7e2a05ec7750af930b279a3379c7167539c02d3368b2c035dc088f",
+    "skills\\tactical_v1\\skills\\cohesive_search.py": "c98f92e2f34622a05a575a5a6aa0e49297f659021ebe034edce2ad372300748d",
+    "skills\\tactical_v1\\skills\\combat_rejoin.py": "ee505dcb06b19885c90bc6809738e7d6d231b3c21d61a26bde797c28cadf15f4",
+    "skills\\tactical_v1\\skills\\combat_reposition.py": "99ecea35971dceeda49dd806f25ac1eeb42562b02fc2129ad34efa45c976917a",
+    "skills\\tactical_v1\\skills\\common.py": "ec57864e8583ee9537a83f6663c6bbfedc5651bc4a5d6a356f889b9e08f98a29",
+    "skills\\tactical_v1\\skills\\coordinated_engage.py": "bb0e324a20a5d68896c143fed66e4b61b6ff64bd6048ada1c86b85ffe159a8d5",
+    "skills\\tactical_v1\\skills\\disengage_reenter.py": "d878f57171277124173f36bf249e4dea5db66aacfb48ea668afeff67e3545167",
+    "skills\\tactical_v1\\skills\\focus_fire.py": "7e640a1555628010b5450bdec4228fec113e50144fbeac5d4fde7386d96723e3",
+    "skills\\tactical_v1\\skills\\heal_support.py": "3a7aba56141ff4dd35d8c9b1477cac8d44e503a0cff648202525f09b7cd7bdf5",
+    "skills\\tactical_v1\\skills\\local_formation.py": "19b52570a84a81070c7e89a50fd0e70045242c40ff3312b1af688d12c958a86b",
+    "skills\\tactical_v1\\skills\\precombat_rally.py": "cb9975c98d75f8a6e2685c2a01c0ceb8264bc063ebc86e8754bfc00fba536fc6",
+    "skills\\tactical_v1\\skills\\regroup.py": "df3caaac33b3f31de047f52fc5fa5b9fe5c2cc87e525b67d4bbb4f8f3f9aaf3f",
+    "skills\\tactical_v1\\skills\\splash_fire.py": "6b1e54e0726c58624921b75393dee17844a78af5bbc389593443ffb180ef7fcf",
+    "skills\\tactical_v1\\skills\\__init__.py": "3b39d5e278ed8bf64487c89777327679c481a31c2f2bcff7a70f71cd9125b104"
+  },
+  "source_changes_since_cached_smoke": [
+    "skills\\tactical_v1\\healing.py"
+  ],
+  "source_changes_during_smoke": [],
+  "rows": [
+    {
+      "roster": "t_2m6r2h",
+      "step": 0,
+      "episode": 1,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_2m6r2h\\events.jsonl",
+      "source_line": 5,
+      "step_ms": 1324.2796999402344,
+      "ok": true,
+      "actions": [
+        6,
+        15,
+        8,
+        7,
+        6,
+        6,
+        6,
+        6,
+        1,
+        1
+      ],
+      "action_errors": [],
+      "idempotent": true,
+      "input_unchanged": true,
+      "repairs": [],
+      "coverage": {
+        "generated": 65,
+        "deduplicated": 65,
+        "screened": 65,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 51,
+            "screened": 51
+          },
+          "heal_support": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "local_formation": {
+            "proposed": 10,
+            "screened": 10
+          }
+        },
+        "by_actor": {
+          "u3": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u4": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u5": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u6": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u7": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u0": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u1": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u2": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u8": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u9": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "evaluations": 506,
+      "evaluation_limit": 512,
+      "joint_score": -4.7608,
+      "config_fingerprint": "8d7a7163bbb30eb6",
+      "changed_actions_from_preceding_cached_smoke": []
+    },
+    {
+      "roster": "t_2m6r2h",
+      "step": 20,
+      "episode": 1,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_2m6r2h\\events.jsonl",
+      "source_line": 65,
+      "step_ms": 491.6786999674514,
+      "ok": true,
+      "actions": [
+        0,
+        10,
+        0,
+        2,
+        5,
+        13,
+        0,
+        4,
+        7,
+        9
+      ],
+      "action_errors": [],
+      "idempotent": true,
+      "input_unchanged": true,
+      "repairs": [],
+      "coverage": {
+        "generated": 36,
+        "deduplicated": 36,
+        "screened": 36,
+        "by_skill": {
+          "combat_reposition": {
+            "proposed": 12,
+            "screened": 12
+          },
+          "coordinated_engage": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "heal_support": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "local_formation": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "focus_fire": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "disengage_reenter": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "regroup": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "by_actor": {
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u7": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u8": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u9": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u3": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u1": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u4": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "evaluations": 188,
+      "evaluation_limit": 512,
+      "joint_score": -2.5726,
+      "config_fingerprint": "8d7a7163bbb30eb6",
+      "changed_actions_from_preceding_cached_smoke": []
+    },
+    {
+      "roster": "t_4m5r1h",
+      "step": 0,
+      "episode": 1,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_4m5r1h\\events.jsonl",
+      "source_line": 5,
+      "step_ms": 1344.2472000606358,
+      "ok": true,
+      "actions": [
+        6,
+        14,
+        14,
+        7,
+        6,
+        14,
+        6,
+        6,
+        6,
+        1
+      ],
+      "action_errors": [],
+      "idempotent": true,
+      "input_unchanged": true,
+      "repairs": [],
+      "coverage": {
+        "generated": 67,
+        "deduplicated": 67,
+        "screened": 67,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 54,
+            "screened": 54
+          },
+          "heal_support": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "local_formation": {
+            "proposed": 11,
+            "screened": 11
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u4": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u6": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u7": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u8": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u1": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u2": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u3": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u5": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u9": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "evaluations": 510,
+      "evaluation_limit": 512,
+      "joint_score": -4.195,
+      "config_fingerprint": "8d7a7163bbb30eb6",
+      "changed_actions_from_preceding_cached_smoke": []
+    },
+    {
+      "roster": "t_4m5r1h",
+      "step": 20,
+      "episode": 1,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_4m5r1h\\events.jsonl",
+      "source_line": 65,
+      "step_ms": 828.9179999846965,
+      "ok": true,
+      "actions": [
+        13,
+        0,
+        13,
+        11,
+        5,
+        0,
+        5,
+        10,
+        3,
+        8
+      ],
+      "action_errors": [],
+      "idempotent": true,
+      "input_unchanged": true,
+      "repairs": [],
+      "coverage": {
+        "generated": 45,
+        "deduplicated": 45,
+        "screened": 45,
+        "by_skill": {
+          "combat_reposition": {
+            "proposed": 16,
+            "screened": 16
+          },
+          "local_formation": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "coordinated_engage": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "heal_support": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "focus_fire": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "disengage_reenter": {
+            "proposed": 4,
+            "screened": 4
+          }
+        },
+        "by_actor": {
+          "u2": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u3": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u4": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u7": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u8": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u9": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u0": {
+            "proposed": 3,
+            "screened": 3
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "evaluations": 339,
+      "evaluation_limit": 512,
+      "joint_score": -2.7992,
+      "config_fingerprint": "8d7a7163bbb30eb6",
+      "changed_actions_from_preceding_cached_smoke": []
+    },
+    {
+      "roster": "t_6m4r",
+      "step": 0,
+      "episode": 1,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_6m4r\\events.jsonl",
+      "source_line": 5,
+      "step_ms": 1192.3675999278203,
+      "ok": true,
+      "actions": [
+        13,
+        6,
+        8,
+        14,
+        6,
+        6,
+        13,
+        13,
+        13,
+        13
+      ],
+      "action_errors": [],
+      "idempotent": true,
+      "input_unchanged": true,
+      "repairs": [],
+      "coverage": {
+        "generated": 70,
+        "deduplicated": 70,
+        "screened": 70,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 58,
+            "screened": 58
+          },
+          "local_formation": {
+            "proposed": 12,
+            "screened": 12
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u6": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u7": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u8": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u9": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u1": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u2": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u3": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u4": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u5": {
+            "proposed": 7,
+            "screened": 7
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "evaluations": 510,
+      "evaluation_limit": 512,
+      "joint_score": -3.4099,
+      "config_fingerprint": "8d7a7163bbb30eb6",
+      "changed_actions_from_preceding_cached_smoke": []
+    },
+    {
+      "roster": "t_6m4r",
+      "step": 20,
+      "episode": 1,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_6m4r\\events.jsonl",
+      "source_line": 65,
+      "step_ms": 402.9410000657663,
+      "ok": true,
+      "actions": [
+        0,
+        10,
+        0,
+        10,
+        10,
+        2,
+        4,
+        4,
+        3,
+        0
+      ],
+      "action_errors": [],
+      "idempotent": true,
+      "input_unchanged": true,
+      "repairs": [],
+      "coverage": {
+        "generated": 25,
+        "deduplicated": 25,
+        "screened": 25,
+        "by_skill": {
+          "coordinated_engage": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "focus_fire": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "disengage_reenter": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "combat_reposition": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "local_formation": {
+            "proposed": 4,
+            "screened": 4
+          }
+        },
+        "by_actor": {
+          "u5": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u7": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u8": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u1": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u4": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u3": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "evaluations": 137,
+      "evaluation_limit": 512,
+      "joint_score": -4.6443,
+      "config_fingerprint": "8d7a7163bbb30eb6",
+      "changed_actions_from_preceding_cached_smoke": []
+    }
+  ],
+  "totals": {
+    "passed": 6,
+    "failed": 0,
+    "repairs": 0,
+    "unexamined": 0
+  }
+}

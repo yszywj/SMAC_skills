@@ -54,7 +54,9 @@ Set-Item -LiteralPath "Function:$wrapperPython" -Value {
     $destinationIndex = [array]::IndexOf($CapturedArguments, '--output-dir') + 1
     $destination = $CapturedArguments[$destinationIndex]
     New-Item -ItemType Directory -Path $destination | Out-Null
-    @{status='complete'; completed_episodes=20; skill_version='current'} | ConvertTo-Json |
+    $versionIndex = [array]::IndexOf($CapturedArguments, '--skill-version')
+    $selectedVersion = if ($versionIndex -ge 0) { $CapturedArguments[$versionIndex + 1] } else { 'current' }
+    @{status='complete'; completed_episodes=20; skill_version=$selectedVersion} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $destination 'summary.json')
     $global:LASTEXITCODE = 0
 }
@@ -122,6 +124,33 @@ Set-Item -LiteralPath "Function:$wrapperPython" -Value {
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Historical skill versions", result.stderr)
                 self.assertIsNone(args)
+
+    def test_version_wrapper_arguments_load_each_actual_manager(self):
+        from bridge import runner, skill_runtime
+
+        for version in ("current", "tactical_v1", "baseline_v2_70pct", "baseline_v6_20261024"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as temporary:
+                result, arguments, _, _ = self.execute_wrapper(Path(temporary), skill_version=version)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                parsed = runner.parser().parse_args(arguments[1:])
+                config = skill_runtime.manager_configuration(parsed)
+                self.assertEqual(config["version"], version)
+                manager = skill_runtime.load_manager(version)(**config["manager_kwargs"])
+                if version == "tactical_v1":
+                    self.assertEqual(manager.current_skill, "tactical_v1")
+                    self.assertTrue(manager.active)
+                    self.assertFalse(any(flag in arguments for flag in (
+                        "--adaptive-" + key.replace("_", "-")
+                        for key in (*skill_runtime.LEGACY_COMBAT_PARAMETERS,
+                                    *skill_runtime.NEW_COMBAT_PARAMETERS))))
+
+    def test_tactical_wrapper_rejects_legacy_spatial_flags_before_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result, arguments, _, _ = self.execute_wrapper(
+                Path(temporary), skill_version="tactical_v1", extra="-EnableRegroup")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("tactical_v1 uses its own spatial skills", result.stderr)
+            self.assertIsNone(arguments)
 
 
 if __name__ == "__main__":

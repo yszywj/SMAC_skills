@@ -10,6 +10,7 @@ from .actions import DEAD_NOOP, KEEP_HEAL_ORDER
 from .context import Context
 from .contracts import CandidatePlan, Dependency
 from .ledger import Ledger
+from .healing import energy_ready, eligible_patient
 
 KNOWN_DEPENDENCY_KINDS = ("member", "target_valid", "fire_window",
                           "heal_owner", "slot")
@@ -43,6 +44,13 @@ def validate_actions(actions: List[int], context: Context,
         if action not in legal:
             problems.append(_problem("illegal_action", True, actor=actor,
                                      target=str(action)))
+        elif unit is not None and context.capabilities[actor].healer:
+            semantic = context.decode(actor, action)
+            if semantic.kind in ("heal", KEEP_HEAL_ORDER) and (
+                    not energy_ready(context, actor)
+                    or not eligible_patient(context, semantic.target)):
+                problems.append(_problem("heal_not_executable", True, actor=actor,
+                                         target=semantic.target or ""))
     return problems
 
 
@@ -82,6 +90,9 @@ def validate_plans(plans: List[CandidatePlan], context: Context,
                                              plan.proposal_id, actor,
                                              semantic.target))
             elif semantic.kind in ("heal", KEEP_HEAL_ORDER):
+                if not energy_ready(context, actor) or not eligible_patient(context, semantic.target):
+                    problems.append(_problem("heal_not_executable", True,
+                                             plan.proposal_id, actor, semantic.target or ""))
                 if semantic.target and semantic.target not in plan.beneficiaries \
                         and plan.goal not in (semantic.target, "observed_order"):
                     problems.append(_problem("heal_target_mismatch", True,

@@ -87,6 +87,9 @@ def combat_profile(stat, unit_type=None):
         "shield_armor_source": "native_protoss_zero_upgrade_prior" if unit_type in (4, 73, 74) else "unknown",
         "weapons": [{"target_type": {1: "ground", 2: "air", 3: "any"}.get(getattr(w, "type", 3)),
                      "range": round(w.range, 3), "base_damage": _optional_field(w, "damage"),
+                     "attack_period_loops": (_optional_field(w, "speed") * 16.0
+                         if _optional_field(w, "speed") is not None and w.speed > 0 else None),
+                     "attack_period_source": "native_catalog_normal_speed_16_loops",
                      "hits_per_attack": _optional_field(w, "attacks"),
                      "damage_bonus": [{"attribute": int(b.attribute), "bonus": float(b.bonus)}
                                       for b in w.damage_bonus] if hasattr(w, "damage_bonus") else None}
@@ -122,6 +125,7 @@ def unit_record(unit, name, previous_health=None, own=False, previous_shields=No
             weapon_cooldown_loops=round(unit.weapon_cooldown, 2),
             weapon_ready=unit.weapon_cooldown <= 0,
             energy=round(unit.energy, 2), max_energy=round(unit.energy_max, 2),
+            energy_raw=_optional_field(unit, "energy"),
             health_status="critical" if effective_health <= effective_max * 0.3 else "healthy_or_damaged",
             health_lost_since_previous_decision=round(max(0, (previous_health or {}).get(
                 unit.tag, unit.health) - unit.health), 2),

@@ -95,11 +95,10 @@ def make_plan(primary_skill: str, actors, goal: str, actions: Dict[str, int],
               goal_data: Optional[Dict] = None,
               task_key: str = "") -> CandidatePlan:
     named = {k: float(v) for k, v in features.items()}
-    if set(named) - {"progress", "hold_value", "switch_cost", "reentry_cost",
-                     "urgency"}:
+    if set(named) - {"progress", "hold_value", "switch_cost", "reentry_cost"}:
         raise ValueError(
             f"unnamed feature channel in {primary_skill}: "
-            f"{sorted(set(named) - {'progress', 'hold_value', 'switch_cost', 'reentry_cost', 'urgency'})}")
+            f"{sorted(set(named) - {'progress', 'hold_value', 'switch_cost', 'reentry_cost'})}")
     return CandidatePlan(
         proposal_id=plan_id(primary_skill, snapshot_id, actors, goal,
                             commitment.phase, actions),

@@ -9,7 +9,9 @@
     "cohesive_search": true,
     "splash_fire": true,
     "heal_support": true,
-    "burst_engage": true
+    "burst_engage": true,
+    "precombat_rally": true,
+    "combat_rejoin": true
   },
   "weights": {
     "useful_damage": 3.0,
@@ -25,7 +27,31 @@
     "tactic_progress": 0.6,
     "link": 0.8,
     "meeting": 0.8,
-    "role": 0.6
+    "role": 0.6,
+    "support_break": 0.6,
+    "attack_continuity": 0.4,
+    "rally_wait_cost": 0.05,
+    "future_attack": 0.35,
+    "target_threat": 0.25,
+    "combat_idle": 0.35,
+    "movement_continuity": 0.8,
+    "blocked_move": 0.6,
+    "unsupported_frontline": 0.5,
+    "sustained_contact": 0.8
+  },
+  "forecasting": {
+    "forecast_reach_discount": 0.5,
+    "uncertain_position_floor": 0.35
+  },
+  "common_combat": {
+    "joint_assessment_enabled": true,
+    "mechanism_recovery_enabled": true,
+    "next_fire_budget_enabled": true,
+    "pressure_memory_enabled": true,
+    "shared_front_enabled": true,
+    "local_cover_enabled": true,
+    "arrival_exposure_enabled": true,
+    "reentry_window_enabled": true
   },
   "search": {
     "beam_width": 8,
@@ -47,17 +73,51 @@
     "formation_max_h": 3.0,
     "search_waypoint_max_h": 12.0,
     "observation_ttl_loops": 240,
-    "search_revisit_cooldown_loops": 160
+    "search_revisit_cooldown_loops": 160,
+    "combat_cycle_commit_h": 2.0,
+    "combat_cycle_memory_h": 6.0
+  },
+  "contact_progress": {
+    "stall_h": 2.0,
+    "deadline_h": 6.0
+  },
+  "battle_intent": {
+    "commit_h": 4.0,
+    "stall_h": 4.0,
+    "quiet_h": 6.0,
+    "failed_retreats": 2
   },
   "focus_fire": {
+    "target_planning_enabled": true,
     "kill_window_h": 3.0,
     "joint_kill_max_members": 5,
     "urgency_value": 0.5
   },
   "coordinated_engage": {
-    "slot_spacing": 1.4
+    "slot_spacing": 1.4,
+    "contact_slot_margin": 0.05
+  },
+  "precombat_rally": {
+    "min_members": 3,
+    "ready_radius": 4.0,
+    "max_member_distance": 20.0,
+    "trigger_enemy_distance": 18.0,
+    "ready_fraction": 0.8,
+    "max_h": 8.0,
+    "min_commit_h": 2.0,
+    "no_progress_h": 3.0,
+    "rearm_quiet_h": 4.0
   },
   "combat_reposition": {},
+  "combat_rejoin": {
+    "support_radius": 6.0,
+    "min_members": 2,
+    "max_members": 10,
+    "max_h": 8.0,
+    "min_commit_h": 2.0,
+    "no_progress_h": 3.0,
+    "min_support_ratio": 1.2
+  },
   "disengage_reenter": {
     "critical_health_fraction": 0.35,
     "reenter_health_fraction": 0.6,
@@ -75,6 +135,7 @@
     "cohesion_radius": 10.0
   },
   "splash_fire": {
+    "coverage_reliability": 0.5,
     "coverage_radius": 3.0,
     "coverage_weight": 0.5
   },

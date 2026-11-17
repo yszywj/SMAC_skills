@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][ValidateSet(5,10)][int]$Size,
-    [Parameter(Mandatory=$true)][ValidateSet('current','baseline_v2_70pct','baseline_v6_20261024')][string]$SkillVersion,
+    [Parameter(Mandatory=$true)][ValidateSet('current','tactical_v1','baseline_v2_70pct','baseline_v6_20261024')][string]$SkillVersion,
     [int]$Episodes = 20,
     [int]$Seed = 170,
     [Parameter(Mandatory=$true)][string]$OutputName,
@@ -15,7 +15,10 @@ $ErrorActionPreference = 'Stop'
 if ($Episodes -le 0) { throw 'Episodes must be positive' }
 if ($SkillVersion -ne 'current' -and ($EnableRegroup -or $EnableCohesiveSearch -or
     $EnableCombatPositioning -or $AutoSpatialDispatch -or $PositioningSpacing -ne 'normal' -or
-    $PositioningLayout -ne 'free')) { throw 'Historical skill versions do not support spatial switches' }
+    $PositioningLayout -ne 'free')) {
+    if ($SkillVersion -eq 'tactical_v1') { throw 'tactical_v1 uses its own spatial skills; legacy spatial switches are not supported' }
+    throw 'Historical skill versions do not support spatial switches'
+}
 if ($OutputName -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]*$') { throw 'OutputName must be a single directory name' }
 $adapterRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $adapterRoot '.venv\Scripts\python.exe'
@@ -38,9 +41,11 @@ try {
     $runArguments = @(
         'run.py', 'run', '--method', 'adaptive-skill', '--skill-version', $SkillVersion,
         '--manifest', $manifest, '--output-dir', $output,
-        '--adaptive-posture', 'balanced', '--skill-max-steps', '4',
-        '--adaptive-window-fire', '--adaptive-range-preserving-move', '--adaptive-target-scoring'
+        '--adaptive-posture', 'balanced', '--skill-max-steps', '4'
     )
+    if ($SkillVersion -ne 'tactical_v1') {
+        $runArguments += @('--adaptive-window-fire', '--adaptive-range-preserving-move', '--adaptive-target-scoring')
+    }
     if ($SkillVersion -in @('current', 'baseline_v6_20261024')) {
         $runArguments += @(
             '--adaptive-coordinated-approach', '--adaptive-safe-reentry',

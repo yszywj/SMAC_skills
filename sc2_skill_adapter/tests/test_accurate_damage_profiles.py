@@ -5,6 +5,15 @@ from bridge.policy import combat_profile, unit_record
 
 
 class AccurateDamageProfileTests(unittest.TestCase):
+    def test_native_cycle_and_unrounded_energy_survive_adapter(self):
+        weapon = data_pb2.Weapon(type=3, range=5, damage=6, attacks=1, speed=.875)
+        profile = combat_profile(data_pb2.UnitTypeData(weapons=[weapon]), 48)
+        self.assertEqual(profile['weapons'][0]['attack_period_loops'], 14.)
+        unit = raw_pb2.Unit(unit_type=54, health=150, health_max=150, energy=.999)
+        row = unit_record(unit, 'Medivac', own=True)
+        self.assertEqual(row['energy'], 1.)
+        self.assertLess(row['energy_raw'], 1.)
+
     def test_raw_catalog_bonus_attributes_and_explicit_shield_prior(self):
         weapon = data_pb2.Weapon(type=data_pb2.Weapon.Any, range=6, damage=13, attacks=1,
                                 damage_bonus=[data_pb2.DamageBonus(attribute=data_pb2.Armored, bonus=5)])

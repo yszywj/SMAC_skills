@@ -1,4 +1,4 @@
-"""Skill registry: exactly 7 generic + 3 specialization skills.
+"""Skill registry: 9 generic + 3 specialization skills.
 
 Specializations act as REGISTRY-INJECTED providers for G1/G3 — a disabled
 S1 is simply absent from the provider dict, so no generic skill can keep a
@@ -8,10 +8,12 @@ from typing import Dict, List
 
 from .skills import (burst_engage, combat_reposition, cohesive_search,
                      coordinated_engage, disengage_reenter, focus_fire,
-                     heal_support, local_formation, regroup, splash_fire)
+                     heal_support, local_formation, regroup, splash_fire,
+                     precombat_rally, combat_rejoin)
 
 GENERIC = ["focus_fire", "coordinated_engage", "combat_reposition",
-           "disengage_reenter", "regroup", "local_formation", "cohesive_search"]
+           "disengage_reenter", "regroup", "local_formation", "cohesive_search",
+           "precombat_rally", "combat_rejoin"]
 SPECIALIZED = ["splash_fire", "heal_support", "burst_engage"]
 
 
@@ -26,6 +28,8 @@ def build_skills(config: Dict) -> Dict[str, object]:
             ("regroup", regroup.RegroupSkill),
             ("local_formation", local_formation.LocalFormationSkill),
             ("cohesive_search", cohesive_search.CohesiveSearchSkill),
+            ("precombat_rally", precombat_rally.PreCombatRallySkill),
+            ("combat_rejoin", combat_rejoin.CombatRejoinSkill),
             ("splash_fire", splash_fire.SplashFireSkill),
             ("heal_support", heal_support.HealSupportSkill),
             ("burst_engage", burst_engage.BurstEngageSkill)):

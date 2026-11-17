@@ -1,0 +1,2069 @@
+{
+  "kind": "offline real-payload interface smoke; not full-trajectory replay or game result",
+  "selection": "first episode steps 0 and 20 from each of nine groups; one manager per group, gap not replayed",
+  "source_hashes_at_start": {
+    "skills\\tactical_v1\\actions.py": "a1713b2ddb15759e67297d115ed1d093c0629450758d41563c6cfe3cb0d69a78",
+    "skills\\tactical_v1\\baseline.py": "cc9f5d54de180921bc6d0a3a525f3762ce9163a882949dd0163f4a3a21959951",
+    "skills\\tactical_v1\\battle_intent.py": "51b67052cbec8b148e81979a83e8574fe23381e12989003e1a5f063fad4b76f3",
+    "skills\\tactical_v1\\battle_pressure.py": "f687a0145e0fd8a6bcacc9c5027c7586ed48722af178a67da830327937255278",
+    "skills\\tactical_v1\\burst.py": "979fc06e64b598293012835b489e8b40730957baa7dd134058bf0608fc66e476",
+    "skills\\tactical_v1\\burst_native_profile.json": "686f9fb113228f06c67a410511169978e1c5a96bc50de9bf5f75b2b8d6dd73d8",
+    "skills\\tactical_v1\\capabilities.py": "59ae0da12635e18b6ed62bc1f9bb3a15d2294254882506455eb977eed57579f6",
+    "skills\\tactical_v1\\combat_exchange.py": "92be9d99f7a6296c6f0d6d6fcd07be25cf2efc4a3019e9b84020776b28b48e09",
+    "skills\\tactical_v1\\combat_groups.py": "6436cfde38314357d82b5a6c0de3dd4e535924dabb96dd27f76d277bdc12a259",
+    "skills\\tactical_v1\\combat_progress.py": "d80e622e7b8b3295cc09adaa3dfa25d1d32d0137431496ef629370b742046693",
+    "skills\\tactical_v1\\config.py": "680f367169c507ac4165d60a536e8362a350e4995bd30a6851892a477acacfb4",
+    "skills\\tactical_v1\\context.py": "dffe2384c492c8e4c6dadd8a2fc0e3be08da75fc20800627a16bbcc0bfafcc60",
+    "skills\\tactical_v1\\contracts.py": "2581e962860579e5bfda3e1903324ca38d0720db3b3a20810a09f66206cd43e8",
+    "skills\\tactical_v1\\coordinator.py": "d4341c27ee8b5f3be302ebc25618af03d2b2e97886355e85cdfe8912f4f56067",
+    "skills\\tactical_v1\\defaults.json": "a4e871bf1a77fc06bbda21af0de0af03b3a66db9dd364b56a2bd9fcaca6fef28",
+    "skills\\tactical_v1\\effects.py": "03d5edb3e2128847a2a3de46ea2c932b531bae8bf822f7f8c7b54913560f8b25",
+    "skills\\tactical_v1\\encounters.py": "e48b5de6121d8bba791091d1e5186fc01ad94200f0eafde705e161d05e26c162",
+    "skills\\tactical_v1\\evaluator.py": "f134b14f7b08e7b565aae1881105c800b3a86c59833a7a0576b0ead912c4ac71",
+    "skills\\tactical_v1\\healing.py": "64865530f8ef39ff520032bc2c0133d33d91c8fc417a86682ead51e5a0043e48",
+    "skills\\tactical_v1\\joint_combat.py": "f5b01010a719ba81dd0b6e11a33d82986ae7e7e610fbf2f0fcce0bd5fe1faae3",
+    "skills\\tactical_v1\\ledger.py": "e22f3929197341651642536829b5a149016a16b234c2ed23f2fb0880a0281ff3",
+    "skills\\tactical_v1\\memory.py": "a4d4e75b585599ad8b8008cb75f459273828096c49b341a11fad27e974a7b006",
+    "skills\\tactical_v1\\recovery.py": "11fccdaf43a694b218b4447223b9fc36e380cbd8024f313a03666e1f20e8cb01",
+    "skills\\tactical_v1\\registry.py": "c986083bbe74ba010c2d702d6c3b591e0d5dd44d30b44479f60c7aa69fabe2eb",
+    "skills\\tactical_v1\\skill_manager.py": "91097cb6d3eb3fdd33c7bd24262a8d0be1bad9c40da14c2c0312574e3ba9acba",
+    "skills\\tactical_v1\\targeting.py": "d6edafcb1120d09799633033fb21630294dfb937e1db8a7601e3b7ae3babcfec",
+    "skills\\tactical_v1\\telemetry.py": "88983734d0733d1f1e6904c18bcd6852a3a883e11b2a7cf6dbe2d26d41e1d102",
+    "skills\\tactical_v1\\validator.py": "c01c1d106342b516c5e8f8d41d87a44de66a215819a94a0be86c9d6fbafd7c02",
+    "skills\\tactical_v1\\__init__.py": "022534fac344ccab3dc3d4200c3601a375260df9ff1715704c5971408cce0189",
+    "skills\\tactical_v1\\skills\\burst_engage.py": "704d49427f7e2a05ec7750af930b279a3379c7167539c02d3368b2c035dc088f",
+    "skills\\tactical_v1\\skills\\cohesive_search.py": "c98f92e2f34622a05a575a5a6aa0e49297f659021ebe034edce2ad372300748d",
+    "skills\\tactical_v1\\skills\\combat_rejoin.py": "ee505dcb06b19885c90bc6809738e7d6d231b3c21d61a26bde797c28cadf15f4",
+    "skills\\tactical_v1\\skills\\combat_reposition.py": "99ecea35971dceeda49dd806f25ac1eeb42562b02fc2129ad34efa45c976917a",
+    "skills\\tactical_v1\\skills\\common.py": "ec57864e8583ee9537a83f6663c6bbfedc5651bc4a5d6a356f889b9e08f98a29",
+    "skills\\tactical_v1\\skills\\coordinated_engage.py": "bb0e324a20a5d68896c143fed66e4b61b6ff64bd6048ada1c86b85ffe159a8d5",
+    "skills\\tactical_v1\\skills\\disengage_reenter.py": "d878f57171277124173f36bf249e4dea5db66aacfb48ea668afeff67e3545167",
+    "skills\\tactical_v1\\skills\\focus_fire.py": "7e640a1555628010b5450bdec4228fec113e50144fbeac5d4fde7386d96723e3",
+    "skills\\tactical_v1\\skills\\heal_support.py": "3a7aba56141ff4dd35d8c9b1477cac8d44e503a0cff648202525f09b7cd7bdf5",
+    "skills\\tactical_v1\\skills\\local_formation.py": "19b52570a84a81070c7e89a50fd0e70045242c40ff3312b1af688d12c958a86b",
+    "skills\\tactical_v1\\skills\\precombat_rally.py": "cb9975c98d75f8a6e2685c2a01c0ceb8264bc063ebc86e8754bfc00fba536fc6",
+    "skills\\tactical_v1\\skills\\regroup.py": "df3caaac33b3f31de047f52fc5fa5b9fe5c2cc87e525b67d4bbb4f8f3f9aaf3f",
+    "skills\\tactical_v1\\skills\\splash_fire.py": "6b1e54e0726c58624921b75393dee17844a78af5bbc389593443ffb180ef7fcf",
+    "skills\\tactical_v1\\skills\\__init__.py": "3b39d5e278ed8bf64487c89777327679c481a31c2f2bcff7a70f71cd9125b104"
+  },
+  "source_files_changed_during_smoke": [],
+  "rows": [
+    {
+      "roster": "p_2z6s2c",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\p_2z6s2c\\events.jsonl",
+      "step_ms": 2481.2997999833897,
+      "action_errors": [],
+      "cached_step_ms": 1.4427999267354608,
+      "commit_ms": 3.5900999791920185,
+      "actions": [
+        6,
+        15,
+        4,
+        4,
+        8,
+        8,
+        7,
+        14,
+        7,
+        7
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 470,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 60,
+        "deduplicated": 60,
+        "screened": 60,
+        "by_skill": {
+          "local_formation": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "focus_fire": {
+            "proposed": 47,
+            "screened": 47
+          },
+          "coordinated_engage": {
+            "proposed": 4,
+            "screened": 4
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u2": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u1": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u3": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u4": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u5": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u6": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u7": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u8": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u9": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 2450.774,
+      "recorded_old_ms": 1580.175,
+      "recorded_old_evaluations": 406,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "p_2z6s2c",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\p_2z6s2c\\events.jsonl",
+      "step_ms": 1159.1626999434084,
+      "action_errors": [],
+      "cached_step_ms": 1.0238999966531992,
+      "commit_ms": 1.7510999459773302,
+      "actions": [
+        2,
+        13,
+        2,
+        2,
+        0,
+        12,
+        12,
+        3,
+        12,
+        12
+      ],
+      "alive": 9,
+      "repairs": [],
+      "evaluations": 335,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 45,
+        "deduplicated": 45,
+        "screened": 45,
+        "by_skill": {
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "coordinated_engage": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "focus_fire": {
+            "proposed": 14,
+            "screened": 14
+          },
+          "combat_reposition": {
+            "proposed": 12,
+            "screened": 12
+          },
+          "regroup": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "disengage_reenter": {
+            "proposed": 8,
+            "screened": 8
+          }
+        },
+        "by_actor": {
+          "u1": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u2": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u3": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u5": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u8": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u0": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u7": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u9": {
+            "proposed": 8,
+            "screened": 8
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1148.755,
+      "recorded_old_ms": 1192.203,
+      "recorded_old_evaluations": 316,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "p_4z5s1c",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\p_4z5s1c\\events.jsonl",
+      "step_ms": 1972.6435999618843,
+      "action_errors": [],
+      "cached_step_ms": 1.2849000049754977,
+      "commit_ms": 2.8574999887496233,
+      "actions": [
+        6,
+        2,
+        5,
+        5,
+        5,
+        8,
+        8,
+        8,
+        8,
+        9
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 343,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 53,
+        "deduplicated": 53,
+        "screened": 53,
+        "by_skill": {
+          "local_formation": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "focus_fire": {
+            "proposed": 36,
+            "screened": 36
+          },
+          "coordinated_engage": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "combat_reposition": {
+            "proposed": 1,
+            "screened": 1
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u1": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u2": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u3": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u4": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u6": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u7": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u8": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u9": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1955.332,
+      "recorded_old_ms": 1367.687,
+      "recorded_old_evaluations": 343,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "p_4z5s1c",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\p_4z5s1c\\events.jsonl",
+      "step_ms": 1062.590999994427,
+      "action_errors": [],
+      "cached_step_ms": 1.1762999929487705,
+      "commit_ms": 1.7903000116348267,
+      "actions": [
+        2,
+        2,
+        14,
+        13,
+        13,
+        2,
+        0,
+        9,
+        9,
+        0
+      ],
+      "alive": 8,
+      "repairs": [],
+      "evaluations": 311,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 43,
+        "deduplicated": 43,
+        "screened": 43,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 23,
+            "screened": 23
+          },
+          "combat_reposition": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "local_formation": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "coordinated_engage": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "disengage_reenter": {
+            "proposed": 3,
+            "screened": 3
+          }
+        },
+        "by_actor": {
+          "u1": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u2": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u3": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u4": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u7": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u8": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u0": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1046.207,
+      "recorded_old_ms": 748.946,
+      "recorded_old_evaluations": 301,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u7": null,
+        "u8": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "p_6z4s",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\p_6z4s\\events.jsonl",
+      "step_ms": 1847.4206998944283,
+      "action_errors": [],
+      "cached_step_ms": 1.636900007724762,
+      "commit_ms": 2.9980000108480453,
+      "actions": [
+        5,
+        2,
+        5,
+        2,
+        4,
+        2,
+        9,
+        9,
+        9,
+        9
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 300,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 48,
+        "deduplicated": 48,
+        "screened": 48,
+        "by_skill": {
+          "local_formation": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "combat_reposition": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "coordinated_engage": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "focus_fire": {
+            "proposed": 25,
+            "screened": 25
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u2": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u1": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u3": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u4": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u5": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u7": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u8": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u9": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1825.945,
+      "recorded_old_ms": 1432.443,
+      "recorded_old_evaluations": 300,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "p_6z4s",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\p_6z4s\\events.jsonl",
+      "step_ms": 1145.1591999502853,
+      "action_errors": [],
+      "cached_step_ms": 1.4815999893471599,
+      "commit_ms": 2.4634000146761537,
+      "actions": [
+        3,
+        13,
+        13,
+        6,
+        4,
+        6,
+        14,
+        5,
+        6,
+        13
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 269,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 40,
+        "deduplicated": 40,
+        "screened": 40,
+        "by_skill": {
+          "combat_reposition": {
+            "proposed": 12,
+            "screened": 12
+          },
+          "focus_fire": {
+            "proposed": 23,
+            "screened": 23
+          },
+          "coordinated_engage": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "disengage_reenter": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u1": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u2": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u3": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u4": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u6": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u7": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u8": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u9": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1131.142,
+      "recorded_old_ms": 901.928,
+      "recorded_old_evaluations": 251,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "t_2m6r2h",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_2m6r2h\\events.jsonl",
+      "step_ms": 1906.9235000060871,
+      "action_errors": [],
+      "cached_step_ms": 1.3837999431416392,
+      "commit_ms": 2.5101000210270286,
+      "actions": [
+        6,
+        15,
+        8,
+        7,
+        6,
+        6,
+        6,
+        6,
+        1,
+        1
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 506,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 65,
+        "deduplicated": 65,
+        "screened": 65,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 51,
+            "screened": 51
+          },
+          "heal_support": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "local_formation": {
+            "proposed": 10,
+            "screened": 10
+          }
+        },
+        "by_actor": {
+          "u3": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u4": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u5": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u6": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u7": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "u0": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u1": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u2": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u8": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u9": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1884.156,
+      "recorded_old_ms": 1334.254,
+      "recorded_old_evaluations": 506,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null
+      },
+      "healers": {
+        "u8": {
+          "alive": true,
+          "energy": 50.04,
+          "raw_energy": 50.04,
+          "final_action": 1
+        },
+        "u9": {
+          "alive": true,
+          "energy": 50.04,
+          "raw_energy": 50.04,
+          "final_action": 1
+        }
+      },
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "t_2m6r2h",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_2m6r2h\\events.jsonl",
+      "step_ms": 519.8207999346778,
+      "action_errors": [],
+      "cached_step_ms": 0.9979000315070152,
+      "commit_ms": 0.9632000001147389,
+      "actions": [
+        0,
+        10,
+        0,
+        2,
+        5,
+        13,
+        0,
+        4,
+        7,
+        9
+      ],
+      "alive": 7,
+      "repairs": [],
+      "evaluations": 188,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 36,
+        "deduplicated": 36,
+        "screened": 36,
+        "by_skill": {
+          "combat_reposition": {
+            "proposed": 12,
+            "screened": 12
+          },
+          "coordinated_engage": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "heal_support": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "local_formation": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "focus_fire": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "disengage_reenter": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "regroup": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "by_actor": {
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u7": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u8": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u9": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u3": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u1": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u4": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 513.352,
+      "recorded_old_ms": 545.648,
+      "recorded_old_evaluations": 210,
+      "periods": {
+        "u1": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u7": null
+      },
+      "healers": {
+        "u8": {
+          "alive": true,
+          "energy": 27.12,
+          "raw_energy": 27.12,
+          "final_action": 7
+        },
+        "u9": {
+          "alive": true,
+          "energy": 27.12,
+          "raw_energy": 27.12,
+          "final_action": 9
+        }
+      },
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "t_4m5r1h",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_4m5r1h\\events.jsonl",
+      "step_ms": 1977.1213000640273,
+      "action_errors": [],
+      "cached_step_ms": 1.1709999525919557,
+      "commit_ms": 2.663400024175644,
+      "actions": [
+        6,
+        14,
+        14,
+        7,
+        6,
+        14,
+        6,
+        6,
+        6,
+        1
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 510,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 67,
+        "deduplicated": 67,
+        "screened": 67,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 54,
+            "screened": 54
+          },
+          "heal_support": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "local_formation": {
+            "proposed": 11,
+            "screened": 11
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u4": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u6": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u7": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u8": {
+            "proposed": 10,
+            "screened": 10
+          },
+          "u1": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u2": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u3": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u5": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u9": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1962.241,
+      "recorded_old_ms": 1284.212,
+      "recorded_old_evaluations": 510,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null
+      },
+      "healers": {
+        "u9": {
+          "alive": true,
+          "energy": 50.04,
+          "raw_energy": 50.04,
+          "final_action": 1
+        }
+      },
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "t_4m5r1h",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_4m5r1h\\events.jsonl",
+      "step_ms": 990.7039999961853,
+      "action_errors": [],
+      "cached_step_ms": 0.9559999452903867,
+      "commit_ms": 0.9944000048562884,
+      "actions": [
+        13,
+        0,
+        13,
+        11,
+        5,
+        0,
+        5,
+        10,
+        3,
+        8
+      ],
+      "alive": 8,
+      "repairs": [],
+      "evaluations": 339,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 45,
+        "deduplicated": 45,
+        "screened": 45,
+        "by_skill": {
+          "combat_reposition": {
+            "proposed": 16,
+            "screened": 16
+          },
+          "local_formation": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "coordinated_engage": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "heal_support": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "focus_fire": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "disengage_reenter": {
+            "proposed": 4,
+            "screened": 4
+          }
+        },
+        "by_actor": {
+          "u2": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u3": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u4": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u7": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u8": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u9": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u0": {
+            "proposed": 3,
+            "screened": 3
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 975.407,
+      "recorded_old_ms": 746.295,
+      "recorded_old_evaluations": 282,
+      "periods": {
+        "u0": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u6": null,
+        "u7": null,
+        "u8": null
+      },
+      "healers": {
+        "u9": {
+          "alive": true,
+          "energy": 27.12,
+          "raw_energy": 27.12,
+          "final_action": 8
+        }
+      },
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "t_6m4r",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_6m4r\\events.jsonl",
+      "step_ms": 1999.0967999910936,
+      "action_errors": [],
+      "cached_step_ms": 1.1623000027611852,
+      "commit_ms": 2.8176000341773033,
+      "actions": [
+        13,
+        6,
+        8,
+        14,
+        6,
+        6,
+        13,
+        13,
+        13,
+        13
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 510,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 70,
+        "deduplicated": 70,
+        "screened": 70,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 58,
+            "screened": 58
+          },
+          "local_formation": {
+            "proposed": 12,
+            "screened": 12
+          }
+        },
+        "by_actor": {
+          "u0": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u6": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u7": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u8": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u9": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u1": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u2": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u3": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u4": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u5": {
+            "proposed": 7,
+            "screened": 7
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1979.125,
+      "recorded_old_ms": 1113.681,
+      "recorded_old_evaluations": 510,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "t_6m4r",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\t_6m4r\\events.jsonl",
+      "step_ms": 451.4175000367686,
+      "action_errors": [],
+      "cached_step_ms": 0.9059000294655561,
+      "commit_ms": 0.9216000325977802,
+      "actions": [
+        0,
+        10,
+        0,
+        10,
+        10,
+        2,
+        4,
+        4,
+        3,
+        0
+      ],
+      "alive": 7,
+      "repairs": [],
+      "evaluations": 137,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 25,
+        "deduplicated": 25,
+        "screened": 25,
+        "by_skill": {
+          "coordinated_engage": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "focus_fire": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "disengage_reenter": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "combat_reposition": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "local_formation": {
+            "proposed": 4,
+            "screened": 4
+          }
+        },
+        "by_actor": {
+          "u5": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u7": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u8": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u1": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u4": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u3": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 445.183,
+      "recorded_old_ms": 348.248,
+      "recorded_old_evaluations": 124,
+      "periods": {
+        "u1": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "z_2l6h2b",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\z_2l6h2b\\events.jsonl",
+      "step_ms": 1293.7631000531837,
+      "action_errors": [],
+      "cached_step_ms": 2.0961000118404627,
+      "commit_ms": 2.620800049044192,
+      "actions": [
+        2,
+        4,
+        2,
+        2,
+        9,
+        8,
+        9,
+        15,
+        15,
+        15
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 310,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 46,
+        "deduplicated": 46,
+        "screened": 46,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 30,
+            "screened": 30
+          },
+          "burst_engage": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "coordinated_engage": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "local_formation": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "disengage_reenter": {
+            "proposed": 3,
+            "screened": 3
+          }
+        },
+        "by_actor": {
+          "u7": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "u8": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u9": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u0": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u1": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u2": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u3": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u4": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u6": {
+            "proposed": 5,
+            "screened": 5
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1279.918,
+      "recorded_old_ms": 1252.224,
+      "recorded_old_evaluations": 328,
+      "periods": {
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "z_2l6h2b",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\z_2l6h2b\\events.jsonl",
+      "step_ms": 25.522500043734908,
+      "action_errors": [],
+      "cached_step_ms": 0.7630999898537993,
+      "commit_ms": 0.3983000060543418,
+      "actions": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        14,
+        0,
+        0,
+        14
+      ],
+      "alive": 2,
+      "repairs": [],
+      "evaluations": 12,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 6,
+        "deduplicated": 6,
+        "screened": 6,
+        "by_skill": {
+          "combat_reposition": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "focus_fire": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "by_actor": {
+          "u6": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u9": {
+            "proposed": 1,
+            "screened": 1
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 23.947,
+      "recorded_old_ms": 27.266,
+      "recorded_old_evaluations": 12,
+      "periods": {
+        "u6": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "z_4l5h1b",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\z_4l5h1b\\events.jsonl",
+      "step_ms": 1539.74829998333,
+      "action_errors": [],
+      "cached_step_ms": 1.2582000344991684,
+      "commit_ms": 2.8266001027077436,
+      "actions": [
+        5,
+        5,
+        2,
+        5,
+        2,
+        8,
+        9,
+        8,
+        6,
+        7
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 304,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 48,
+        "deduplicated": 48,
+        "screened": 48,
+        "by_skill": {
+          "local_formation": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "burst_engage": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "coordinated_engage": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "focus_fire": {
+            "proposed": 26,
+            "screened": 26
+          },
+          "disengage_reenter": {
+            "proposed": 4,
+            "screened": 4
+          }
+        },
+        "by_actor": {
+          "u1": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u2": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u0": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u3": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u4": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u5": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u6": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u7": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u8": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u9": {
+            "proposed": 7,
+            "screened": 7
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1519.097,
+      "recorded_old_ms": 1219.007,
+      "recorded_old_evaluations": 287,
+      "periods": {
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "z_4l5h1b",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\z_4l5h1b\\events.jsonl",
+      "step_ms": 67.03340006060898,
+      "action_errors": [],
+      "cached_step_ms": 0.8043000707402825,
+      "commit_ms": 0.4453000146895647,
+      "actions": [
+        0,
+        0,
+        0,
+        4,
+        0,
+        2,
+        0,
+        10,
+        10,
+        0
+      ],
+      "alive": 4,
+      "repairs": [],
+      "evaluations": 26,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 7,
+        "deduplicated": 7,
+        "screened": 7,
+        "by_skill": {
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "coordinated_engage": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "focus_fire": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "by_actor": {
+          "u3": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u7": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u8": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u5": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 64.912,
+      "recorded_old_ms": 74.582,
+      "recorded_old_evaluations": 36,
+      "periods": {
+        "u3": null,
+        "u5": null,
+        "u7": null,
+        "u8": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "z_6l4h",
+      "episode": 1,
+      "step": 0,
+      "source_line": 5,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\z_6l4h\\events.jsonl",
+      "step_ms": 1807.081799954176,
+      "action_errors": [],
+      "cached_step_ms": 1.1854000622406602,
+      "commit_ms": 2.507299999706447,
+      "actions": [
+        2,
+        2,
+        5,
+        5,
+        2,
+        4,
+        14,
+        13,
+        13,
+        13
+      ],
+      "alive": 10,
+      "repairs": [],
+      "evaluations": 296,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 45,
+        "deduplicated": 45,
+        "screened": 45,
+        "by_skill": {
+          "focus_fire": {
+            "proposed": 23,
+            "screened": 23
+          },
+          "coordinated_engage": {
+            "proposed": 11,
+            "screened": 11
+          },
+          "local_formation": {
+            "proposed": 11,
+            "screened": 11
+          }
+        },
+        "by_actor": {
+          "u6": {
+            "proposed": 7,
+            "screened": 7
+          },
+          "u7": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u8": {
+            "proposed": 9,
+            "screened": 9
+          },
+          "u0": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u1": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u2": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u3": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u4": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u5": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u9": {
+            "proposed": 8,
+            "screened": 8
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 1786.97,
+      "recorded_old_ms": 1474.927,
+      "recorded_old_evaluations": 295,
+      "periods": {
+        "u0": null,
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u4": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null,
+        "u9": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    },
+    {
+      "roster": "z_6l4h",
+      "episode": 1,
+      "step": 20,
+      "source_line": 65,
+      "source": "runs\\tactical_all_races_10v10_9x20_mechanisms_20261115\\current\\z_6l4h\\events.jsonl",
+      "step_ms": 387.4524000566453,
+      "action_errors": [],
+      "cached_step_ms": 1.0076999897137284,
+      "commit_ms": 0.8852999890223145,
+      "actions": [
+        0,
+        11,
+        10,
+        10,
+        0,
+        4,
+        2,
+        11,
+        10,
+        0
+      ],
+      "alive": 7,
+      "repairs": [],
+      "evaluations": 166,
+      "evaluation_limit": 512,
+      "coverage": {
+        "generated": 22,
+        "deduplicated": 22,
+        "screened": 22,
+        "by_skill": {
+          "coordinated_engage": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "local_formation": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "focus_fire": {
+            "proposed": 8,
+            "screened": 8
+          },
+          "combat_rejoin": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "combat_reposition": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "disengage_reenter": {
+            "proposed": 2,
+            "screened": 2
+          }
+        },
+        "by_actor": {
+          "u5": {
+            "proposed": 3,
+            "screened": 3
+          },
+          "u6": {
+            "proposed": 5,
+            "screened": 5
+          },
+          "u7": {
+            "proposed": 1,
+            "screened": 1
+          },
+          "u8": {
+            "proposed": 4,
+            "screened": 4
+          },
+          "u1": {
+            "proposed": 2,
+            "screened": 2
+          },
+          "u3": {
+            "proposed": 6,
+            "screened": 6
+          },
+          "u2": {
+            "proposed": 6,
+            "screened": 6
+          }
+        },
+        "semantics": "screened means one complete baseline substitution attempted; invalid branches rejected",
+        "unexamined": 0
+      },
+      "reported_ms": 381.562,
+      "recorded_old_ms": 299.376,
+      "recorded_old_evaluations": 112,
+      "periods": {
+        "u1": null,
+        "u2": null,
+        "u3": null,
+        "u5": null,
+        "u6": null,
+        "u7": null,
+        "u8": null
+      },
+      "healers": {},
+      "idempotent": true,
+      "input_unchanged": true,
+      "config_fingerprint": "5312355d258f2313",
+      "ok": true,
+      "analysis_note": "Initial report extractor used generated instead of per-actor proposed; runtime assertions had all passed. Corrected from saved coverage without replay.",
+      "actors_generated_but_unscreened": []
+    }
+  ],
+  "totals": {
+    "passed": 18,
+    "failed": 0,
+    "step_ms_median": 1226.462899998296,
+    "step_ms_max": 2481.2997999833897,
+    "cached_ms_max": 2.0961000118404627,
+    "commit_ms_max": 3.5900999791920185,
+    "repairs": 0,
+    "unexamined": 0,
+    "actors_generated_but_unscreened": 0,
+    "new_total_reported_ms": 22374.02500000001,
+    "historical_total_reported_ms": 16943.102,
+    "timing_note": "Current offline sparse replay versus historic native-run recorded telemetry; different runtime load and incomplete memory, not a controlled speed benchmark."
+  }
+}

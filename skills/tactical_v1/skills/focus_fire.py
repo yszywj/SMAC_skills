@@ -10,6 +10,8 @@ keep healing or escaping instead.
 from typing import Dict, List, Optional
 
 from ..context import Context, IN_RANGE
+from ..battle_pressure import enemy_pressure
+from ..targeting import next_shot_target, planning_enabled, shared_target_plan
 from ..contracts import (Commitment, Dependency, EffectClaim, HEURISTIC,
                          ResourceClaims)
 from .common import h_loops, make_plan, space_claim
@@ -23,10 +25,8 @@ class FocusFireSkill:
         params = config.get("focus_fire", {})
         self.kill_window_h = params.get("kill_window_h", 3.0)
         self.joint_kill_max_members = params.get("joint_kill_max_members", 5)
-        self.urgency_value = params.get("urgency_value", 0.5)
         self.max_candidates = config.get("search", {}).get(
             "max_candidates_per_unit", 6)
-        self.urgent_types = ["baneling"]
         self.providers = providers or {}
 
     # -- impact model -------------------------------------------------------
@@ -55,7 +55,7 @@ class FocusFireSkill:
 
     # -- candidate ordering -------------------------------------------------
     def _ordered_targets(self, context: Context, actor: str, issuable,
-                         original) -> List[str]:
+                         original, assigned=None) -> List[str]:
         provider = self.providers.get("splash_fire")
         capability = context.capabilities[actor]
         if capability.specialization == "splash_fire" and provider is not None:
@@ -67,12 +67,16 @@ class FocusFireSkill:
         killable = [e for e in issuable
                     if self._window_damage(context, actor, e)
                     >= context.snapshot.enemies[e].effective_health]
-        high_threat = [e for e in issuable
-                       if any(e in context.threats_to(a)
-                              for a in context.snapshot.allies)]
+        # A boolean "threatens anyone" leaves all ordinary attackers sorted
+        # by ID, so an eligible high-pressure rear attacker can miss the
+        # candidate quota entirely. Rank compatible objective pressure;
+        # known immediate kills and the established target remain classes.
+        high_threat = sorted((e for e in issuable if enemy_pressure(context, e) > 0),
+                             key=lambda e: (-enemy_pressure(context, e), e))
         nearby = sorted(issuable, key=lambda e: (
             context.snapshot.relations[actor][e].distance, e))
-        classes = [killable, [original] if original else [], high_threat,
+        classes = [killable, [original] if original else [],
+                   [assigned] if assigned in issuable else [], high_threat,
                    nearby, *classes]
         # round-robin interleave: one from each class per round
         ordered, seen = [], set()
@@ -90,6 +94,7 @@ class FocusFireSkill:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
         plans: List = []
+        target_plan = shared_target_plan(context, memory, self.config)
         attackers: Dict[str, List[str]] = {}
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive:
@@ -104,13 +109,15 @@ class FocusFireSkill:
                 telemetry.count(self.name, "applicable")
         for actor, issuable in sorted(attackers.items()):
             instance = memory.instance_for(self.name, actor)
-            original = None
-            if instance is not None and instance.goal_kind == "enemy" \
-                    and instance.goal in context.snapshot.enemies \
-                    and context.can_issue_attack(actor, instance.goal):
-                original = instance.goal
+            # A cooldown reposition replaces the G1 task, but it must not
+            # erase the actual shot target that G3 positioned around.
+            original = (next_shot_target(context, memory, actor, issuable)
+                        if planning_enabled(self.config) else
+                        memory.recent_attack_target(context, actor, issuable))
+            assignment = target_plan.assignments.get(actor)
             for enemy_id in self._ordered_targets(
-                    context, actor, issuable, original)[:self.max_candidates]:
+                    context, actor, issuable, original,
+                    assignment.target if assignment else None)[:self.max_candidates]:
                 action = context.attack_action(actor, enemy_id)
                 if action is None:
                     continue
@@ -129,7 +136,7 @@ class FocusFireSkill:
                     delta = {"kind": "retarget", "instance_id":
                              instance.instance_id, "goal": enemy_id,
                              "goal_kind": "enemy"}   # keep budget, update goal
-                switch = 0.2 if instance is not None and instance.goal != enemy_id \
+                switch = 0.2 if original is not None and original != enemy_id \
                     else 0.0
                 plans.append(make_plan(
                     self.name, {actor: action}, enemy_id, {actor: action},
@@ -137,29 +144,33 @@ class FocusFireSkill:
                     ResourceClaims(controls=(actor,),
                                    fire=((enemy_id, amount),) if amount else ()),
                     Commitment("attacking", min_loops=0),
-                    {"switch_cost": switch, "urgency": (
-                        self.urgency_value if any(
-                            enemy_id in context.threats_to(a)
-                            for a in context.snapshot.allies) else 0.0)},
+                    {"switch_cost": switch},
                     snapshot_id, fingerprint, provider=provider,
                     instance_id=instance.instance_id if instance else None,
                     memory_delta=delta,
                     goal_kind="enemy",
-                    goal_data={"target_id": enemy_id},
+                    goal_data={"target_id": enemy_id,
+                               "allocated_target": assignment.target if assignment else None,
+                               "target_horizon_loops": target_plan.horizon_loops},
                     rationale=f"attack {enemy_id}"))
         plans.extend(self._joint_interceptions(
-            context, memory, telemetry, attackers, fingerprint, snapshot_id))
+            context, memory, telemetry, attackers, fingerprint, snapshot_id,
+            target_plan))
         telemetry.count(self.name, "proposed", len(plans))
         return plans
 
     def _joint_interceptions(self, context, memory, telemetry, attackers,
-                             fingerprint, snapshot_id) -> List:
+                             fingerprint, snapshot_id, target_plan=None) -> List:
         plans: List = []
         max_atomic = self.config.get("search", {}).get(
             "max_atomic_candidates", 12)
         produced = 0
+        allocated_targets = {assignment.target for assignment in
+                             (target_plan.assignments.values() if target_plan else ())}
         for enemy_id, enemy in sorted(context.snapshot.enemies.items()):
-            if enemy.type_name not in self.urgent_types:
+            if not context.enemy_capabilities[enemy_id].suicide_attack and not (
+                    enemy_id in allocated_targets
+                    and enemy_pressure(context, enemy_id) > 0):
                 continue
             # member pool ranked by opportunity: window damage, effect delay,
             # then the member's own foregone output (opportunity cost)
@@ -205,7 +216,7 @@ class FocusFireSkill:
                             Commitment("intercepting", 0,
                                        max_loops=h_loops(context,
                                                          self.kill_window_h)),
-                            {"urgency": self.urgency_value},
+                            {},
                             snapshot_id, fingerprint, atomic=True,
                             goal_kind="enemy",
                             goal_data={"target_id": enemy_id},
