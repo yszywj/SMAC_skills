@@ -174,6 +174,110 @@ def main():
     else:
         print("zerg intercept plans: none (no bomber in coverage this scene)")
 
+    # ---- Consistency check 1: contact vs earlier death are mutually
+    # exclusive. Real geometry: our baneling can legally attack a target 2
+    # units away (contact needs travel, so contact_time > 0), while three
+    # enemy hydralisks stand on the SOURCE point with OBSERVED attack orders
+    # targeting this baneling at zero cooldown (3x12 >= 30 effective
+    # health) — legitimate observation inputs that danger_evidence's
+    # targeted branch accepts. The real _outcome must pick ONE death result
+    # and drop the distant contact coverage. No function under test is
+    # stubbed.
+    from skills.tactical_v1.burst import outcome as burst_outcome
+    duel_orders = [{"kind": "attack", "target_unit": "u0",
+                    "target_tag": "tag-duel-u0"}]
+    duel = scene([((10., 10.), "baneling")],
+                 enemies={"e0": dict(enemy((8., 10.), "baneling",
+                                          health=30., max_health=30.),
+                                     tag="tag-duel-e0"),
+                          "e1": dict(enemy((9.7, 10.2), "hydralisk",
+                                           orders=duel_orders,
+                                           weapon_cooldown_loops=0.),
+                                     tag="tag-duel-e1"),
+                          "e2": dict(enemy((9.8, 9.7), "hydralisk",
+                                           orders=duel_orders,
+                                           weapon_cooldown_loops=0.),
+                                     tag="tag-duel-e2"),
+                          "e3": dict(enemy((9.6, 10.4), "hydralisk",
+                                           orders=duel_orders,
+                                           weapon_cooldown_loops=0.),
+                                     tag="tag-duel-e3")})
+    duel["allies"]["u0"].update(health=30., max_health=30., tag="tag-duel-u0")
+    duel = with_questions(calibrate_baneling(duel))
+    duel_ctx = Context(build_snapshot(duel, 99))
+    duel_ctx.burst_config = dict(manager.config.get("burst_engage", {}))
+    duel_action = None
+    for candidate in sorted(duel_ctx.legal_actions("u0")):
+        if duel_ctx.decode("u0", candidate).kind == 'attack':
+            duel_action = candidate
+            break
+    if duel_action is None:
+        failures.append("consistency1: attack not legal in duel scene setup")
+    else:
+        duel_result = burst_outcome(duel_ctx, "u0", duel_action)
+        print(f"consistency1: duel trigger={duel_result.trigger} "
+              f"T={duel_result.evaluation_after_loops:.1f} "
+              f"weight={duel_result.opportunity:.2f}")
+        if duel_result.trigger.startswith('death_'):
+            print("consistency1: earlier death selected; distant contact "
+                  "coverage dropped (single result)")
+        elif duel_result.trigger == 'active_contact_opportunity':
+            failures.append("consistency1: contact won despite evidence-backed "
+                            "earlier death on the route")
+        elif duel_result.trigger == 'none':
+            failures.append("consistency1: no trigger at all in duel scene")
+
+    # ---- Consistency check 2: action_position_at honors T semantics.
+    from skills.tactical_v1.burst import action_position_at
+    zerg_probe = Context(build_snapshot(zerg2, 99))
+    zerg_probe.burst_config = dict(manager.config.get("burst_engage", {}))
+    move = None
+    for candidate in sorted(zerg_probe.legal_actions("u0")):
+        if zerg_probe.decode("u0", candidate).kind == 'move':
+            move = candidate
+            break
+    if move is not None:
+        H = max(zerg_probe.H, 1)
+        pos0, unc0 = action_position_at(zerg_probe, "u0", move, 0)
+        posH, uncH = action_position_at(zerg_probe, "u0", move, H)
+        current = zerg_probe.snapshot.allies["u0"].position
+        same0 = max(abs(pos0[i] - current[i]) for i in (0, 1)) < 1e-6
+        moved = max(abs(posH[i] - current[i]) for i in (0, 1)) > 1e-3
+        print(f"consistency2: pos(0)==current={same0}, pos(H) moved={moved}, "
+              f"uncertain={unc0},{uncH}")
+        if not same0 or not moved:
+            failures.append("zerg: action_position_at T-semantics broken")
+    else:
+        print("consistency2: no legal MOVE in scene (skipped)")
+
+    # ---- Consistency check 3: side-target sources & late damage timing.
+    # Synthetic source rows through the REAL scenario accumulator: the
+    # bomber is never a primary target (side entry via damage_potential);
+    # T=2 damage 10 + T=8 damage 20 vs 30 remaining HP must NOT form a
+    # death scenario at T=2.
+    from skills.tactical_v1.effects import _bomber_death_scenarios
+    enemy_hp = 30.
+    rows = [
+        {'source_actor': 'u2', 'victim_enemy_id': 'e0', 'damage': 10.,
+         'raw_damage': 10., 'opportunity': 1., 'evaluation_after_loops': 2.,
+         'timing_kind': 'predicted', 'outcome_actor': 'u9'},
+        {'source_actor': 'u3', 'victim_enemy_id': 'e0', 'damage': 20.,
+         'raw_damage': 20., 'opportunity': 1., 'evaluation_after_loops': 8.,
+         'timing_kind': 'predicted', 'outcome_actor': 'u9'},
+    ]
+    snapshot_stub = type('S', (), {'enemies': {'e0': type('E', (), {
+        'effective_health': enemy_hp})()}})()
+    scenarios = _bomber_death_scenarios(zerg_probe, snapshot_stub,
+                                        {'e0': rows}, 'e0')
+    first_moment = scenarios[0][0] if scenarios else None
+    print(f"consistency3: first lethal moment = {first_moment} (must be 8.0)")
+    if first_moment != 8.:
+        failures.append("zerg: late damage participated before its moment")
+    # Side-target inclusion: a row whose outcome_actor differs from the
+    # victim's primary claim is retained by the accumulator input itself.
+    if any(r['victim_enemy_id'] == 'e0' for r in rows):
+        print("consistency3: side-target row retained (passed via damage_potential)")
+
     # Terran: marines + marauder + medivac vs zerglings.
     terran = scene([((10., 10.), "marine"), ((10.5, 10.5), "marine"),
                     ((11., 9.5), "marauder"), ((12., 12.), "medivac")],

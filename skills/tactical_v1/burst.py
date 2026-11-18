@@ -264,12 +264,116 @@ def action_position(context, actor, action):
     return tuple(context.predict_position(actor, action).position)
 
 
-def supported_death_point(context, actor, destination, horizon=None):
-    """First sampled lethal warning backed by loss, targeting or an effect.
+def action_position_at(context, actor, action, after_loops):
+    """Predicted ally position at ONE moment under its FINAL action.
 
-    The all-enemy volley remains a scoring bound in ``_exposure``. It does
-    not replace a reachable contact point with a hypothetical earlier death.
-    This pure query deliberately does not call region/assignment allocation.
+    after_loops is RELATIVE to the current game_loop: 0 returns the current
+    OBSERVED position; 0 < T <= H advances the unit along its action's
+    semantics limited by its native speed (speed*T/16); out-of-range or
+    non-finite T degrades to the conservatively-certain current position,
+    never silently to the full-window endpoint. No mutation, no coordinator
+    calls, no game commands; cache keyed by snapshot/actor/action/T.
+    Returns (position, uncertain): uncertain=True marks model estimates
+    (missing speed/path data or bomber trigger geometry), never an
+    observed fact.
+    """
+    H = float(context.H)
+    try:
+        T = float(after_loops)
+    except (TypeError, ValueError):
+        return tuple(context.snapshot.allies[actor].position), True
+    if not math.isfinite(T) or T < 0.:
+        return tuple(context.snapshot.allies[actor].position), True
+    T = min(T, H)
+    cache = getattr(context, "_action_position_at_cache", None)
+    if cache is None:
+        cache = context._action_position_at_cache = {}
+    key = (context.snapshot.snapshot_id, actor, action, round(T, 6))
+    if key in cache:
+        return cache[key]
+    unit = context.snapshot.allies[actor]
+    current = tuple(unit.position)
+    if T <= 1e-9:
+        cache[key] = (current, False)
+        return cache[key]
+    speed = context.speed(actor)
+    semantic = context.decode(actor, action)
+    if semantic.kind == 'move':
+        info = context.snapshot.movement_candidates.get(actor, {}).get(action)
+        destination = info.get('destination') if info else None
+        if destination is None or not speed:
+            cache[key] = (current, True)       # unknown speed/path data
+            return cache[key]
+        destination = (float(destination[0]), float(destination[1]))
+        gap = _distance(current, destination)
+        max_travel = speed * T / 16.
+        if gap <= max_travel:
+            point = destination                # arrived by T (model estimate)
+        else:
+            fraction = max_travel / gap if gap > 1e-9 else 0.
+            point = (current[0] + (destination[0] - current[0]) * fraction,
+                     current[1] + (destination[1] - current[1]) * fraction)
+        cache[key] = (point, True)
+        return cache[key]
+    if semantic.kind == 'attack' and semantic.target in context.snapshot.enemies:
+        cap = context.capabilities.get(actor)
+        if cap is not None and cap.suicide_attack:
+            # Bomber: reuse the outcome's already-selected route/position;
+            # no recursion into effects or outcome building.
+            result = outcome(context, actor, action)
+            if result.opportunity > 0. and result.trigger \
+                    != 'active_contact_opportunity' \
+                    and T >= result.trigger_loops - 1e-6:
+                cache[key] = (tuple(result.position), True)
+                return cache[key]
+            point_t, travel = _contact_point(context, actor, semantic.target,
+                                             context.snapshot.enemies[
+                                                 semantic.target].position)
+            budget_t = speed * T / 16. if speed else 0.
+            if travel <= budget_t + 1e-6:
+                cache[key] = (tuple(point_t), True)
+                return cache[key]
+            fraction = budget_t / travel if travel > 1e-9 else 0.
+            point = (current[0] + (point_t[0] - current[0]) * fraction,
+                     current[1] + (point_t[1] - current[1]) * fraction)
+            cache[key] = (point, True)
+            return cache[key]
+        contact = context.contact_status(actor, semantic.target)
+        if contact == "in_range":
+            cache[key] = (current, False)      # keeps existing contact model
+            return cache[key]
+        enemy = context.snapshot.enemies[semantic.target]
+        reach = context.effective_attack_reach(actor, semantic.target)
+        if reach is None or reach < 0 or not speed:
+            cache[key] = (current, True)
+            return cache[key]
+        gap = max(_distance(current, enemy.position) - reach, 0.)
+        max_travel = speed * T / 16.
+        advance = min(gap, max_travel)
+        direction = (enemy.position[0] - current[0], enemy.position[1] - current[1])
+        norm = math.hypot(*direction)
+        if norm <= 1e-9:
+            cache[key] = (current, True)
+            return cache[key]
+        point = (current[0] + direction[0] / norm * advance,
+                 current[1] + direction[1] / norm * advance)
+        cache[key] = (point, True)
+        return cache[key]
+    # STOP and other semantics: the existing model keeps them in place.
+    cache[key] = (current, False)
+    return cache[key]
+
+
+def supported_death_point(context, actor, destination, horizon=None):
+    """First SAMPLED lethal-opportunity point backed by danger evidence.
+
+    Samples the straight route current position -> ``destination`` at
+    fractions 0/.5/1 and returns (point, fraction, facts) for the first
+    position whose danger evidence is immediate AND supported lethal.
+    ``fraction * horizon`` is the death OPPORTUNITY's sampled moment — a
+    model estimate, never an observed death time. The all-enemy volley
+    stays a scoring bound in ``_exposure`` and never proves an earlier
+    death by itself. Pure query, no allocation calls.
     """
     from .combat_exchange import danger_evidence
     source = context.snapshot.allies[actor]
@@ -298,12 +402,29 @@ def outcome(context, actor, action, position=None) -> BurstOutcome:
 
 
 def _outcome(context, actor, action, position=None) -> BurstOutcome:
-    """One mutually exclusive opportunity: contact, origin, or path death.
+    """ONE mutually exclusive result: contact OR death, never both.
 
-    Prefer an immediate legal trigger. Otherwise supported lethal danger
-    bounds the useful source center, rather than also granting a later arrival.
-    An all-enemy volley only discounts value; it cannot prove an earlier death.
-    Path sampling is explicitly uncertain; it is not a native timing model.
+    Selection order (task 1): build the model-feasible CONTACT candidate
+    first (earliest feasible trigger moment, contact point recomputed from
+    scratch per moment), but do NOT cash in its coverage yet. When the
+    contact needs travel (contact_time > 0), check the SAME NEW route
+    (current position -> contact position) for an EVIDENCE-BACKED earlier
+    death via supported_death_point; if found, the death hypothesis wins
+    and the distant contact coverage is dropped. Selection rules:
+      contact_time == 0            -> immediate contact (no invented risk
+                                      ordering against a later-window death);
+      contact_time > 0, earlier
+      supported death found        -> death_at/path_opportunity at the
+                                      SAMPLED death point and its sampled
+                                      moment (uncertain, not a known death
+                                      time);
+      contact candidate, no death  -> active_contact_opportunity with the
+                                      new-route risk discount;
+      no contact candidate         -> death on the actual action path only.
+    One unified exit builds a single BurstOutcome; damage is evaluated once
+    at the selected position/moment. health/(health+incoming) stays an
+    OPPORTUNITY discount only — it never substitutes for relocating the
+    burst point to an earlier death.
     """
     source = context.snapshot.allies[actor]
     effect = profile(context)
@@ -311,127 +432,122 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
     predicted = action_position(context, actor, action)
     if semantic.kind != 'attack' and position is not None:
         predicted = tuple(position)
-    trigger, weight, center = "none", 0., predicted
     target_id = semantic.target if semantic.kind == 'attack' else None
-    reachable, arrival = False, float(context.H)
     speed = context.speed(actor)
-    if semantic.kind == "attack" and semantic.target in context.snapshot.enemies:
-        # Repair D: search a FEW candidate trigger moments T ∈ (0, H]. For
-        # each T the target is placed at its predicted position, the contact
-        # point and required travel are recomputed FROM SCRATCH, and the
-        # first model-feasible T wins. The legacy static arrival joins the
-        # set when it lands inside the window. No endless iteration, no
-        # extra search budget — a bounded engineering approximation, not an
-        # exact earliest-trigger oracle.
-        target_id_static = semantic.target
-        static_center, static_ok = trigger_position(context, actor, target_id_static)
-        feasible = static_ok and context.can_issue_attack(actor, target_id_static)
-        candidates_T = [0.]
-        Hf = float(context.H)
-        for fraction in (.25, .5, .75, 1.):
-            candidates_T.append(Hf * fraction)
-        if 0. < arrival <= Hf and feasible:
-            candidates_T.append(arrival)
-        best_T = None
-        for moment in sorted(set(round(t, 6) for t in candidates_T)):
-            if moment > Hf + 1e-6:
-                continue
-            enemy_map_t, _, _ = _predicted_enemy_positions(
-                context, context.snapshot.game_loop + moment)
-            future = enemy_map_t.get(target_id_static)
-            if future is None:
-                continue
-            point_t, travel = _contact_point(context, actor, target_id_static, future)
-            budget_t = speed * moment / 16. if speed else 0.
-            if travel <= budget_t + 1e-6:
-                best_T = (moment, point_t, enemy_map_t)
-                break
-        if best_T is not None:
-            moment, point_t, enemy_map_t = best_T
-            center, reachable = point_t, True
-            arrival = moment
-            # Route risk recomputed for the NEW route only (start / new
-            # midpoint / new endpoint); no stale static-route facts.
-            maximum_incoming, maximum_unknown = 0., 0
-            for fraction in (0., .5, 1.):
-                sample = tuple(source.position[i] + (center[i] - source.position[i]) * fraction
-                               for i in (0, 1))
-                incoming, unknown = _exposure(context, actor, sample,
-                                              max(moment, context.H), physical=True)
-                maximum_incoming = max(maximum_incoming, incoming)
-                maximum_unknown = max(maximum_unknown, unknown)
-            if arrival <= 1e-6:
-                trigger, weight = 'active_contact_opportunity', 1.
-            else:
-                center = point_t
-                trigger = 'active_contact_opportunity'
-                weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
-                weight /= 1. + maximum_unknown
-            # Jump straight to the unified space-time tail with these facts.
-            potential = area_damage(context, center, enemy_map_t) if weight else {}
-            if trigger.startswith('death_') and potential:
-                target_id = max(potential, key=lambda enemy_id: (
-                    (potential[enemy_id] or 0.) / max(context.snapshot.enemies[enemy_id].effective_health, 1.),
-                    -_distance(center, enemy_map_t.get(enemy_id,
-                                                     context.snapshot.enemies[enemy_id].position)), enemy_id))
-            return BurstOutcome(actor, trigger, center, weight, potential,
-                                effect.geometry_known, effect.evidence, target_id,
-                                arrival if weight else 0., trigger != 'active_contact_opportunity'
-                                or arrival > 1e-6,
-                                evaluation_after_loops=max(arrival, 0.) if weight else 0.,
-                                enemy_positions=dict(enemy_map_t) if weight else None,
-                                motion_used=weight > 0.)
-        # No model-feasible trigger moment within this window: fall through
-        # to the death-hypothesis path WITHOUT any active-trigger credit.
-        reachable = False
-    if reachable and arrival <= 1e-6:
-        trigger, weight = 'active_contact_opportunity', 1.
-    else:
-        # Origin, middle, endpoint are exclusive ordered hypotheses. They do
-        # not each receive the complete damage or consumption budget.
-        horizon = min(arrival, context.H) if reachable else context.H
+    Hf = float(context.H)
+
+    # ---- 1. contact candidate (model-feasible earliest trigger moment) ----
+    contact = None        # (time, position, enemy_map, motion_used, fallbacks)
+    if semantic.kind == "attack" and semantic.target in context.snapshot.enemies \
+            and context.can_issue_attack(actor, semantic.target):
+        target_enemy = context.snapshot.enemies[semantic.target]
+        if not target_enemy.is_flying:
+            static_center, static_ok = trigger_position(context, actor,
+                                                        semantic.target)
+            candidates_T = [0., Hf * .25, Hf * .5, Hf * .75, Hf]
+            if static_ok and speed:
+                static_arrival = (_distance(source.position, static_center)
+                                  * 16. / speed)
+                if 0. <= static_arrival <= Hf:
+                    candidates_T.append(static_arrival)
+            for moment in sorted(set(round(t, 6) for t in candidates_T)):
+                if moment > Hf + 1e-6:
+                    continue
+                enemy_map_t, motion_t, fallback_t = _predicted_enemy_positions(
+                    context, context.snapshot.game_loop + moment)
+                future = enemy_map_t.get(semantic.target)
+                if future is None:
+                    continue
+                point_t, travel = _contact_point(context, actor,
+                                                 semantic.target, future)
+                budget_t = speed * moment / 16. if speed else 0.
+                if travel <= budget_t + 1e-6:
+                    contact = (moment, point_t, enemy_map_t, motion_t, fallback_t)
+                    break
+
+    # ---- 2. evidence-backed earlier death along the actual route ----
+    death = None
+    if contact is not None and contact[0] > 1e-6:
+        # New route only: current position -> NEW contact position.
+        death = supported_death_point(context, actor, contact[1],
+                                      horizon=max(contact[0], 1.))
+    elif contact is None:
+        # No contact candidate: death on the action's own path.
+        death = supported_death_point(context, actor, predicted, horizon=None)
+
+    # ---- 3. mutually exclusive selection ----
+    if contact is not None and contact[0] <= 1e-6:
+        selected_trigger = 'active_contact_opportunity'
+        selected_position = contact[1]
+        selected_time = 0.
+        selected_map = contact[2]
+        motion_used = contact[3]
+        fallbacks = contact[4]
+        weight = 1.
+    elif death is not None:
+        selected_position, fraction, facts = death
+        selected_trigger = ('death_at_origin_opportunity' if fraction == 0.
+                            else 'death_on_path_opportunity')
+        # fraction*horizon is the SAMPLED death-opportunity moment — a
+        # model estimate, never an observed death time.
+        selected_time = max(0., min(float(context.H), contact[0] if contact
+                                    else float(context.H)) * fraction) \
+            if contact is not None else float(context.H) * fraction
+        selected_map, motion_used, fallbacks = _predicted_enemy_positions(
+            context, context.snapshot.game_loop + selected_time)
+        supported = facts['supported_amount']
+        weight = supported / (supported + max(source.effective_health, 1.))
+    elif contact is not None:
+        moment, point_t, enemy_map_t, motion_t, fallback_t = contact
+        selected_trigger = 'active_contact_opportunity'
+        selected_position = point_t
+        selected_time = moment
+        selected_map = enemy_map_t
+        motion_used = motion_t
+        fallbacks = fallback_t
         maximum_incoming, maximum_unknown = 0., 0
         for fraction in (0., .5, 1.):
-            point = tuple(source.position[i] + (predicted[i] - source.position[i]) * fraction
-                          for i in (0, 1))
-            incoming, unknown = _exposure(context, actor, point, horizon, physical=True)
+            sample = tuple(source.position[i] + (point_t[i] - source.position[i]) * fraction
+                           for i in (0, 1))
+            incoming, unknown = _exposure(context, actor, sample,
+                                          max(moment, 1.), physical=True)
             maximum_incoming = max(maximum_incoming, incoming)
             maximum_unknown = max(maximum_unknown, unknown)
-        death = supported_death_point(context, actor, predicted, horizon)
-        if death is not None:
-            center, fraction, facts = death
-            trigger = ('death_at_origin_opportunity' if fraction == 0.
-                       else 'death_on_path_opportunity')
-            supported = facts['supported_amount']
-            weight = supported / (supported + max(source.effective_health, 1.))
-            arrival = horizon * fraction
-        elif reachable:
-            center = predicted
-            trigger = 'active_contact_opportunity'
-            weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
-            weight /= 1. + maximum_unknown
-    # Unified space-time evaluation (repair D): ONE evaluation moment T in
-    # [0, H] shared by all consumers of this outcome. Death hypotheses use
-    # their sampled death moment T=arrival as the evaluation moment, so the
-    # covered enemies' positions correspond to WHEN the death burst lands,
-    # not to now.
-    evaluation_after = max(min(arrival, float(context.H)), 0.) if weight else 0.
-    enemy_map, motion_used, fallback_ids = _predicted_enemy_positions(
-        context, context.snapshot.game_loop + evaluation_after)
-    potential = area_damage(context, center, enemy_map) if weight else {}
-    if trigger.startswith('death_') and potential:
+        weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
+        weight /= 1. + maximum_unknown
+    else:
+        selected_trigger, selected_position = 'none', predicted
+        selected_time, selected_map = 0., {}
+        motion_used, fallbacks, weight = False, (), 0.
+        target_id = None
+
+    # ---- 4. single unified exit: one damage evaluation ----
+    evaluation_after = selected_time if weight > 0. else 0.
+    if selected_trigger == 'active_contact_opportunity':
+        # contact_time semantics: 0 means already in contact NOW.
+        trigger_loops = selected_time
+    else:
+        trigger_loops = selected_time
+    potential = area_damage(context, selected_position, selected_map) \
+        if weight > 0. and selected_trigger != 'none' else {}
+    if potential and selected_trigger.startswith('death_'):
         target_id = max(potential, key=lambda enemy_id: (
             (potential[enemy_id] or 0.) / max(context.snapshot.enemies[enemy_id].effective_health, 1.),
-            -_distance(center, enemy_map.get(enemy_id,
-                                             context.snapshot.enemies[enemy_id].position)), enemy_id))
-    return BurstOutcome(actor, trigger, center, weight, potential,
-                        effect.geometry_known, effect.evidence, target_id,
-                        arrival if weight else 0., trigger != 'active_contact_opportunity'
-                        or arrival > 1e-6,
+            -_distance(selected_position, selected_map.get(
+                enemy_id, context.snapshot.enemies[enemy_id].position)), enemy_id))
+    if selected_trigger == 'none':
+        # No trigger opportunity: leave NO position/damage metadata behind.
+        selected_map, motion_used, fallbacks = {}, False, ()
+    return BurstOutcome(actor, selected_trigger, selected_position, weight,
+                        potential, effect.geometry_known, effect.evidence,
+                        target_id, trigger_loops,
+                        selected_trigger != 'active_contact_opportunity'
+                        or trigger_loops > 1e-6,
                         evaluation_after_loops=evaluation_after,
-                        enemy_positions=dict(enemy_map) if weight else None,
-                        motion_used=motion_used and weight > 0.,
-                        static_fallback_enemies=fallback_ids if weight else ())
+                        enemy_positions=dict(selected_map) if potential else None,
+                        motion_used=bool(motion_used) and weight > 0.,
+                        static_fallback_enemies=tuple(fallbacks)
+                        if potential else ())
 
 
 def useful_area_value(context, center, remaining=None, enemy_positions=None):
