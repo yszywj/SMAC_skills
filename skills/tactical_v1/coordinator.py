@@ -570,6 +570,21 @@ class Coordinator:
             getattr(context, '_burst_defer_reasons', {}))
         summary['burst_decline_reasons'] = dict(
             getattr(context, '_burst_decline_log', {}))
+        summary['burst_commit_reasons'] = dict(
+            getattr(context, '_burst_commit_reasons', {}))
+        summary['joint_rescue_substitutions'] = dict(
+            getattr(context, '_joint_rescue_log', {}))
+        try:
+            from .enemy_motion import summary as motion_summary
+            summary['enemy_motion'] = motion_summary(context)
+        except Exception:
+            summary['enemy_motion'] = {"error": "summary_failed"}
+        try:
+            summary['fire_delay_budget'] = {
+                actor: round(memory.fire_delay_available(context, actor), 1)
+                for actor in list(context.snapshot.allies)[:10]}
+        except Exception:
+            summary['fire_delay_budget'] = {"error": "unavailable"}
         try:
             from .deployment import summary as deployment_summary
             summary['deployment'] = deployment_summary(context)

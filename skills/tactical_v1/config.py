@@ -71,6 +71,15 @@ _SCHEMA = {
         "local_cover_enabled": _bool_spec(),
         "arrival_exposure_enabled": _bool_spec(),
         "reentry_window_enabled": _bool_spec(),
+        # Complete-plan joint kill may satisfy a rescue duty (task 3).
+        "joint_rescue_enabled": _bool_spec(),
+        # Melee/zergling rescue eligibility under ordinary fire (task 4).
+        "melee_survivable_rescue_enabled": _bool_spec(),
+        # Bounded "delay one shot for damage reduction" budget (task 5).
+        "bounded_fire_delay_enabled": _bool_spec(),
+        # Engineering initial value (NOT a validated optimum); windows of
+        # postponed fire regained per committed real attack.
+        "fire_delay_max_h": _float_spec(0.5, 2.0),
     },
     "search": {
         "beam_width": _int_spec(1, 64),
@@ -164,6 +173,10 @@ _SCHEMA = {
         "min_exchange_value": _float_spec(0.0, 10.0),
         "self_cost": _float_spec(0.0, 5.0),
         "lonely_enemy_exception": _bool_spec(),
+        # Short-window enemy motion prediction for burst-point timing.
+        "motion_prediction_enabled": _bool_spec(),
+        # Only state-backed strong exchanges become forced cashout duties.
+        "selective_commitment_enabled": _bool_spec(),
     },
     # Legacy pure-evaluator weights reused through unit_value_view; manual
     # engineering priors, bounded by the legacy parameter surface.
@@ -183,6 +196,11 @@ _SCHEMA = {
     },
     "intercept": {
         "enabled": _bool_spec(),
+        # Require a conservative (upper-bound) kill time before calling an
+        # interception "safe"; unknown timing degrades to loss-control.
+        "timing_guard_enabled": _bool_spec(),
+        # Loss-control interception duties when members are already exposed.
+        "loss_control_enabled": _bool_spec(),
         # Relative margin required before deferring a currently positive
         # one-use exchange for a strictly better reachable point.
         "burst_defer_margin": _float_spec(0.0, 5.0),

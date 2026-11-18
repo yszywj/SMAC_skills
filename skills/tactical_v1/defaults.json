@@ -51,7 +51,11 @@
     "shared_front_enabled": true,
     "local_cover_enabled": true,
     "arrival_exposure_enabled": true,
-    "reentry_window_enabled": true
+    "reentry_window_enabled": true,
+    "joint_rescue_enabled": true,
+    "melee_survivable_rescue_enabled": true,
+    "bounded_fire_delay_enabled": true,
+    "fire_delay_max_h": 1.0
   },
   "search": {
     "beam_width": 8,
@@ -148,7 +152,9 @@
     "value_per_enemy": 2.0,
     "min_exchange_value": 2.0,
     "self_cost": 1.0,
-    "lonely_enemy_exception": true
+    "lonely_enemy_exception": true,
+    "motion_prediction_enabled": true,
+    "selective_commitment_enabled": true
   },
   "unit_value": {
     "enabled": true,
@@ -166,6 +172,8 @@
   },
   "intercept": {
     "enabled": true,
+    "timing_guard_enabled": true,
+    "loss_control_enabled": true,
     "burst_defer_margin": 0.5
   },
   "telemetry": {

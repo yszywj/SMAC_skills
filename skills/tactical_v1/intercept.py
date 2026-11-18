@@ -172,19 +172,30 @@ def intercept_plan(context, memory=None, config=None):
     if key in cache:
         return cache[key]
     plans, used = [], set()
-    from .action_duties import rescue_actions
+    from .impact_timing import attack_impact_timing, joint_kill_time
     from .unit_value_view import preservation_value
+    timing_guard = getattr(context, 'intercept_config', {}).get(
+        'timing_guard_enabled', True)
+    loss_control = getattr(context, 'intercept_config', {}).get(
+        'loss_control_enabled', True)
     for row in threat_facts(context)['bombers']:
         enemy = row['enemy']
         # Only imminent approaches get a duty; distant bombers retain ordinary fire candidates.
         if row['entry_h'] > 2. or row['unknown_damage']:
             continue
+        exposed = [v for v in row['victims']
+                   if v['entry_h'] is not None and v['entry_h'] <= 0.]
+        protected = [v for v in row['victims']
+                     if v['entry_h'] is not None and 0. < v['entry_h'] <= 2.]
         pool = []
         for actor in sorted(context.snapshot.allies):
             if actor in used:
                 continue
             estimate = _safe_shooter(context, actor, enemy)
-            if estimate is not None and not rescue_actions(context, actor, memory):
+            # Rescue-eligible shooters are NOT unconditionally excluded here:
+            # whether the group substitution is admissible is decided by the
+            # joint rescue check and final group validation, not per member.
+            if estimate is not None:
                 delay = estimate.effective_after_loops
                 pool.append((float(context.H if delay is None else delay), -estimate.damage_lo, actor))
         pool.sort()
@@ -195,14 +206,39 @@ def intercept_plan(context, memory=None, config=None):
             kill_loops = max(kill_loops, delay)
             if remaining <= 0:
                 break
-        safe = bool(shooters) and remaining <= 0 and kill_loops + 1. < row['entry_h'] * max(context.H, 1)
-        # Failed/late attempts do not reserve shooters or create hard attack duties.
-        if not safe:
+        # Timing split (task 1): cooldown end is when the gun CAN fire, not
+        # when damage LANDS. Without wind-up/projectile data the kill-time
+        # has a lower bound only — that can never prove a timely intercept.
+        kill = joint_kill_time(context, [a for a, _, _ in shooters], enemy)
+        conservative_kill = None
+        if all(attack_impact_timing(context, a, enemy).impact_after_loops_upper
+               is not None for a, _, _ in shooters) and shooters:
+            conservative_kill = max(
+                attack_impact_timing(context, a, enemy).impact_after_loops_upper
+                for a, _, _ in shooters)
+        if not timing_guard:
+            # Legacy rollback comparison (cooldown treated as impact time).
+            conservative_kill = kill_loops if shooters else None
+        safe = bool(shooters) and remaining <= 0 \
+            and conservative_kill is not None \
+            and conservative_kill + 1. < row['entry_h'] * max(context.H, 1)
+        # Loss-control interception: members are ALREADY exposed, so killing
+        # the bomber now can still cap the team loss even though "safe"
+        # timing can no longer be proven. The bomber's death explosion at its
+        # current position stays priced (evaluator enemy_death_burst floor);
+        # killing it never zeroes that cost here.
+        loss_plan = bool(loss_control and exposed and shooters and remaining <= 0)
+        plan_type = ('safe_intercept' if safe
+                     else 'loss_control_intercept' if loss_plan else None)
+        # Failed/late attempts without exposure do not reserve shooters or
+        # create hard attack duties.
+        if plan_type is None:
             shooters = []
         used.update(a for a, _, _ in shooters)
         spread = []
-        if not safe:
-            for victim in sorted(row['victims'], key=lambda v: (
+        if plan_type != 'safe_intercept':
+            spread_pool = exposed if loss_plan else row['victims']
+            for victim in sorted(spread_pool, key=lambda v: (
                     v['entry_h'] if v['entry_h'] is not None else float('inf'),
                     -preservation_value(context, v['actor']), v['actor'])):
                 actor = victim['actor']
@@ -218,8 +254,15 @@ def intercept_plan(context, memory=None, config=None):
                     spread.append((actor, action))
                     used.add(actor)
         if shooters or spread:
-            plans.append({**row, 'shooters': shooters, 'spread': spread, 'safe': safe,
-                          'kill_loops': kill_loops, 'victims': [v['actor'] for v in row['victims']
+            plans.append({**row, 'shooters': shooters, 'spread': spread,
+                          'safe': safe, 'type': plan_type or 'spread_only',
+                          'kill_loops': kill_loops,
+                          'kill_time_status': kill['status'],
+                          'conservative_kill_loops': conservative_kill,
+                          'already_exposed': [v['actor'] for v in exposed],
+                          'protected_members': [v['actor'] for v in protected],
+                          'death_burst_priced_elsewhere': True,
+                          'victims': [v['actor'] for v in row['victims']
                               if v['entry_h'] is not None and v['entry_h'] <= 1.]})
     cache[key] = plans
     context._intercept_plans = cache
@@ -228,7 +271,9 @@ def intercept_plan(context, memory=None, config=None):
 
 def actor_intercept_duty(context, actor, memory=None, config=None):
     for plan in intercept_plan(context, memory, config):
-        choices = [(a, action, 'safe_intercept_window') for a, action, _ in plan['shooters'] if plan['safe']]
+        choices = [(a, action,
+                    'safe_intercept_window' if plan['safe'] else 'loss_control_intercept')
+                   for a, action, _ in plan['shooters']]
         choices += [(a, action, 'spread_from_enemy_burst_cover') for a, action in plan['spread']]
         for member, action, reason in choices:
             if member == actor:
@@ -241,7 +286,15 @@ def actor_intercept_duty(context, actor, memory=None, config=None):
 
 
 def final_valid(context, actions, actor, memory):
-    """Validate whole shooting group after combination/repair, never prepaid fire."""
+    """Validate by plan type after combination/repair; never prepaid fire.
+
+    safe_intercept: protected members must stay unexposed before the
+    (conservatively timed) kill. loss_control_intercept: the final member
+    set, their window fire and the spread positions must still hold, and
+    the exchange cost (including the bomber's death explosion, priced by
+    the evaluator) stays in the comparison — already-exposed members are
+    NOT required to be unexposed, and their losses are not zeroed.
+    """
     for plan in intercept_plan(context, memory):
         if any(a == actor for a, _, _ in plan['shooters']):
             damage = 0.
@@ -252,18 +305,22 @@ def final_valid(context, actions, actor, memory):
                 damage += estimate.damage_lo
             if damage < context.snapshot.enemies[plan['enemy']].effective_health:
                 return False
-            from .joint_combat import action_position
-            for member, command in actions.items():
-                unit = context.snapshot.allies[member]
-                if not unit.alive or unit.is_flying:
-                    continue
-                point = action_position(context, member, command)[0]
-                middle = tuple((x + y) / 2. for x, y in zip(unit.position, point))
-                for position in (unit.position, middle, point):
-                    entry = _entry(context, member, plan['enemy'], position)
-                    if entry is None or entry <= plan['kill_loops'] + 1.:
-                        return False
-            return plan['safe']
+            if plan['type'] == 'safe_intercept':
+                from .joint_combat import action_position
+                for member, command in actions.items():
+                    unit = context.snapshot.allies[member]
+                    if not unit.alive or unit.is_flying:
+                        continue
+                    point = action_position(context, member, command)[0]
+                    middle = tuple((x + y) / 2. for x, y in zip(unit.position, point))
+                    for position in (unit.position, middle, point):
+                        entry = _entry(context, member, plan['enemy'], position)
+                        if entry is None or entry <= plan['kill_loops'] + 1.:
+                            return False
+                return plan['safe']
+            # loss_control: group fire and final positions hold; exposure of
+            # already-exposed members remains priced, not forbidden.
+            return plan['type'] == 'loss_control_intercept'
         if any(a == actor for a, _ in plan['spread']):
             command = actions.get(actor)
             if not spread_valid(context, actor, command, memory):
@@ -287,10 +344,15 @@ def final_valid(context, actions, actor, memory):
 def summary(context, memory=None, limit=3):
     rows = []
     for plan in intercept_plan(context, memory)[:limit]:
-        rows.append({'enemy': plan['enemy'], 'safe': plan['safe'],
+        rows.append({'enemy': plan['enemy'], 'type': plan.get('type'),
+                     'safe': plan['safe'],
+                     'kill_time_status': plan.get('kill_time_status'),
+                     'already_exposed': plan.get('already_exposed', []),
+                     'protected_members': plan.get('protected_members', []),
                      'shooters': [a for a, _, _ in plan['shooters']],
                      'allocated_fire': sum(d for _, _, d in plan['shooters']),
                      'spread': [a for a, _ in plan['spread']], 'entry_h': plan['entry_h'],
                      'predicted_loss_hp': plan['known_loss_hp'], 'victims': plan['victims']})
     return {'enabled': _enabled(context), 'bombers': rows,
-            'semantics': 'predicted reachable coverage, not observed damage'}
+            'semantics': 'predicted reachable coverage, not observed damage; '
+                         'kill timing has a lower bound only unless stated otherwise'}

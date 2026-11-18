@@ -42,6 +42,14 @@ class TacticalMemory:
         self.recovery = RecoveryMemory(self.encounter_config)
         self.pressure_memory = PressureMemory(self.encounter_config)
         self.reentry_window = ReentryWindowMemory(self.encounter_config)
+        # Bounded "delay one shot for damage reduction" budget per actor.
+        # Refilled ONLY by a committed real attack, consumed ONLY by a
+        # committed move that actually postponed a window shot: repeated
+        # queries never spend it and switching skill/target/provider never
+        # resets it (tag-keyed, cross-skill, persisted across steps).
+        self.fire_delay_budget: Dict[str, Dict] = {}
+        # Visible-enemy short-window motion samples (enemy_motion module).
+        self.enemy_motion: Dict[str, Dict] = {}
         self.lifecycle_counts: Dict[str, Dict[str, int]] = {}
         self.last_committed_loop = None
         self.episode = None
@@ -91,6 +99,8 @@ class TacticalMemory:
         self.movement_intents.clear()
         self.pending_moves.clear()
         self.blocked_directions.clear()
+        self.fire_delay_budget.clear()
+        self.enemy_motion.clear()
         self.encounters = EncounterTracker(self.encounter_config)
         self.battle = BattleIntent(self.encounter_config)
         self.combat_progress = CombatProgress(self.encounter_config)
@@ -192,6 +202,14 @@ class TacticalMemory:
                 del history[:len(history) - 16]
         for enemy_id, enemy in snapshot.enemies.items():
             self.enemy_last_seen[enemy_id] = (snapshot.game_loop, enemy.position)
+            # Short-window motion samples (enemy_motion): one per distinct
+            # game_loop, tag-keyed; observation phase only.
+            from .enemy_motion import record_observation
+            record_observation(self.enemy_motion, enemy_id,
+                               snapshot.raw_state.get('visible_enemies', {})
+                               .get(enemy_id, {}).get('tag') or enemy_id,
+                               snapshot.game_loop, enemy.position,
+                               snapshot.step_mul)
         stale = [e for e, (loop, _) in self.enemy_last_seen.items()
                  if snapshot.game_loop - loop > self.observation_ttl_loops]
         for enemy_id in stale:
@@ -213,6 +231,7 @@ class TacticalMemory:
         events: List[str] = []
         if context is not None:
             context.deployment_memory = self
+            context.enemy_motion = self.enemy_motion   # read-only shared view
             self._observe_movement(snapshot, context)
             self.pressure_memory.observe(context)
             self.recovery.observe(context)
@@ -420,6 +439,62 @@ class TacticalMemory:
                     min(radius, distance(start, other.position)) - .02:
                 return 0.
         return .5
+
+    # -- bounded "delay one shot" budget (task 5) --------------------------
+    def fire_delay_available(self, context, actor):
+        """Remaining delay budget in loops; 0 when disabled or exhausted.
+
+        A fresh actor starts with the full engineering-initial budget
+        (fire_delay_max_h control windows, default 1H — NOT a validated
+        optimum). Budget returns ONLY through a committed real attack.
+        """
+        common = self.encounter_config.get('common_combat', {})
+        if not common.get('bounded_fire_delay_enabled', True):
+            return 0.
+        unit, cap = context.snapshot.allies.get(actor), context.capabilities.get(actor)
+        if unit is None or not unit.alive or cap is None \
+                or cap.healer or cap.suicide_attack:
+            return 0.
+        maximum = max(1, int(round(max(context.H, 1) * float(
+            common.get('fire_delay_max_h', 1.0)))))
+        record = self.fire_delay_budget.get(actor)
+        if record is None or record.get('tag') != unit.tag:
+            return float(maximum)
+        return max(0., float(record.get('available_loops', maximum)))
+
+    def _commit_fire_delay(self, snapshot, context, actions):
+        """Update the budget ONLY from committed final actions.
+
+        A committed window attack refills the actor's budget (real output
+        happened). A committed move that postponed a ready window shot
+        spends one control window. Queries and unselected candidates never
+        touch this state; new emergencies still use the rescue path.
+        """
+        for actor, action in actions.items():
+            unit = snapshot.allies.get(actor)
+            cap = context.capabilities.get(actor)
+            if unit is None or not unit.alive or cap is None \
+                    or cap.healer or cap.suicide_attack:
+                continue
+            maximum = max(1, int(round(max(snapshot.step_mul, 1) * float(
+                self.encounter_config.get('common_combat', {}).get(
+                    'fire_delay_max_h', 1.0)))))
+            record = self.fire_delay_budget.get(actor)
+            if record is None or record.get('tag') != unit.tag:
+                record = {'tag': unit.tag, 'available_loops': float(maximum)}
+                self.fire_delay_budget[actor] = record
+            semantic = context.decode(actor, action)
+            if semantic.kind == 'attack' and semantic.target in snapshot.enemies \
+                    and context.contact_status(actor, semantic.target) == 'in_range' \
+                    and unit.weapon_cooldown_loops <= max(snapshot.step_mul, 1):
+                record['available_loops'] = float(maximum)   # real output
+            elif semantic.kind == 'move':
+                had_window_shot = any(
+                    context.fire_estimate(actor, e).window_shots >= 1
+                    for e in context.attackable_enemies(actor))
+                if had_window_shot:
+                    record['available_loops'] = max(
+                        0., record['available_loops'] - max(snapshot.step_mul, 1))
 
     def movement_blockage(self, context, actor, action, *, joint_actions=None,
                           joint_positions=None):
@@ -1042,6 +1117,7 @@ class TacticalMemory:
         self._retire_switched(snapshot, committed_plans, actions, context, deployment_facts)
         if context is not None:
             self._commit_deployment(snapshot, context, actions, deployment_facts)
+            self._commit_fire_delay(snapshot, context, actions)
         self.last_committed_loop = snapshot.game_loop
 
     def _commit_deployment(self, snapshot, context, actions, deployment_facts):

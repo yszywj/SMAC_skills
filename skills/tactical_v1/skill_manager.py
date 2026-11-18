@@ -153,6 +153,8 @@ class SkillManager:
         context.unit_value_parameters = dict(self.config.get("unit_value", {})) \
             or {"enabled": False}
         context.intercept_config = dict(self.config.get("intercept", {}))
+        context.common_config = dict(self.config.get("common_combat", {}))
+        context.burst_config = dict(self.config.get("burst_engage", {}))
         risk_now = {a: len(context.risk_at(a, snapshot.allies[a].position).threats)
                     for a in snapshot.allies if snapshot.allies[a].alive}
         # observation phase FIRST (single ordered entry, 3.1): record the

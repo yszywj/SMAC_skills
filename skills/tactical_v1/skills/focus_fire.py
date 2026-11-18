@@ -219,10 +219,28 @@ class FocusFireSkill:
                            + f" with {len(row['shooters'])} shooters"
                            + (f", {len(row['spread'])} spreading" if row["spread"] else ""))))
         # -- ordinary allocated high-pressure targets keep the generic
-        # minimal-sufficient joint kill path.
+        # minimal-sufficient joint kill path. Imminent threats to members
+        # in danger are added here: they must not be missed just because
+        # the shared target plan allocated elsewhere — without a real
+        # candidate entry the assess()-side joint rescue substitution would
+        # have nothing to substitute with.
+        threat_targets = set(allocated_targets)
+        from ..combat_exchange import danger_evidence
+        for member in sorted(context.snapshot.allies):
+            unit = context.snapshot.allies.get(member)
+            if unit is None or not unit.alive:
+                continue
+            cap = context.capabilities[member]
+            if cap.healer or cap.suicide_attack:
+                continue
+            if not danger_evidence(context, member, horizon_h=2.)['immediate']:
+                continue
+            threat_targets.update(e for e in context.forecast_risk(
+                member, unit.position).reachable_threats
+                if e in context.snapshot.enemies)
         for enemy_id, enemy in sorted(context.snapshot.enemies.items()):
             if not context.enemy_capabilities[enemy_id].suicide_attack and not (
-                    enemy_id in allocated_targets
+                    enemy_id in threat_targets
                     and enemy_pressure(context, enemy_id) > 0):
                 continue
             # member pool ranked by opportunity: window damage, effect delay,

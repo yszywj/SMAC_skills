@@ -278,6 +278,23 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
             trigger = 'active_contact_opportunity'
             weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
             weight /= 1. + maximum_unknown
+    # Unify the burst point and the enemy-group prediction MOMENT (task 6):
+    # for an attack-trigger hypothesis, shift the trigger center with the
+    # target's short-window predicted position at the arrival loop. Death
+    # hypotheses keep the sampled death location (that is where WE are).
+    # This one entry point serves both candidate ranking and the final
+    # effects rebuild (context.burst_outcome), so neither can drift back to
+    # static positions while the other uses motion. Unreliable or missing
+    # motion keeps the static result — legal actions are never cancelled.
+    if weight and trigger == 'active_contact_opportunity' \
+            and target_id in context.snapshot.enemies:
+        from .enemy_motion import predicted_position
+        future = predicted_position(context, target_id,
+                                    context.snapshot.game_loop + max(arrival, 0.))
+        if future is not None:
+            enemy = context.snapshot.enemies[target_id]
+            center = (center[0] + future[0] - enemy.position[0],
+                      center[1] + future[1] - enemy.position[1])
     potential = area_damage(context, center) if weight else {}
     if trigger.startswith('death_') and potential:
         target_id = max(potential, key=lambda enemy_id: (
@@ -398,23 +415,37 @@ def _better_point_within_window(context, actor, exchange, remaining, margin):
 
 
 def trigger_assignments(context):
-    """One joint marginal assignment for *strong* native trigger duties.
+    """SELECTIVE strong-cashout duties (task 7).
 
-    The assignment reserves real target HP across all sources, including
-    current triggers. It never forbids other legal attacks from utility
-    search, and never treats an uncertain death prediction as an order to die.
-    A currently positive exchange is still executed immediately unless a
-    clearly better, reachable-this-window point exists (bounded deferral);
-    the deferral is re-judged every observation, never a hidden commitment.
+    "Currently net-positive" alone no longer forces consumption: the plain
+    attack stays a normal candidate competing with side-steps, synchronized
+    advances and bounded waits. A STRONG (forced) assignment needs state
+    evidence:
+      * evidence-backed imminent death while the exchange has value; or
+      * the approach deadline / cashout marker fired (waiting has no
+        reliable remaining payoff); or
+      * a key team-level exchange completing right now (cover fire ready,
+        arrival immediate).
+    Timing basis is stated per assignment; unknown data degrades the claim
+    instead of inventing one. Reservations stay per-snapshot: unselected
+    candidates never hold budget, and a changed final action elsewhere is
+    re-marginalized on the next observation.
     """
     cache = getattr(context, '_burst_trigger_assignments', None)
     if cache is not None:
         return cache
+    selective = getattr(context, 'burst_config', {}).get(
+        'selective_commitment_enabled', True)
     margin = float(getattr(context, 'intercept_config', {}).get(
         'burst_defer_margin', .5) or 0.)
     defer_log = getattr(context, '_burst_defer_reasons', None)
     if defer_log is None:
         defer_log = context._burst_defer_reasons = {}
+    commit_log = getattr(context, '_burst_commit_reasons', None)
+    if commit_log is None:
+        commit_log = context._burst_commit_reasons = {}
+    from .combat_exchange import danger_evidence
+    progress = getattr(context, 'burst_progress', None)
     candidates = []
     for actor, cap in sorted(context.capabilities.items()):
         if not cap.suicide_attack or not context.snapshot.allies[actor].alive:
@@ -444,6 +475,15 @@ def trigger_assignments(context):
                     'current_net_hp': round(exchange['net_hp'], 2), 'point': list(better)}
                 continue
             defer_log.pop(actor, None)
+            basis = _strong_commitment_basis(context, actor, result, progress)
+            if selective and basis is None:
+                # Positive but not forced: keep the attack as a normal
+                # candidate; no duty, no budget reservation.
+                defer_log[actor] = {
+                    'reason': 'positive_exchange_not_forced',
+                    'net_hp': round(exchange['net_hp'], 2)}
+                continue
+            commit_log[actor] = basis or {'reason': 'forced_by_rollback_switch'}
             ranked.append((exchange['net_hp'], -result.trigger_loops,
                            actor, action, result, exchange))
         if not ranked:
@@ -451,7 +491,7 @@ def trigger_assignments(context):
         _, _, actor, action, result, exchange = max(ranked, key=lambda row: row[:4])
         selected[actor] = {'action': action, 'exchange': exchange,
                            'target': context.decode(actor, action).target,
-                           'position': result.position}
+                           'position': result.position, 'basis': commit_log.get(actor)}
         positions[actor] = result.position
         # Reserve the whole potential to prevent two compulsory sources
         # banking on the same victim. Final actions still recompute effects.
@@ -461,6 +501,25 @@ def trigger_assignments(context):
     context._burst_trigger_assignments = selected
     context._burst_trigger_remaining = remaining
     return selected
+
+
+def _strong_commitment_basis(context, actor, result, progress):
+    """State-based reason a positive exchange MUST be cashed now, or None."""
+    unit = context.snapshot.allies[actor]
+    if danger_evidence(context, actor, horizon_h=1.)['immediate']:
+        return {'reason': 'evidence_backed_imminent_death'}
+    record = progress.records.get(actor) if progress is not None else None
+    if record is not None and (record.get('deadline_expired')
+                               or record.get('cashout_reason')
+                               or record.get('last_failure')):
+        return {'reason': 'approach_deadline_or_cashout_reached',
+                'marker': record.get('cashout_reason') or record.get('last_failure')}
+    if result.trigger_loops <= 1e-6:
+        ready, arriving = cover_window(context, actor, result.target_id or '')
+        if ready > 0:
+            return {'reason': 'key_exchange_completing_now_with_cover',
+                    'ready_cover': ready}
+    return None
 
 
 def cover_window(context, actor, enemy_id):

@@ -50,11 +50,17 @@ def rescue_actions(context, actor, memory=None):
         return ()
     zergling = cap.key == 'zergling'
     blast_before, _ = zergling_blast_exposure(context, actor) if zergling else (0., ())
-    if zergling and (blast_before is None or blast_before <= 0.):
-        cache[key] = ()
-        return ()
     before = danger_evidence(context, actor, horizon_h=2.)
-    if not zergling and not before['immediate']:
+    # A zergling qualifies for rescue through EITHER evidence channel:
+    # observed imminent ordinary fire (same as every ordinary unit — being a
+    # zergling alone vetoes nothing) or a calibrated explosion exposure.
+    # Blast checks below are an ADDITIONAL condition when a blast threat
+    # actually exists, never the only gate to rescue eligibility.
+    melee_rescue_ok = getattr(context, 'common_config', {}).get(
+        'melee_survivable_rescue_enabled', True)
+    immediate = (before['immediate'] and (not zergling or melee_rescue_ok)) \
+        or (zergling and (blast_before or 0.) > 0.)
+    if not immediate:
         cache[key] = ()
         return ()
     origin_effects = set(context.forecast_risk(actor, unit.position).effect_weapon_near)
@@ -70,12 +76,12 @@ def rescue_actions(context, actor, memory=None):
         mid_effects = set(context.forecast_risk(actor, midpoint).effect_weapon_near)
         if (effects | mid_effects) - origin_effects:
             continue
-        if zergling:
+        if zergling and (blast_before or 0.) > 0.:
             blast_after, _ = zergling_blast_exposure(context, actor, point)
             blast_middle, _ = zergling_blast_exposure(context, actor, midpoint)
             if blast_after is None or blast_middle is None \
                     or blast_after >= blast_before or blast_middle > blast_before:
-                continue  # ordinary pressure relief alone cannot pull a ling out
+                continue  # with a real blast threat, the route must also reduce it
         after = danger_evidence(context, actor, point, horizon_h=2.)
         middle = danger_evidence(context, actor, midpoint, horizon_h=1.)
         # A relative improvement is not a rescue. Both the traversed route
@@ -116,12 +122,21 @@ def sustained_fire_actions(context, actor, memory=None):
     if not targets:
         return ()
     attacks = tuple(context.attack_action(actor, e) for e in targets)
-    if unit.weapon_cooldown_loops <= context.H:
+    # Bounded "delay one shot" budget: with budget left, moves with a
+    # CONCRETE benefit (supported-fire relief, explosion-coverage loss
+    # reduction) may postpone the next shot by up to the budget and still
+    # satisfy this fire duty. "Neater formation" or "more spread out" alone
+    # is never a benefit here.
+    delay_budget = memory.fire_delay_available(context, actor) \
+        if memory is not None else 0.
+    if unit.weapon_cooldown_loops <= context.H and delay_budget <= 0.:
         return attacks
     before = danger_evidence(context, actor, horizon_h=1.)
     peers = [u for a, u in context.snapshot.allies.items() if a != actor and u.alive
              and u.health_lost + u.shield_lost > 0.
              and distance(unit.position, u.position) <= 10.]
+    from .intercept import explosion_loss
+    origin_blast_loss = explosion_loss(context, actor, unit.position)
     moves = []
     for action in context.move_destinations(actor):
         if memory is not None and memory.movement_blockage(context, actor, action) >= .5:
@@ -134,7 +149,7 @@ def sustained_fire_actions(context, actor, memory=None):
             continue
         timing = next_fire_timing(context, actor, action, position=point,
                                   eligible_targets=retained)
-        if timing['delay_h'] > 1e-6 or timing['lost_cycle_opportunities'] > 0:
+        if timing['delay_h'] > delay_budget or timing['lost_cycle_opportunities'] > 0:
             continue
         # A cooldown move must not widen ORDINARY enemy weapon coverage
         # unless a teammate can actually deliver window fire on the new
@@ -152,9 +167,11 @@ def sustained_fire_actions(context, actor, memory=None):
         if any(set(context.forecast_risk(actor, p).effect_weapon_near) - effects for p in (middle, point)):
             continue
         relief = after['supported_amount'] < before['supported_amount'] - .1
+        blast_relief = origin_blast_loss > 0 and \
+            explosion_loss(context, actor, point) < origin_blast_loss
         closes_support = any(distance(point, u.position) + .25 < distance(unit.position, u.position)
                              for u in peers)
-        if relief or closes_support:
+        if relief or blast_relief or closes_support:
             moves.append(action)
     return attacks + tuple(moves)
 
@@ -228,6 +245,52 @@ def actor_duty(context, actor, memory):
     return result
 
 
+def joint_rescue_substitution(context, actions, actor, memory):
+    """A COMPLETE final joint kill of the threatening enemy can satisfy a
+    rescue duty without withdrawal.
+
+    Read-only, final-actions based: the actor's own final command must be a
+    legal in-range ATTACK on an enemy currently threatening it, and the full
+    group whose final actions attack that same enemy must have cumulative
+    window-qualified fire reaching its remaining health with a stated
+    timing basis. Members without an executable contribution do not count,
+    and a missing timing/damage basis grants NO exemption (the plain joint
+    attack candidate still competes through scoring). Pre-kill damage and
+    the target's death effects stay priced in the evaluator.
+    """
+    if not getattr(context, 'common_config', {}).get('joint_rescue_enabled', True):
+        return None
+    unit = context.snapshot.allies.get(actor)
+    action = actions.get(actor)
+    if unit is None or not unit.alive or action is None \
+            or action not in context.legal_actions(actor):
+        return None
+    threats = set(context.forecast_risk(actor, unit.position).reachable_threats) \
+        | set(context.risk_at(actor, unit.position).threats)
+    semantic = context.decode(actor, action)
+    if semantic.kind != 'attack' or semantic.target not in threats \
+            or semantic.target not in context.snapshot.enemies:
+        return None
+    target = semantic.target
+    members = []
+    for member, command in actions.items():
+        other = context.snapshot.allies.get(member)
+        if other is None or not other.alive:
+            continue
+        decoded = context.decode(member, command)
+        if decoded.kind == 'attack' and decoded.target == target:
+            members.append(member)
+    if not members:
+        return None
+    from .impact_timing import joint_kill_time
+    kill = joint_kill_time(context, members, target)
+    if kill['kill_after_loops'] is None:
+        return None
+    return {'target': target, 'members': tuple(sorted(members)),
+            'kill_status': kill['status'],
+            'kill_after_loops': kill['kill_after_loops']}
+
+
 def assess(context, actions, memory):
     """Smaller violation counts win BEFORE the existing numeric score.
 
@@ -243,6 +306,9 @@ def assess(context, actions, memory):
     counts = dict.fromkeys(PRIORITIES, 0)
     rows = {}
     joint = None
+    joint_rescue_log = getattr(context, '_joint_rescue_log', None)
+    if joint_rescue_log is None:
+        joint_rescue_log = context._joint_rescue_log = {}
     burst_allowed = memory.burst_progress.joint_allowed(context, actions)
     for actor, action in actions.items():
         duty = actor_duty(context, actor, memory)
@@ -272,6 +338,16 @@ def assess(context, actions, memory):
             if exchange and exchange['after']['amount'] >= context.snapshot.allies[actor].effective_health:
                 satisfied = False
                 branch_reason = 'joint_route_still_lethal_compare_exchange'
+        if not satisfied and duty['required'] and duty['kind'] == 'rescue':
+            # Complete-plan alternative: a final joint kill of the actor's
+            # actual threatening enemy satisfies the rescue duty without
+            # withdrawal. The plain retreat options stay available; both
+            # branches compete at the same duty level through scoring.
+            substitution = joint_rescue_substitution(context, actions, actor, memory)
+            if substitution is not None:
+                satisfied = True
+                branch_reason = 'joint_kill_rescue_substitution'
+                joint_rescue_log.setdefault(actor, substitution)
         if not satisfied:
             counts[duty['kind'] or 'burst'] += 1
         rows[actor] = {**duty, 'selected_action': action, 'satisfied': satisfied,
