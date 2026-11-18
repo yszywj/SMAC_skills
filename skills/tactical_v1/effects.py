@@ -224,7 +224,19 @@ def physical_effects(context: Context, actions: Dict[str, int],
     # Killing an enemy Baneling does not erase the same local explosion.
     # A potential combined burst kill also carries conditional retaliation.
     # It remains discounted exposure, never ordinary damage or a known kill.
+    # Repair D: the death-burst coverage uses the SOURCE's own evaluation
+    # moment — our bomber's outcome carrying this enemy as a kill claim
+    # supplies the shared-moment enemy map (with per-enemy static-fallback
+    # flags); unknown death timing (ordinary fire only) keeps a bounded
+    # conservative merge of the source's current position scenarios: for
+    # each victim the MAX risk over scenarios replaces the position sum,
+    # never an additive accumulation of one bomber's repeated explosions.
     effect_profile = context.burst_profile()
+    kill_sources = {}
+    for result in report.burst_outcomes.values():
+        if result.opportunity > 0. and result.enemy_positions \
+                and result.target_id in snapshot.enemies:
+            kill_sources.setdefault(result.target_id, result)
     for enemy_id, enemy in snapshot.enemies.items():
         if not context.enemy_capabilities[enemy_id].suicide_attack:
             continue
@@ -235,18 +247,40 @@ def physical_effects(context: Context, actions: Dict[str, int],
             continue
         weight = min(1., (ordinary + report.burst_damage_potential.get(enemy_id, 0.))
                      / max(enemy.effective_health, 1.))
+        source = kill_sources.get(enemy_id)
+        radius = effect_profile.blast_radius if effect_profile.geometry_known else 0.
         for actor, (position, _) in report.positions.items():
             ally = snapshot.allies[actor]
             if ally.is_flying:
                 continue
-            radius = effect_profile.blast_radius if effect_profile.geometry_known else 0.
-            if distance(position, enemy.position) > radius + ally.radius:
+            if source is not None:
+                # Same-moment geometry from the claiming outcome.
+                enemy_point = source.enemy_positions.get(enemy_id, enemy.position)
+                amount = burst_damage(context, actor, enemy_target=False)
+                if amount is None:
+                    report.enemy_death_burst_unknown.setdefault(actor, []).append(enemy_id)
+                    continue
+                if distance(position, enemy_point) <= radius + ally.radius:
+                    report.enemy_death_burst[actor] = \
+                        report.enemy_death_burst.get(actor, 0.) + amount * weight
                 continue
+            # Unknown death timing: bounded max over scenarios (T=0 now,
+            # T=H window end), never summed across moments. MOVE到达H末只是
+            # 保守情景，不创造额外攻击。
             amount = burst_damage(context, actor, enemy_target=False)
             if amount is None:
                 report.enemy_death_burst_unknown.setdefault(actor, []).append(enemy_id)
-            else:
-                report.enemy_death_burst[actor] = report.enemy_death_burst.get(actor, 0.) + amount * weight
+                continue
+            covered = distance(position, enemy.position) <= radius + ally.radius
+            if not covered and context.capabilities[actor].combat_class == 'ranged' \
+                    and not context.capabilities[actor].healer:
+                # Ranged units rarely move a full stride; the window-end
+                # scenario uses their own commanded endpoint only.
+                late = report.positions.get(actor, (position, False))[0]
+                covered = distance(late, enemy.position) <= radius + ally.radius
+            if covered:
+                report.enemy_death_burst[actor] = \
+                    report.enemy_death_burst.get(actor, 0.) + amount * weight
     return report
 
 

@@ -237,11 +237,13 @@ class TacticalMemory:
         if context is not None:
             context.deployment_memory = self
             context.enemy_motion = self.enemy_motion   # read-only shared view
-            self._observe_fire_delay(snapshot)
             self._observe_movement(snapshot, context)
             self.pressure_memory.observe(context)
             self.recovery.observe(context)
+            # CombatProgress FIRST: the budget restore below reads THIS
+            # observation's fired set, never the previous one.
             self.combat_progress.observe(context)
+            self._observe_fire_delay(snapshot, self.combat_progress)
             self.contact_progress.observe(context)
             self.burst_progress.observe(context)
             self.reentry_window.observe(context)
@@ -457,11 +459,10 @@ class TacticalMemory:
     def fire_delay_available(self, context, actor):
         """Remaining delay budget in LOOPS; 0 when disabled or exhausted.
 
-        Budget is restored ONLY by observation-phase evidence of a fire-cycle
-        restart (a cooldown that visibly restarted), never by submitting an
-        ATTACK command — a submitted attack is not proof a shot was fired.
-        Switching skill/target/provider never resets it; a new unit identity
-        or episode starts fresh.
+        Budget is restored ONLY by observation-phase ``fired`` evidence from
+        CombatProgress (see _observe_fire_delay), never by submitting an
+        ATTACK command. Switching skill/target/provider never resets it; a
+        new unit identity or episode starts fresh.
         """
         common = self.encounter_config.get('common_combat', {})
         if not common.get('bounded_fire_delay_enabled', True):
@@ -476,48 +477,54 @@ class TacticalMemory:
             return float(maximum)
         return max(0., float(record.get('available_loops', maximum)))
 
-    def _observe_fire_delay(self, snapshot):
-        """Observation phase: restore budget on visible fire-cycle restarts.
+    def _observe_fire_delay(self, snapshot, combat_progress=None):
+        """Observation phase: restore budget from THIS observation's fired set.
 
-        A cooldown that JUMPED UP since the previous observation is the
-        existing fire-cycle proxy for "a shot happened". This is still a
-        cycle proxy — it is NOT confirmation that damage landed.
+        Reads ``combat_progress.fired`` — the SAME observed fire-cycle
+        evidence CombatProgress just computed (elapsed time vs. naturally
+        decreasing cooldown), so the two modules never disagree. ``fired``
+        is a cycle proxy for "a shot happened", NOT confirmation that
+        damage landed. Each observation restores at most once per actor
+        (``last_restored_loop``); submitting an ATTACK command never
+        restores anything.
         """
         common = self.encounter_config.get('common_combat', {})
         if not common.get('bounded_fire_delay_enabled', True):
             self.fire_delay_budget.clear()
             return
         step = max(snapshot.step_mul, 1)
+        maximum = self._fire_delay_max(step)
+        loop = snapshot.game_loop
+        fired = set(getattr(combat_progress, 'fired', ()) or ())
         for actor, unit in snapshot.allies.items():
-            if not unit.alive:
-                continue
+            cap = self._capability_map.get(actor) if getattr(
+                self, '_capability_map', None) is not None else None
+            if not unit.alive or cap in ('healer', 'suicide'):
+                continue        # medivac / one-use bombers keep no gun budget
             record = self.fire_delay_budget.get(actor)
             if record is None or record.get('tag') != unit.tag:
                 self.fire_delay_budget[actor] = {
-                    'tag': unit.tag, 'available_loops': self._fire_delay_max(step),
-                    'previous_cooldown': unit.weapon_cooldown_loops}
+                    'tag': unit.tag, 'available_loops': maximum,
+                    'last_restored_loop': loop if actor in fired else None}
                 continue
-            previous = record.get('previous_cooldown')
-            cooldown = unit.weapon_cooldown_loops
-            if previous is not None and cooldown > float(previous) + step:
-                # Observed cycle restart: restore once for this cycle.
-                record['available_loops'] = self._fire_delay_max(step)
-            record['previous_cooldown'] = cooldown
+            if actor in fired and record.get('last_restored_loop') != loop:
+                record['available_loops'] = maximum
+                record['last_restored_loop'] = loop
+            # Dead/invalid units are dropped at the next identity check above.
 
     def _commit_fire_delay(self, snapshot, context, actions):
         """Charge ONLY the delay a committed final move actually adds.
 
-        Same action, same eligible target set, same predicted position and
-        same next_fire_timing semantics as the eligibility test in
-        sustained_fire_actions. Zero added delay charges nothing. Runs once
-        per decision step (commit is idempotent); unselected candidates
-        never reach here. Disabled switch: no state updates at all.
+        Uses the SAME unified query as the eligibility test
+        (_fire_delay_postponement): same action, same eligible target set,
+        same predicted position, same next_fire_timing semantics. Zero added
+        delay charges nothing. Runs once per decision step (commit is
+        idempotent); unselected candidates never reach here. Disabled
+        switch: no state updates at all.
         """
         common = self.encounter_config.get('common_combat', {})
         if not common.get('bounded_fire_delay_enabled', True):
             return
-        from .combat_exchange import next_fire_timing
-        from .joint_combat import action_position
         step = max(snapshot.step_mul, 1)
         for actor, action in actions.items():
             unit = snapshot.allies.get(actor)
@@ -527,28 +534,40 @@ class TacticalMemory:
                 continue
             if context.decode(actor, action).kind != 'move':
                 continue
-            targets = [e for e in context.attackable_enemies(actor)
-                       if context.contact_status(actor, e) == 'in_range'
-                       and context.fire_estimate(actor, e).window_shots >= 1]
-            if not targets:
-                continue        # nothing was postponed
-            point, _ = action_position(context, actor, action)
-            move_timing = next_fire_timing(context, actor, action, position=point,
-                                           eligible_targets=targets)
-            attack_action = context.attack_action(actor, targets[0])
-            base_timing = next_fire_timing(context, actor, attack_action,
-                                           eligible_targets=targets) \
-                if attack_action is not None else {'delay_h': 0.}
-            added_loops = max(0., move_timing['delay_h'] - base_timing['delay_h']) * step
+            added_loops = self._fire_delay_postponement(context, actor, action)
             if added_loops <= 1e-9:
-                continue
+                continue        # zero added delay: nothing to charge
             record = self.fire_delay_budget.get(actor)
             if record is None or record.get('tag') != unit.tag:
                 record = {'tag': unit.tag,
                           'available_loops': self._fire_delay_max(step),
-                          'previous_cooldown': unit.weapon_cooldown_loops}
+                          'last_restored_loop': None}
                 self.fire_delay_budget[actor] = record
             record['available_loops'] = max(0., record['available_loops'] - added_loops)
+
+    def _fire_delay_postponement(self, context, actor, action):
+        """Unified pure query: loops of next-shot delay this MOVE adds.
+
+        Shared by sustained_fire_actions (eligibility) and _commit_fire_delay
+        (charging), so both use one target set, one predicted position and
+        one next_fire_timing semantics. In-range window targets ONLY; a
+        move losing contact with all of them postpones everything.
+        """
+        from .combat_exchange import next_fire_timing
+        from .joint_combat import action_position
+        targets = tuple(e for e in context.attackable_enemies(actor)
+                        if context.contact_status(actor, e) == 'in_range'
+                        and context.fire_estimate(actor, e).window_shots >= 1)
+        if not targets:
+            return 0.
+        point, _ = action_position(context, actor, action)
+        retained = [e for e in targets
+                    if context.projected_attack_opportunity(actor, e, point).available]
+        if not retained:
+            return float(max(context.H, 1))   # contact fully lost this window
+        timing = next_fire_timing(context, actor, action, position=point,
+                                  eligible_targets=retained)
+        return max(0., float(timing['delay_h'])) * max(context.H, 1)
 
     def movement_blockage(self, context, actor, action, *, joint_actions=None,
                           joint_positions=None):

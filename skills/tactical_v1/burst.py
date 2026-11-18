@@ -43,6 +43,9 @@ class BurstOutcome:
     evaluation_after_loops: float = 0.
     enemy_positions: Optional[Dict[str, Tuple[float, float]]] = None
     motion_used: bool = False
+    # Enemies whose position in enemy_positions is an explicitly STATIC
+    # fallback (no reliable motion record), not a claimed future position.
+    static_fallback_enemies: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -172,13 +175,16 @@ def trigger_position(context, actor, enemy_id, horizon=None):
 def _predicted_enemy_positions(context, at_loop):
     """Enemy positions at ONE evaluation moment, with a static fallback.
 
-    Returns (map, motion_used): reliable ≤1H motion predictions where they
-    exist, otherwise the CURRENT (static) position — never a mixture of
-    different moments, and the fallback is distinguishable via
-    ``motion_used``. Pure query.
+    ``at_loop`` is an ABSOLUTE loop count; all callers use one convention.
+    Returns (map, motion_used, fallback_ids): reliable ≤1H motion
+    predictions where they exist, otherwise the CURRENT (static) position —
+    never a mixture of different moments. ``fallback_ids`` names the enemies
+    whose entry is an explicitly static fallback, so consumers can tell
+    predicted from conservative positions without trusting the whole map.
+    Pure query.
     """
     from .enemy_motion import predicted_position
-    positions, motion_used = {}, False
+    positions, motion_used, fallback = {}, False, []
     for enemy_id, enemy in context.snapshot.enemies.items():
         future = predicted_position(context, enemy_id, at_loop)
         if future is not None:
@@ -186,7 +192,30 @@ def _predicted_enemy_positions(context, at_loop):
             motion_used = True
         else:
             positions[enemy_id] = enemy.position
-    return positions, motion_used
+            fallback.append(enemy_id)
+    return positions, motion_used, tuple(fallback)
+
+
+def _contact_point(context, actor, enemy_id, enemy_position):
+    """Trigger contact point toward the enemy AT ``enemy_position``.
+
+    P(T) = S + (E(T)-S) * travel/d with R = radii + trigger reach;
+    d = 0 keeps the source center (no division by zero). Returns
+    (point, travel): travel is the straight-line distance the bomber must
+    still cover by T — the caller compares it with its own speed budget.
+    """
+    source = context.snapshot.allies[actor]
+    enemy = context.snapshot.enemies[enemy_id]
+    effect = profile(context)
+    reach = source.radius + enemy.radius + (effect.trigger_reach or 0.)
+    dx, dy = enemy_position[0] - source.position[0], enemy_position[1] - source.position[1]
+    d = math.hypot(dx, dy)
+    if d <= 1e-9:
+        return tuple(source.position), 0.
+    travel = max(0., d - reach)
+    fraction = travel / d
+    return (source.position[0] + dx * fraction,
+            source.position[1] + dy * fraction), travel
 
 
 def area_damage(context, center, enemy_positions=None):
@@ -287,9 +316,74 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
     reachable, arrival = False, float(context.H)
     speed = context.speed(actor)
     if semantic.kind == "attack" and semantic.target in context.snapshot.enemies:
-        center, reachable = trigger_position(context, actor, semantic.target)
-        reachable = reachable and context.can_issue_attack(actor, semantic.target)
-        arrival = _distance(source.position, center) * 16. / speed if speed else float(context.H)
+        # Repair D: search a FEW candidate trigger moments T ∈ (0, H]. For
+        # each T the target is placed at its predicted position, the contact
+        # point and required travel are recomputed FROM SCRATCH, and the
+        # first model-feasible T wins. The legacy static arrival joins the
+        # set when it lands inside the window. No endless iteration, no
+        # extra search budget — a bounded engineering approximation, not an
+        # exact earliest-trigger oracle.
+        target_id_static = semantic.target
+        static_center, static_ok = trigger_position(context, actor, target_id_static)
+        feasible = static_ok and context.can_issue_attack(actor, target_id_static)
+        candidates_T = [0.]
+        Hf = float(context.H)
+        for fraction in (.25, .5, .75, 1.):
+            candidates_T.append(Hf * fraction)
+        if 0. < arrival <= Hf and feasible:
+            candidates_T.append(arrival)
+        best_T = None
+        for moment in sorted(set(round(t, 6) for t in candidates_T)):
+            if moment > Hf + 1e-6:
+                continue
+            enemy_map_t, _, _ = _predicted_enemy_positions(
+                context, context.snapshot.game_loop + moment)
+            future = enemy_map_t.get(target_id_static)
+            if future is None:
+                continue
+            point_t, travel = _contact_point(context, actor, target_id_static, future)
+            budget_t = speed * moment / 16. if speed else 0.
+            if travel <= budget_t + 1e-6:
+                best_T = (moment, point_t, enemy_map_t)
+                break
+        if best_T is not None:
+            moment, point_t, enemy_map_t = best_T
+            center, reachable = point_t, True
+            arrival = moment
+            # Route risk recomputed for the NEW route only (start / new
+            # midpoint / new endpoint); no stale static-route facts.
+            maximum_incoming, maximum_unknown = 0., 0
+            for fraction in (0., .5, 1.):
+                sample = tuple(source.position[i] + (center[i] - source.position[i]) * fraction
+                               for i in (0, 1))
+                incoming, unknown = _exposure(context, actor, sample,
+                                              max(moment, context.H), physical=True)
+                maximum_incoming = max(maximum_incoming, incoming)
+                maximum_unknown = max(maximum_unknown, unknown)
+            if arrival <= 1e-6:
+                trigger, weight = 'active_contact_opportunity', 1.
+            else:
+                center = point_t
+                trigger = 'active_contact_opportunity'
+                weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
+                weight /= 1. + maximum_unknown
+            # Jump straight to the unified space-time tail with these facts.
+            potential = area_damage(context, center, enemy_map_t) if weight else {}
+            if trigger.startswith('death_') and potential:
+                target_id = max(potential, key=lambda enemy_id: (
+                    (potential[enemy_id] or 0.) / max(context.snapshot.enemies[enemy_id].effective_health, 1.),
+                    -_distance(center, enemy_map_t.get(enemy_id,
+                                                     context.snapshot.enemies[enemy_id].position)), enemy_id))
+            return BurstOutcome(actor, trigger, center, weight, potential,
+                                effect.geometry_known, effect.evidence, target_id,
+                                arrival if weight else 0., trigger != 'active_contact_opportunity'
+                                or arrival > 1e-6,
+                                evaluation_after_loops=max(arrival, 0.) if weight else 0.,
+                                enemy_positions=dict(enemy_map_t) if weight else None,
+                                motion_used=weight > 0.)
+        # No model-feasible trigger moment within this window: fall through
+        # to the death-hypothesis path WITHOUT any active-trigger credit.
+        reachable = False
     if reachable and arrival <= 1e-6:
         trigger, weight = 'active_contact_opportunity', 1.
     else:
@@ -316,28 +410,14 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
             trigger = 'active_contact_opportunity'
             weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
             weight /= 1. + maximum_unknown
-    # Unified space-time evaluation (repair 5): ONE evaluation moment T in
-    # [0, H]. All enemies are placed at their predicted positions at T
-    # (static fallback where motion is unreliable). For an attack trigger
-    # the center follows the target's predicted position, but ONLY if the
-    # source can still reach that shifted center within its own speed
-    # budget by T — otherwise this window's active-trigger credit is
-    # dropped entirely. Reachability, arrival and coverage are therefore
-    # recomputed at the same moment; no "shift the center only" patching.
+    # Unified space-time evaluation (repair D): ONE evaluation moment T in
+    # [0, H] shared by all consumers of this outcome. Death hypotheses use
+    # their sampled death moment T=arrival as the evaluation moment, so the
+    # covered enemies' positions correspond to WHEN the death burst lands,
+    # not to now.
     evaluation_after = max(min(arrival, float(context.H)), 0.) if weight else 0.
-    enemy_map, motion_used = _predicted_enemy_positions(
+    enemy_map, motion_used, fallback_ids = _predicted_enemy_positions(
         context, context.snapshot.game_loop + evaluation_after)
-    if weight and trigger == 'active_contact_opportunity' \
-            and target_id in context.snapshot.enemies:
-        enemy = context.snapshot.enemies[target_id]
-        future = enemy_map[target_id]
-        shifted = (center[0] + future[0] - enemy.position[0],
-                   center[1] + future[1] - enemy.position[1])
-        budget = speed * evaluation_after / 16. if speed else 0.
-        if _distance(source.position, shifted) <= budget + 1e-6:
-            center = shifted
-        else:
-            trigger, weight = 'none', 0.   # not reachable at T: no credit
     potential = area_damage(context, center, enemy_map) if weight else {}
     if trigger.startswith('death_') and potential:
         target_id = max(potential, key=lambda enemy_id: (
@@ -350,7 +430,8 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
                         or arrival > 1e-6,
                         evaluation_after_loops=evaluation_after,
                         enemy_positions=dict(enemy_map) if weight else None,
-                        motion_used=motion_used and weight > 0.)
+                        motion_used=motion_used and weight > 0.,
+                        static_fallback_enemies=fallback_ids if weight else ())
 
 
 def useful_area_value(context, center, remaining=None, enemy_positions=None):
@@ -446,28 +527,33 @@ def _better_point_within_window(context, actor, exchange, remaining, margin):
     # Alternatives reachable within one window are compared at the SAME
     # future moment (T=H) as their own evaluation, never against a mixture
     # of current and predicted enemy positions.
-    horizon_map, _ = _predicted_enemy_positions(
+    horizon_map, _, _ = _predicted_enemy_positions(
         context, context.snapshot.game_loop + max(context.H, 1))
     for move in sorted(context.move_destinations(actor)):
         point = context.predict_position(actor, move).position
-        # Only actual legal move endpoints with a compatible trigger anchor;
-        # a straight-line projection through an obstacle is not a route.
-        anchored = any(not enemy.is_flying and _distance(point, enemy.position)
+        # Trigger anchor measured against the SAME-TIME enemy positions, not
+        # against current positions while coverage uses the future map.
+        anchored = any(not enemy.is_flying
+                       and _distance(point, horizon_map[enemy_id])
                        <= source.radius + enemy.radius + effect.trigger_reach
-                       for enemy in context.snapshot.enemies.values())
+                       for enemy_id, enemy in context.snapshot.enemies.items())
         if not anchored or _distance(source.position, point) > budget + .1:
             continue
+        # A MOVE arriving at H only CREATES a later trigger opportunity; the
+        # deferred value keeps the cost of needing that follow-up action and
+        # its uncertainty. This is not a same-window detonation.
         alternative = exchange_value(context, actor, point, remaining,
                                      enemy_positions=horizon_map)
-        if not alternative['known'] or alternative['net_hp'] <= best_net \
-                or alternative['net_hp'] <= threshold:
+        alternative_net = alternative['net_hp'] * 0.5   # follow-up-action discount
+        if not alternative['known'] or alternative_net <= best_net \
+                or alternative_net <= threshold:
             continue
         midpoint = tuple((source.position[i] + point[i]) / 2. for i in (0, 1))
         incoming, unknown = _exposure(context, actor, midpoint, context.H, physical=True)
         end_incoming, end_unknown = _exposure(context, actor, point, context.H, physical=True)
         if max(incoming, end_incoming) >= source.effective_health or unknown or end_unknown:
             continue
-        best, best_net = point, alternative['net_hp']
+        best, best_net = point, alternative_net
     return best
 
 

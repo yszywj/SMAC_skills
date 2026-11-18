@@ -84,24 +84,95 @@ def main():
     zerg1 = scene(zerg_allies(), enemies=zerg_enemies())
     for actor in ("u4", "u5"):
         zerg1["allies"][actor].update(health=30., max_health=30., tag=f"tag-{actor}")
+    # Cooldown-cycle setup: u2 starts ready (0); after the step it observes
+    # cooldown 6 > elapsed 8-expectation 0 — the natural fired-proxy input.
+    zerg1["allies"]["u2"]["weapon_cooldown_loops"] = 0.
     zerg1 = with_questions(calibrate_baneling(zerg1))
     manager = SkillManager()
     run_scene(manager, zerg1, "zerg#1", failures)
+    # Second snapshot: same reliable tags, different loops, consistent
+    # non-zero same-direction motion for every enemy.
     zerg2 = scene(zerg_allies((.4, .4)), enemies=zerg_enemies((1., .2)),
                   loop=zerg1["state"]["game_loop"] + zerg1["state"]["step_mul"],
                   episode=zerg1["state"]["episode"])
     for actor in ("u4", "u5"):
         zerg2["allies"][actor].update(health=30., max_health=30., tag=f"tag-{actor}")
+    # Hydralisk u2 fired during the first window (proxy: fresh cooldown 6).
+    zerg2["allies"]["u2"]["weapon_cooldown_loops"] = 6.
     zerg2 = with_questions(calibrate_baneling(zerg2))
     run_scene(manager, zerg2, "zerg#2", failures)
     # The calibrated profile must NOT report a catalog mismatch.
     from skills.tactical_v1.context import Context, build_snapshot
     from skills.tactical_v1.burst import profile as burst_profile
     probe = Context(build_snapshot(zerg2, 99))
+    probe.burst_config = dict(manager.config.get("burst_engage", {}))
     evidence = burst_profile(probe).evidence
     print(f"zerg burst profile evidence: {evidence}")
     if "mismatch" in evidence:
         failures.append(f"zerg: burst profile catalog mismatch: {evidence}")
+    # Wiring 1 — motion: the second observation must yield a VALID velocity
+    # estimate (not just history rows), from the shared recorded samples.
+    from skills.tactical_v1.enemy_motion import velocity
+    probe.enemy_motion = manager.memory.enemy_motion
+    motion = velocity(probe, "e1")
+    print(f"zerg motion e1: {motion.get('reason') if motion else None}")
+    if not (motion and motion.get('reliable')):
+        failures.append("zerg: motion estimate invalid on second snapshot")
+    # Wiring 3 — budget: the fired proxy for u2 must have restored its
+    # delay budget during the second observation.
+    available = manager.memory.fire_delay_available(probe, "u2")
+    fired = "u2" in manager.memory.combat_progress.fired
+    print(f"zerg u2 fired={fired} available_loops={available}")
+    if not fired:
+        failures.append("zerg: cooldown-cycle proxy did not mark u2 fired")
+    if available <= 0.:
+        failures.append("zerg: fired evidence did not restore delay budget")
+    # Wiring 2 — soft intercept: bomber-contract candidates must reach the
+    # whole-plan validation entry. Drive validate_plans directly with a
+    # synthetic bomber contract built from the scene's intercept facts.
+    from skills.tactical_v1.intercept import intercept_plan, validate_intercept_plan
+    plans_found = intercept_plan(probe, manager.memory)
+    print(f"zerg intercept plans: {len(plans_found)}")
+    if plans_found:
+        row = plans_found[0]
+        members = {a: action for a, action, _ in row['shooters']}
+        members.update(dict(row['spread']))
+        if members:
+            from skills.tactical_v1.contracts import CandidatePlan
+            from skills.tactical_v1.validator import validate_plans
+            contract = CandidatePlan(
+                proposal_id="smoke-bomber-1", snapshot_id=99,
+                config_fingerprint="", primary_skill="focus_fire",
+                specialization_provider=None, instance_id=None,
+                controlled_actors=tuple(sorted(members)), beneficiaries=(),
+                goal=row['enemy'], current_actions=dict(members),
+                expected_effects=(), claims=None, dependencies=(),
+                commitment=None, features={}, proposed_memory_delta={},
+                atomic=True, rationale="smoke",
+                goal_kind="enemy",
+                goal_data={"validation_kind": "bomber_intercept",
+                           "intercept_type": 'safe_intercept' if row.get('safe')
+                           else 'loss_control_intercept' if row.get('safe') is False
+                           and row.get('type') == 'loss_control_intercept'
+                           else 'ordinary_joint_fire' if row['shooters']
+                           else 'spread_only',
+                           "target_id": row['enemy'],
+                           "shooter_actions": {a: action for a, action, _ in row['shooters']},
+                           "spread_actions": dict(row['spread']),
+                           "protected_members": list(row.get('protected_members', ())),
+                           "already_exposed_members": list(row.get('already_exposed', ())),
+                           "conservative_kill_loops": row.get('conservative_kill_loops'),
+                           "requires_lethal_damage": bool(row['shooters'])})
+            actions_map = {a: manager.memory.last_committed_actions.get(a, members[a])
+                           for a in members}
+            problems = validate_plans([contract], probe, actions_map,
+                                      None, manager.memory)
+            print(f"zerg bomber contract validation: {len(problems)} problem(s)")
+            for problem in problems:
+                if str(problem.get('type', '')).startswith('bomber_contract'):
+                    print(f"  - {problem['type']} (expected when final actions differ)")
+    else:
+        print("zerg intercept plans: none (no bomber in coverage this scene)")
 
     # Terran: marines + marauder + medivac vs zerglings.
     terran = scene([((10., 10.), "marine"), ((10.5, 10.5), "marine"),

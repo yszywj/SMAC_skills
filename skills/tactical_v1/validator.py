@@ -55,14 +55,32 @@ def validate_actions(actions: List[int], context: Context,
 
 
 def validate_plans(plans: List[CandidatePlan], context: Context,
-                   actions: Dict[str, int],
-                   report=None) -> List[Dict[str, object]]:
+                   actions: Dict[str, int], report=None,
+                   memory=None) -> List[Dict[str, object]]:
     """Structural + dependency validation of the plan set against the FINAL
     actions. ``report`` is the physical effects of ``actions`` and carries
-    the window-qualified fire sources and heal assignments."""
+    the window-qualified fire sources and heal assignments. ``memory`` is
+    optional for backwards compatibility; it feeds ONLY the specialized
+    bomber-intercept contract checks below — missing memory degrades the
+    blockage sub-check to route-agnostic, it never waives the contract."""
     problems: List[Dict[str, object]] = []
     seen_control: Dict[str, str] = {}
     plan_by_id = {p.proposal_id: p for p in plans}
+    from .intercept import validate_intercept_plan
+    for plan in plans:
+        if (getattr(plan, 'goal_data', None) or {}).get(
+                'validation_kind') == 'bomber_intercept':
+            # Specialized whole-group check runs on EVERY complete plan that
+            # declares the contract — independent of whether any actor
+            # currently carries a required intercept duty, and for all
+            # contract types (safe/loss_control/ordinary_joint_fire/
+            # spread_only), not just safe plans.
+            passed, reason, target = validate_intercept_plan(
+                context, actions, plan, memory=memory, report=report)
+            if not passed:
+                problems.append(_problem("bomber_contract:" + reason, True,
+                                         plan.proposal_id,
+                                         target=target or plan.goal))
     for plan in plans:
         if set(plan.current_actions) != set(plan.controlled_actors):
             problems.append(_problem("actions_actors_mismatch", True,
@@ -195,10 +213,10 @@ def validate_plans(plans: List[CandidatePlan], context: Context,
     return problems
 
 
-def complete_and_validate(plans, context, actions, report=None):
+def complete_and_validate(plans, context, actions, report=None, memory=None):
     problems = validate_actions([actions[f"u{i}"] for i in range(len(actions))],
                                 context, len(actions))
-    problems.extend(validate_plans(plans, context, actions, report))
+    problems.extend(validate_plans(plans, context, actions, report, memory))
     return problems
 
 
@@ -217,7 +235,7 @@ def repair(plans: List[CandidatePlan], context: Context,
         problems = validate_actions(
             [actions[f"u{i}"] for i in range(len(actions))], context,
             len(actions))
-        problems += validate_plans(plans, context, actions, report)
+        problems += validate_plans(plans, context, actions, report, memory)
         if not problems:
             break
         drop_ids = {p["proposal_id"] for p in problems if p["drop_whole"]}

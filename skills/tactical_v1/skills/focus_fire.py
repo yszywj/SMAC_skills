@@ -186,6 +186,20 @@ class FocusFireSkill:
             members.update(dict(row["spread"]))
             if len(members) < 1:
                 continue
+            # Candidate contract for the specialized whole-group validation
+            # (validate_plans -> validate_intercept_plan): the plan's OWN
+            # member/action lists and claim type are frozen here; final
+            # eligibility is RECOMPUTED from final actions, never trusted
+            # from these declared facts.
+            shooter_actions = {actor: action for actor, action, _ in row["shooters"]}
+            spread_actions = dict(row["spread"])
+            intercept_type = ('safe_intercept' if row.get('safe')
+                              else 'loss_control_intercept'
+                              if row.get('type') == 'loss_control_intercept'
+                              else 'ordinary_joint_fire' if row['shooters']
+                              else 'spread_only')
+            requires_lethal = intercept_type in ('safe_intercept',
+                                                 'loss_control_intercept')
             effects, fire = [], []
             for actor, action, damage_lo in row["shooters"]:
                 estimate = context.fire_estimate(actor, row["enemy"])
@@ -208,14 +222,24 @@ class FocusFireSkill:
                 {}, snapshot_id, fingerprint, atomic=True,
                 goal_kind="enemy",
                 goal_data={"target_id": row["enemy"],
-                           "intercept_safe": row["safe"],
+                           "validation_kind": "bomber_intercept",
+                           "intercept_type": intercept_type,
+                           "shooter_actions": shooter_actions,
+                           "spread_actions": spread_actions,
+                           "protected_members": list(row.get('protected_members', ())),
+                           "already_exposed_members": list(row.get('already_exposed', ())),
+                           "conservative_kill_loops": row.get('conservative_kill_loops'),
+                           "requires_lethal_damage": requires_lethal,
                            "entry_h": round(row["entry_h"], 3),
                            "spread_members": [a for a, _ in row["spread"]]},
                 dependencies=(Dependency("member", tuple(sorted(members))),
-                              Dependency("target_valid", (row["enemy"],))) + (
-                                  (Dependency("fire_window", (row["enemy"],)),)
-                                  if row['shooters'] else ()),
-                rationale=("joint explosion defense against " + row["enemy"]
+                              Dependency("target_valid", (row["enemy"],)))
+                # fire_window (kill claim) only for plans that actually claim
+                # a kill; ordinary joint fire must not be forced lethal.
+                + ((Dependency("fire_window", (row["enemy"],)),)
+                   if requires_lethal and row['shooters'] else ()),
+                rationale=("joint explosion defense (" + intercept_type
+                           + ") against " + row["enemy"]
                            + f" with {len(row['shooters'])} shooters"
                            + (f", {len(row['spread'])} spreading" if row["spread"] else ""))))
         # -- ordinary allocated high-pressure targets keep the generic

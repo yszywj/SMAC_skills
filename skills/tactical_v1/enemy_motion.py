@@ -34,49 +34,66 @@ def record_observation(records, enemy_id, tag, loop, position, step_mul):
 
 
 def velocity(context, enemy_id):
-    """Velocity estimate from visible tagged history, or None when unreliable.
+    """Velocity estimate from visible tagged history, or a failure reason.
 
-    Validity checks: the enemy is currently visible; its CURRENT payload tag
-    matches the recorded one (no tag → no estimate at all); no sample comes
-    from the future; sample loops are distinct with a positive span; all
-    positions are finite; no teleport-speed jumps; and no clear direction
-    reversal inside the window (a recent segment opposing the mean motion
-    degrades the estimate instead of averaging it into "reliable").
+    Read-only: this query NEVER appends to the persistent records. In the
+    normal manager path the observation phase has already recorded the
+    current position at the current game_loop, so the samples are used as
+    stored. Only for direct calls whose records do NOT yet contain the
+    current observation does a LOCAL copy gain one current sample
+    (last.sample < now); a sample already stamped at ``now`` is REPLACED in
+    the local copy, never appended again; a sample in the future fails as
+    invalid_time. Records are never mutated.
     """
     records = getattr(context, 'enemy_motion', None) or {}
     row = records.get(enemy_id)
     if not row or not row.get('samples'):
-        return None
+        return {'reliable': False, 'reason': 'insufficient_samples'}
     enemy = context.snapshot.enemies.get(enemy_id)
     if enemy is None:
-        return None
+        return {'reliable': False, 'reason': 'missing_identity'}
     current_tag = context.snapshot.raw_state.get('visible_enemies', {}) \
         .get(enemy_id, {}).get('tag')
-    if not current_tag or current_tag != row.get('tag'):
-        return None                        # identity not reliably established
+    if not current_tag:
+        return {'reliable': False, 'reason': 'missing_identity'}
+    if current_tag != row.get('tag'):
+        return {'reliable': False, 'reason': 'identity_changed'}
     H = max(context.H, 1)
     now = context.snapshot.game_loop
-    samples = [(loop, point) for loop, point in row['samples']
-               if now - loop <= MAX_SPAN_H * H and loop <= now]
-    samples.append((now, tuple(enemy.position)))
-    if len(samples) < 2:
-        return None
+    # Local copies only — the persistent record list is never modified.
+    samples = [(loop, tuple(point)) for loop, point in row['samples']
+               if now - loop <= MAX_SPAN_H * H]
+    last_loop, last_point = (samples[-1] if samples else (None, None))
+    if last_loop is None or last_loop > now:
+        return {'reliable': False, 'reason': 'invalid_time'}
+    if last_loop < now:
+        samples.append((now, tuple(enemy.position)))     # once, local copy
+    elif last_loop == now:
+        samples[-1] = (now, tuple(enemy.position))       # replace, no append
+    if any(loop > now for loop, _ in samples):
+        return {'reliable': False, 'reason': 'invalid_time'}
+    dedup = {}
+    for loop, point in samples:
+        dedup[loop] = point              # at most one sample per game_loop
+    samples = sorted(dedup.items())
+    if len(samples) < 2 or samples[-1][0] == samples[0][0]:
+        return {'reliable': False, 'reason': 'insufficient_samples'}
     if any(not (math.isfinite(loop) and math.isfinite(point[0])
                 and math.isfinite(point[1]))
            for loop, point in samples):
-        return None
+        return {'reliable': False, 'reason': 'invalid_position'}
     first_loop, first = samples[0]
     last_loop, last = samples[-1]
     span = last_loop - first_loop
     if span <= 0:
-        return None
+        return {'reliable': False, 'reason': 'invalid_time'}
     segments = []
     for (loop_a, point_a), (loop_b, point_b) in zip(samples, samples[1:]):
         dt = loop_b - loop_a
         if dt <= 0:
-            return None                    # duplicate-clock corruption
+            return {'reliable': False, 'reason': 'invalid_time'}
         if math.dist(point_a, point_b) / dt * H > JUMP_PER_H:
-            return None                    # teleport-speed outlier
+            return {'reliable': False, 'reason': 'motion_unreliable'}
         segments.append(((point_b[0] - point_a[0]) / dt,
                          (point_b[1] - point_a[1]) / dt))
     mean = ((last[0] - first[0]) / span, (last[1] - first[1]) / span)
@@ -90,10 +107,10 @@ def velocity(context, enemy_id):
         dot = (mean[0] * latest[0] + mean[1] * latest[1]) \
             / (mean_norm * max(latest_norm, 1e-9))
         if latest_norm > .5 * mean_norm and dot < -.25:
-            return None
+            return {'reliable': False, 'reason': 'motion_unreliable'}
     return {'vx': mean[0], 'vy': mean[1],
             'loops_span': span, 'reliable': True,
-            'reason': 'visible_same_tag_linear_estimate'}
+            'reason': 'valid_short_motion'}
 
 
 def predicted_position(context, enemy_id, at_loop):
@@ -101,13 +118,18 @@ def predicted_position(context, enemy_id, at_loop):
 
     Linear short-window prediction only. ``at_loop`` beyond the horizon,
     missing/unreliable velocity or a vanished enemy degrade to None; the
-    caller then keeps its static-position result.
+    caller then keeps its static-position result. velocity() failures carry
+    a diagnosis reason (insufficient_samples / missing_identity /
+    identity_changed / invalid_time / invalid_position / motion_unreliable)
+    retrievable via velocity(context, enemy_id)['reason'].
     """
     if not getattr(context, 'burst_config', {}).get('motion_prediction_enabled', True):
         return None
     motion = velocity(context, enemy_id)
+    if not motion.get('reliable'):
+        return None
     enemy = context.snapshot.enemies.get(enemy_id)
-    if motion is None or enemy is None:
+    if enemy is None:
         return None
     delta = float(at_loop) - context.snapshot.game_loop
     if delta < 0 or delta > PREDICT_HORIZON_H * max(context.H, 1):
@@ -120,7 +142,7 @@ def summary(context, limit=3):
     rows = {}
     for enemy_id in list(getattr(context, 'enemy_motion', {}) or {})[:limit]:
         motion = velocity(context, enemy_id)
-        if motion is not None:
+        if motion is not None and motion.get('reliable'):
             rows[enemy_id] = {'speed_per_loop': round(
                 math.hypot(motion['vx'], motion['vy']), 3),
                 'loops_span': motion['loops_span']}

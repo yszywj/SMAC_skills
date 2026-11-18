@@ -292,6 +292,95 @@ def actor_intercept_duty(context, actor, memory=None, config=None):
     return {'required': False, 'actions': (), 'kind': None, 'reason': 'no_intercept_duty'}
 
 
+def validate_intercept_plan(context, actions, plan, memory=None, report=None):
+    """Whole-group validation of ONE candidate's OWN bomber contract.
+
+    Reads ``plan.goal_data['validation_kind'] == 'bomber_intercept'`` and
+    checks the DECLARED members against the actual final actions — never
+    the first matching row of intercept_plan(), because candidates may
+    differ in members, spread or target. Pure read-only: no coordinator
+    calls, no search, no task mutations, no fire pre-reservation.
+
+    Returns (passed: bool, reason: str, target: str).
+    """
+    data = getattr(plan, 'goal_data', None) or {}
+    if data.get('validation_kind') != 'bomber_intercept':
+        return True, 'not_bomber_contract', ''
+    target = data.get('target_id')
+    if target not in context.snapshot.enemies:
+        return False, 'target_lost', target or ''
+    shooter_actions = data.get('shooter_actions') or {}
+    spread_actions = data.get('spread_actions') or {}
+    # ---- shooters: alive, final action intact, legal, window-qualified ----
+    cumulative = 0.
+    for member, command in shooter_actions.items():
+        unit = context.snapshot.allies.get(member)
+        if unit is None or not unit.alive:
+            return False, 'shooter_dead', target
+        if actions.get(member) != command:
+            return False, 'shooter_action_lost', target
+        if command not in context.legal_actions(member):
+            return False, 'shooter_action_illegal', target
+        estimate = context.fire_estimate(member, target)
+        if estimate.window_shots < 1:
+            return False, 'shooter_lost_window', target
+        if estimate.damage_lo is not None:
+            cumulative += max(0., estimate.damage_lo)
+    lethal_required = bool(data.get('requires_lethal_damage'))
+    if lethal_required and cumulative \
+            < context.snapshot.enemies[target].effective_health:
+        return False, 'intercept_fire_insufficient', target
+    # safe plans additionally need their conservative kill time to exist
+    # and keep relevant members outside the kill window (same conservative
+    # time everywhere; no cooldown fallback). Ordinary joint fire never
+    # claims a kill and is not forced lethal here.
+    if data.get('intercept_type') == 'safe_intercept':
+        conservative = data.get('conservative_kill_loops')
+        if conservative is None:
+            return False, 'safe_timing_unknown', target
+        from .joint_combat import action_position
+        protected = set(data.get('protected_members') or ())
+        for member, command in actions.items():
+            unit = context.snapshot.allies.get(member)
+            if not unit.alive or unit.is_flying:
+                continue
+            point = action_position(context, member, command)[0]
+            middle = tuple((x + y) / 2. for x, y in zip(unit.position, point))
+            for position in (unit.position, middle, point):
+                entry = _entry(context, member, target, position)
+                if entry is None or entry <= conservative + 1.:
+                    if member in protected or member in shooter_actions \
+                            or member in spread_actions:
+                        return False, 'safe_window_violated', target
+    # ---- spread: every declared member, against one shared joint state ----
+    if spread_actions:
+        from .joint_combat import action_position, assess_joint
+        positions = {a: action_position(context, a, c)[0] for a, c in actions.items()
+                     if context.snapshot.allies[a].alive}
+        joint = assess_joint(context, actions)   # once; per-member reads below
+        for member, command in spread_actions.items():
+            unit = context.snapshot.allies.get(member)
+            if unit is None or not unit.alive:
+                return False, 'spread_member_dead', target
+            if actions.get(member) != command:
+                return False, 'spread_action_lost', target
+            if command not in context.legal_actions(member):
+                return False, 'spread_action_illegal', target
+            if memory is not None and memory.movement_blockage(
+                    context, member, command, joint_actions=actions,
+                    joint_positions=positions) >= .5:
+                return False, 'spread_route_blocked', target
+            if any(a != member and context.snapshot.allies[a].is_flying == unit.is_flying
+                   and distance(positions[member], point)
+                   < unit.radius + context.snapshot.allies[a].radius
+                   for a, point in positions.items()):
+                return False, 'spread_position_overlap', target
+            exchange = joint['team_exchange']['actors'].get(member)
+            if exchange and exchange['after']['amount'] >= unit.effective_health:
+                return False, 'spread_route_still_lethal', target
+    return True, 'bomber_contract_valid', target
+
+
 def final_valid(context, actions, actor, memory):
     """Validate whole plans after combination/repair, never prepaid fire.
 
@@ -345,6 +434,7 @@ def _spread_members_valid(context, actions, plan, memory):
     from .joint_combat import action_position, assess_joint
     positions = {a: action_position(context, a, c)[0] for a, c in actions.items()
                  if context.snapshot.allies[a].alive}
+    joint = assess_joint(context, actions)   # once; per-member reads below
     for member, command in plan['spread']:
         if actions.get(member) != command \
                 or not spread_valid(context, member, command, memory):
@@ -357,11 +447,9 @@ def _spread_members_valid(context, actions, plan, memory):
                and distance(positions[member], point) < unit.radius + context.snapshot.allies[a].radius
                for a, point in positions.items()):
             return False
-    if plan['spread']:
-        member = plan['spread'][0][0]
-        exchange = assess_joint(context, actions)['team_exchange']['actors'].get(member)
+        exchange = joint['team_exchange']['actors'].get(member)
         if exchange and exchange['after']['amount'] \
-                >= context.snapshot.allies[member].effective_health:
+                >= unit.effective_health:
             return False
     return True
 

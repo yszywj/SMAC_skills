@@ -151,7 +151,10 @@ def sustained_fire_actions(context, actor, memory=None):
             continue
         timing = next_fire_timing(context, actor, action, position=point,
                                   eligible_targets=retained)
-        delay_loops = max(0., timing['delay_h']) * max(context.H, 1)
+        # Unified postponement query (same target set, position and
+        # next_fire_timing semantics as the commit-side charge).
+        delay_loops = memory._fire_delay_postponement(context, actor, action) \
+            if memory is not None else max(0., timing['delay_h']) * max(context.H, 1)
         if timing['lost_cycle_opportunities'] > 1:
             continue                    # one postponed opportunity at most
         if timing['lost_cycle_opportunities'] > 0 and delay_loops > delay_budget + 1e-6:
@@ -419,7 +422,8 @@ def seed_actions(context, actions, memory):
             def burst_rank(action):
                 result = outcome(context, actor, action)
                 value = exchange_value(context, actor, result.position,
-                                       opportunity=result.opportunity)['net_hp'] if result.opportunity else 0.
+                                       opportunity=result.opportunity,
+                                       enemy_positions=result.enemy_positions)['net_hp'] if result.opportunity else 0.
                 semantic = context.decode(actor, action)
                 return (-value, semantic.kind == 'stop', action)
             chosen[actor] = min(allowed, key=burst_rank)

@@ -142,7 +142,8 @@ class Coordinator:
                                     n_agents) \
                 or validate_plans(entry.plans, context, entry.actions,
                                   self.evaluator.effects(context,
-                                                         entry.actions)):
+                                                         entry.actions),
+                                  memory):
             return None
         if self.config.get('common_combat', {}).get('joint_assessment_enabled', True):
             from .action_duties import assess
