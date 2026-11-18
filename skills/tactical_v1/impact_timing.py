@@ -61,46 +61,75 @@ def attack_impact_timing(context, actor, enemy_id):
 
 
 def joint_kill_time(context, members, enemy_id, remaining_hp=None):
-    """Cumulative kill time for one COMPLETE final action group.
+    """Cumulative kill assessment for one COMPLETE final action group.
 
-    Members are the actors whose FINAL actions actually attack ``enemy_id``.
-    Damage is accumulated in impact-lower-bound order; the kill time is the
-    readiness of the member whose cumulative known window damage first
-    reaches the target's remaining effective health. Only ONE shot per
-    member is counted (no assumed re-fire inside the window), members
-    without window damage contribute nothing, and any missing damage data
-    downgrades the result to unknown.
+    Returned concepts are strictly separated:
+      damage_sufficient        — known window-qualified fire (from the
+                                 members' FINAL actions, deduplicated) is
+                                 enough for the target's remaining EHP;
+      contributors             — the members that actually contributed;
+      kill_after_loops_lower   — earliest possible kill time (impact lower
+                                 bounds); NEVER a basis for a strong duty;
+      kill_after_loops_upper   — conservative completion time supported by
+                                 applicable data; currently always None
+                                 (no wind-up/projectile data exists), so no
+                                 caller may claim a proven-timely kill;
+      timing_status            — unknown | estimated_lower_bound |
+                                 insufficient_fire | unknown_damage |
+                                 invalid_target;
+      evidence                 — which catalog fields were used.
+
+    Members come from the final action list: alive, legal, pointing at the
+    same valid target, in range with a window shot. One shot per member;
+    no assumed re-fire inside the window.
     """
     enemy = context.snapshot.enemies.get(enemy_id)
     if enemy is None:
-        return {"kill_after_loops": None, "status": "invalid_target",
-                "members": tuple(members)}
+        return {"damage_sufficient": False, "contributors": (),
+                "kill_after_loops_lower": None, "kill_after_loops_upper": None,
+                "kill_after_loops": None, "timing_status": "invalid_target",
+                "evidence": "target_missing"}
     remaining = enemy.effective_health if remaining_hp is None \
         else max(0., float(remaining_hp))
     contributions = []
-    for actor in members:
+    for actor in dict.fromkeys(members):                      # dedup sources
+        unit = context.snapshot.allies.get(actor)
+        if unit is None or not unit.alive:
+            continue
         estimate = context.fire_estimate(actor, enemy_id)
         if not context.can_issue_attack(actor, enemy_id) \
                 or context.contact_status(actor, enemy_id) != "in_range" \
                 or estimate.window_shots < 1:
             continue                      # not an executable contribution
         if estimate.damage_lo is None:
-            return {"kill_after_loops": None, "status": "unknown_damage",
-                    "members": tuple(members)}
+            return {"damage_sufficient": False,
+                    "contributors": (), "kill_after_loops_lower": None,
+                    "kill_after_loops_upper": None, "kill_after_loops": None,
+                    "timing_status": "unknown_damage",
+                    "evidence": "window_shot_without_known_damage"}
         contributions.append((attack_impact_timing(context, actor, enemy_id)
                               .impact_after_loops_lower, estimate.damage_lo,
                               actor))
     contributions.sort()
-    cumulative, kill_loops = 0., None
+    cumulative, kill_lower = 0., None
     for lower, damage, actor in contributions:
         cumulative += max(0., damage)
-        kill_loops = lower
+        kill_lower = lower
         if cumulative >= remaining:
             break
     if cumulative < remaining:
-        return {"kill_after_loops": None, "status": "insufficient_fire",
-                "members": tuple(members), "cumulative": round(cumulative, 2)}
-    return {"kill_after_loops": kill_loops, "status": "estimated_lower_bound",
-            "members": tuple(members), "cumulative": round(cumulative, 2),
-            "semantics": "lower bound only; landing time unknown — not a "
-                         "guarantee that the kill happens before exposure"}
+        return {"damage_sufficient": False,
+                "contributors": tuple(a for _, _, a in contributions),
+                "kill_after_loops_lower": None, "kill_after_loops_upper": None,
+                "kill_after_loops": None, "timing_status": "insufficient_fire",
+                "cumulative": round(cumulative, 2),
+                "evidence": "window_fire_below_remaining_ehp"}
+    # kill_after_loops is DEFINED as the conservative completion time for
+    # strong-timing judgements: without an upper bound it must be None.
+    return {"damage_sufficient": True,
+            "contributors": tuple(a for _, _, a in contributions),
+            "kill_after_loops_lower": kill_lower, "kill_after_loops_upper": None,
+            "kill_after_loops": None, "timing_status": "estimated_lower_bound",
+            "evidence": "cooldown_lower_bounds;no_windup_or_projectile_data",
+            "semantics": "lower bound only: damage may land later; a strong "
+                         "timely-kill duty requires kill_after_loops_upper"}

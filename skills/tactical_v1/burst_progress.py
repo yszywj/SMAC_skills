@@ -444,7 +444,8 @@ class BurstProgress:
         result = outcome(context, actor, action)
         if result.opportunity > 0.:
             exchange = exchange_value(context, actor, result.position, remaining,
-                                      opportunity=result.opportunity)
+                                      opportunity=result.opportunity,
+                                      enemy_positions=result.enemy_positions)
             if exchange['known']:
                 return (exchange['useful_hp'] > exchange['counter_burst_hp']
                         and not exchange['endangered_peers']
@@ -558,7 +559,8 @@ class BurstProgress:
             if result.opportunity <= 0. or result.target_id not in context.snapshot.enemies:
                 continue
             exchange = exchange_value(context, actor, result.position, remaining,
-                                      opportunity=result.opportunity)
+                                      opportunity=result.opportunity,
+                                      enemy_positions=result.enemy_positions)
             if not exchange['known'] or exchange['useful_hp'] <= exchange['counter_burst_hp'] \
                     or exchange['endangered_peers']:
                 continue
@@ -596,7 +598,8 @@ class BurstProgress:
                 result = outcome(context, actor, action)
                 if result.opportunity > 0.:
                     exchange = exchange_value(context, actor, result.position, remaining,
-                                              opportunity=result.opportunity)
+                                              opportunity=result.opportunity,
+                                              enemy_positions=result.enemy_positions)
                     if exchange['counter_burst_hp'] >= exchange['useful_hp'] and exchange['counter_burst_hp'] > 0. \
                             or exchange['endangered_peers']:
                         continue
@@ -864,7 +867,8 @@ class BurstProgress:
                 continue
             result = outcome(context, actor, action)
             if result.opportunity > 0. and not exchange_value(context, actor, result.position,
-                    remaining, opportunity=result.opportunity, consumed=assignments)['worthwhile']:
+                    remaining, opportunity=result.opportunity, consumed=assignments,
+                    enemy_positions=result.enemy_positions)['worthwhile']:
                 continue  # An attractive endpoint cannot require a poor path-death trade.
             point = action_position(context, actor, action)
             gap = math.dist(point, region['position'])

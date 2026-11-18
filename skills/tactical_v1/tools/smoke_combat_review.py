@@ -8,6 +8,7 @@ and commit + short telemetry succeed. NO game, NO episode, NO win-rate or
 tactical-quality claim: passing this proves none of the combat logic.
 Optional local output goes to runs/tactical_combat_review/.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -18,6 +19,20 @@ if str(ROOT) not in sys.path:
 from skills.tactical_v1.skill_manager import SkillManager  # noqa: E402
 from skills.tactical_v1.tests.fixtures import (  # noqa: E402
     ally, enemy, scene, with_questions)
+
+
+def calibrate_baneling(state):
+    """Install the REAL calibration catalog contract for type id 9.
+
+    The generic fixture ships a fake baneling with an ordinary weapon; the
+    native profile requires exactly the contract fields below (empty
+    weapons, speed 2.5, attributes [3], armor 0, known). Using the contract
+    keeps burst.profile() calibrated instead of silently mismatching.
+    """
+    profile = json.loads((ROOT / "skills/tactical_v1/burst_native_profile.json")
+                         .read_text(encoding="utf8"))["catalog_contract"]
+    state["unit_type_profiles"]["9"] = dict(profile)
+    return state
 
 
 def legal_menu(payload):
@@ -43,44 +58,63 @@ def run_scene(manager, payload, label, failures):
 def main():
     failures = []
 
-    # Zerg: zerglings + hydralisks + banelings vs an approaching enemy
-    # baneling and hydralisk; two CONSECUTIVE snapshots so the new motion
-    # history and memory paths are exercised at least once.
-    zerg1 = scene(
-        [((10., 10.), "zergling"), ((10.5, 10.5), "zergling"),
-         ((11., 9.), "hydralisk"), ((11.5, 9.5), "hydralisk"),
-         ((12., 11.), "baneling"), ((12.5, 11.5), "baneling")],
-        enemies={"e0": enemy((6., 10.), "baneling", health=30., max_health=30.),
-                 "e1": enemy((5., 9.), "hydralisk")})
-    for actor, health in (("u4", 30.), ("u5", 30.)):
-        zerg1["allies"][actor].update(health=health, max_health=health)
-    zerg1 = with_questions(zerg1)
+    # Zerg: a REAL calibrated baneling with a legal contact attack whose
+    # explosion would cover two nearby ground enemies (positive exchange
+    # candidates -> trigger_assignments -> selective-commitment basis is
+    # actually executed), plus an approaching enemy baneling and hydralisk.
+    # Two consecutive snapshots exercise motion history and memory paths.
+    def zerg_allies(shift=(0., 0.)):
+        return [((10. + shift[0], 10. + shift[1]), "zergling"),
+                ((10.5 + shift[0], 10.5 + shift[1]), "zergling"),
+                ((11. + shift[0], 9. + shift[1]), "hydralisk"),
+                ((11.5 + shift[0], 9.5 + shift[1]), "hydralisk"),
+                ((12. + shift[0], 11. + shift[1]), "baneling"),
+                ((12.5 + shift[0], 11.5 + shift[1]), "baneling")]
+
+    def zerg_enemies(shift=(0., 0.)):
+        return {"e0": dict(enemy((6. + shift[0], 10. + shift[1]), "baneling",
+                                 health=30., max_health=30.), tag="tag-e0"),
+                "e1": dict(enemy((5. + shift[0], 9. + shift[1]), "hydralisk"),
+                           tag="tag-e1"),
+                "e2": dict(enemy((12.8 + shift[0], 11. + shift[1]), "hydralisk"),
+                           tag="tag-e2"),
+                "e3": dict(enemy((12.3 + shift[0], 11.9 + shift[1]), "hydralisk"),
+                           tag="tag-e3")}
+
+    zerg1 = scene(zerg_allies(), enemies=zerg_enemies())
+    for actor in ("u4", "u5"):
+        zerg1["allies"][actor].update(health=30., max_health=30., tag=f"tag-{actor}")
+    zerg1 = with_questions(calibrate_baneling(zerg1))
     manager = SkillManager()
     run_scene(manager, zerg1, "zerg#1", failures)
-    zerg2 = scene(
-        [((10.4, 10.4), "zergling"), ((10.9, 10.9), "zergling"),
-         ((11.2, 9.2), "hydralisk"), ((11.7, 9.7), "hydralisk"),
-         ((12.2, 11.2), "baneling"), ((12.7, 11.7), "baneling")],
-        enemies={"e0": enemy((7., 10.2), "baneling", health=30., max_health=30.),
-                 "e1": enemy((5.6, 9.1), "hydralisk")},
-        loop=zerg1["state"]["game_loop"] + zerg1["state"]["step_mul"],
-        episode=zerg1["state"]["episode"])
+    zerg2 = scene(zerg_allies((.4, .4)), enemies=zerg_enemies((1., .2)),
+                  loop=zerg1["state"]["game_loop"] + zerg1["state"]["step_mul"],
+                  episode=zerg1["state"]["episode"])
     for actor in ("u4", "u5"):
-        zerg2["allies"][actor].update(health=30., max_health=30.)
-    run_scene(manager, with_questions(zerg2), "zerg#2", failures)
+        zerg2["allies"][actor].update(health=30., max_health=30., tag=f"tag-{actor}")
+    zerg2 = with_questions(calibrate_baneling(zerg2))
+    run_scene(manager, zerg2, "zerg#2", failures)
+    # The calibrated profile must NOT report a catalog mismatch.
+    from skills.tactical_v1.context import Context, build_snapshot
+    from skills.tactical_v1.burst import profile as burst_profile
+    probe = Context(build_snapshot(zerg2, 99))
+    evidence = burst_profile(probe).evidence
+    print(f"zerg burst profile evidence: {evidence}")
+    if "mismatch" in evidence:
+        failures.append(f"zerg: burst profile catalog mismatch: {evidence}")
 
     # Terran: marines + marauder + medivac vs zerglings.
     terran = scene([((10., 10.), "marine"), ((10.5, 10.5), "marine"),
                     ((11., 9.5), "marauder"), ((12., 12.), "medivac")],
-                   enemies={"e0": enemy((6., 10.), "zergling"),
-                            "e1": enemy((5.5, 9.), "zergling")})
+                   enemies={"e0": dict(enemy((6., 10.), "zergling"), tag="tag-e0"),
+                            "e1": dict(enemy((5.5, 9.), "zergling"), tag="tag-e1")})
     run_scene(SkillManager(), with_questions(terran), "terran", failures)
 
     # Protoss: zealot + stalker + colossus vs zerglings/hydralisk.
     protoss = scene([((10., 10.), "zealot"), ((11., 9.5), "stalker"),
                      ((12., 12.), "colossus")],
-                    enemies={"e0": enemy((6., 10.), "zergling"),
-                             "e1": enemy((5., 9.), "hydralisk")})
+                    enemies={"e0": dict(enemy((6., 10.), "zergling"), tag="tag-e0"),
+                             "e1": dict(enemy((5., 9.), "hydralisk"), tag="tag-e1")})
     run_scene(SkillManager(), with_questions(protoss), "protoss", failures)
 
     if failures:

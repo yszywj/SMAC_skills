@@ -572,8 +572,18 @@ class Coordinator:
             getattr(context, '_burst_decline_log', {}))
         summary['burst_commit_reasons'] = dict(
             getattr(context, '_burst_commit_reasons', {}))
-        summary['joint_rescue_substitutions'] = dict(
-            getattr(context, '_joint_rescue_log', {}))
+        # CANDIDATE-level log above; SELECTED reasons come from the final
+        # plan's burst duties (last_execution records), so an evaluated-but-
+        # unselected candidate can never masquerade as an executed one.
+        summary['burst_selected_reasons'] = {
+            actor: row['last_execution'].get('reason') for actor, row in
+            getattr(getattr(memory, 'burst_progress', None), 'records', {}).items()
+            if row.get('last_execution')}
+        # Joint-rescue diagnostics come from the FINAL plan's assess rows
+        # only — never from a context-wide log written during the search.
+        summary['joint_rescue_substitutions'] = {
+            actor: row['joint_rescue'] for actor, row in
+            final.execution.get('actors', {}).items() if row.get('joint_rescue')}
         try:
             from .enemy_motion import summary as motion_summary
             summary['enemy_motion'] = motion_summary(context)

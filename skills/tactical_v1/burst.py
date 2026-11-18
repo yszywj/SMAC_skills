@@ -35,6 +35,14 @@ class BurstOutcome:
     target_id: Optional[str] = None
     trigger_loops: float = 0.
     uncertain: bool = True
+    # Unified space-time facts (repair 5): everything in this outcome is
+    # evaluated at ONE moment, evaluation_after_loops from now. enemy_positions
+    # holds the position each visible enemy was assumed to hold AT that
+    # moment (motion prediction where reliable, explicitly static otherwise);
+    # motion_used marks whether any prediction actually applied.
+    evaluation_after_loops: float = 0.
+    enemy_positions: Optional[Dict[str, Tuple[float, float]]] = None
+    motion_used: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,16 +97,20 @@ def _distance(a, b):
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def affects(profile, center, target) -> bool:
+def affects(profile, center, target, position=None) -> bool:
     """Native effect geometry; an unknown radius only establishes body contact.
 
-    The fallback has finite scope and is explicitly uncalibrated. It cannot
-    create numeric damage or make every visible Baneling an imminent threat.
+    ``position`` optionally overrides the target's location so coverage can
+    be judged at ONE shared evaluation moment instead of mixing current and
+    future positions. The fallback has finite scope and is explicitly
+    uncalibrated: it cannot create numeric damage or make every visible
+    Baneling an imminent threat.
     """
     if target.is_flying:
         return False
+    point = target.position if position is None else position
     radius = profile.blast_radius if profile.geometry_known else 0.
-    return _distance(center, target.position) <= radius + target.radius
+    return _distance(center, point) <= radius + target.radius
 
 
 def damage(context, target_id, *, enemy_target=True) -> Optional[float]:
@@ -157,11 +169,37 @@ def trigger_position(context, actor, enemy_id, horizon=None):
     return point, travel <= budget + 1e-6
 
 
-def area_damage(context, center):
+def _predicted_enemy_positions(context, at_loop):
+    """Enemy positions at ONE evaluation moment, with a static fallback.
+
+    Returns (map, motion_used): reliable ≤1H motion predictions where they
+    exist, otherwise the CURRENT (static) position — never a mixture of
+    different moments, and the fallback is distinguishable via
+    ``motion_used``. Pure query.
+    """
+    from .enemy_motion import predicted_position
+    positions, motion_used = {}, False
+    for enemy_id, enemy in context.snapshot.enemies.items():
+        future = predicted_position(context, enemy_id, at_loop)
+        if future is not None:
+            positions[enemy_id] = future
+            motion_used = True
+        else:
+            positions[enemy_id] = enemy.position
+    return positions, motion_used
+
+
+def area_damage(context, center, enemy_positions=None):
+    """Coverage at ONE moment: every enemy uses the supplied position map.
+
+    Omitted map = pure static T=0 query (current positions); callers inside
+    a prediction chain must pass the same-moment map rather than mixing.
+    """
     effect = profile(context)
+    positions = enemy_positions or {}
     return {enemy_id: damage(context, enemy_id)
             for enemy_id, enemy in context.snapshot.enemies.items()
-            if affects(effect, center, enemy)}
+            if affects(effect, center, enemy, positions.get(enemy_id))}
 
 
 def _exposure(context, actor, point, horizon=None, *, physical=False):
@@ -278,38 +316,47 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
             trigger = 'active_contact_opportunity'
             weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
             weight /= 1. + maximum_unknown
-    # Unify the burst point and the enemy-group prediction MOMENT (task 6):
-    # for an attack-trigger hypothesis, shift the trigger center with the
-    # target's short-window predicted position at the arrival loop. Death
-    # hypotheses keep the sampled death location (that is where WE are).
-    # This one entry point serves both candidate ranking and the final
-    # effects rebuild (context.burst_outcome), so neither can drift back to
-    # static positions while the other uses motion. Unreliable or missing
-    # motion keeps the static result — legal actions are never cancelled.
+    # Unified space-time evaluation (repair 5): ONE evaluation moment T in
+    # [0, H]. All enemies are placed at their predicted positions at T
+    # (static fallback where motion is unreliable). For an attack trigger
+    # the center follows the target's predicted position, but ONLY if the
+    # source can still reach that shifted center within its own speed
+    # budget by T — otherwise this window's active-trigger credit is
+    # dropped entirely. Reachability, arrival and coverage are therefore
+    # recomputed at the same moment; no "shift the center only" patching.
+    evaluation_after = max(min(arrival, float(context.H)), 0.) if weight else 0.
+    enemy_map, motion_used = _predicted_enemy_positions(
+        context, context.snapshot.game_loop + evaluation_after)
     if weight and trigger == 'active_contact_opportunity' \
             and target_id in context.snapshot.enemies:
-        from .enemy_motion import predicted_position
-        future = predicted_position(context, target_id,
-                                    context.snapshot.game_loop + max(arrival, 0.))
-        if future is not None:
-            enemy = context.snapshot.enemies[target_id]
-            center = (center[0] + future[0] - enemy.position[0],
-                      center[1] + future[1] - enemy.position[1])
-    potential = area_damage(context, center) if weight else {}
+        enemy = context.snapshot.enemies[target_id]
+        future = enemy_map[target_id]
+        shifted = (center[0] + future[0] - enemy.position[0],
+                   center[1] + future[1] - enemy.position[1])
+        budget = speed * evaluation_after / 16. if speed else 0.
+        if _distance(source.position, shifted) <= budget + 1e-6:
+            center = shifted
+        else:
+            trigger, weight = 'none', 0.   # not reachable at T: no credit
+    potential = area_damage(context, center, enemy_map) if weight else {}
     if trigger.startswith('death_') and potential:
         target_id = max(potential, key=lambda enemy_id: (
             (potential[enemy_id] or 0.) / max(context.snapshot.enemies[enemy_id].effective_health, 1.),
-            -_distance(center, context.snapshot.enemies[enemy_id].position), enemy_id))
+            -_distance(center, enemy_map.get(enemy_id,
+                                             context.snapshot.enemies[enemy_id].position)), enemy_id))
     return BurstOutcome(actor, trigger, center, weight, potential,
                         effect.geometry_known, effect.evidence, target_id,
                         arrival if weight else 0., trigger != 'active_contact_opportunity'
-                        or arrival > 1e-6)
+                        or arrival > 1e-6,
+                        evaluation_after_loops=evaluation_after,
+                        enemy_positions=dict(enemy_map) if weight else None,
+                        motion_used=motion_used and weight > 0.)
 
 
-def useful_area_value(context, center, remaining=None):
-    """Residual capped damage fractions for deterministic multi-source allocation."""
+def useful_area_value(context, center, remaining=None, enemy_positions=None):
+    """Residual capped damage fractions at ONE evaluation moment."""
     result = 0.
-    for enemy_id, amount in area_damage(context, center).items():
+    for enemy_id, amount in area_damage(context, center, enemy_positions).items():
         enemy = context.snapshot.enemies[enemy_id]
         health = enemy.effective_health if remaining is None else remaining.get(enemy_id, 0.)
         if amount is not None and health > 0:
@@ -318,17 +365,20 @@ def useful_area_value(context, center, remaining=None):
 
 
 def exchange_value(context, actor, center, remaining=None, *, opportunity=1.,
-                   consumed=(), positions=None):
+                   consumed=(), positions=None, enemy_positions=None):
     """Conservative HP exchange gate for a compulsory one-use commitment.
 
-    Unlike damage/current-HP utility, a nearly dead victim is not worth a
-    whole healthy source. This is a gate, not a replacement for final joint
-    scoring: marginal or unknown exchanges remain legal soft alternatives.
-    Enemy death effects are conditional costs, never observed damage.
+    ``enemy_positions`` carries the SAME-moment enemy position map used by
+    the outcome being evaluated; without it this is a pure static T=0
+    query (explicitly not part of a prediction chain). Collateral from
+    enemy death bursts is also measured at that shared moment. This is a
+    gate, not a replacement for final joint scoring: marginal or unknown
+    exchanges remain legal soft alternatives. Enemy death effects are
+    conditional costs, never observed damage.
     """
     source = context.snapshot.allies[actor]
     effect = profile(context)
-    potential = area_damage(context, center)
+    potential = area_damage(context, center, enemy_positions)
     useful, known, death_sources = 0., True, []
     for enemy_id, amount in potential.items():
         enemy = context.snapshot.enemies[enemy_id]
@@ -341,6 +391,7 @@ def exchange_value(context, actor, center, remaining=None, *, opportunity=1.,
             death_sources.append(enemy_id)
     collateral, endangered = 0., set()
     positions = positions or {}
+    shared = enemy_positions or {}
     for enemy_id in death_sources:
         enemy = context.snapshot.enemies[enemy_id]
         for peer, unit in context.snapshot.allies.items():
@@ -348,7 +399,7 @@ def exchange_value(context, actor, center, remaining=None, *, opportunity=1.,
                 continue
             point = positions.get(peer, unit.position)
             radius = effect.blast_radius_upper if effect.blast_radius_upper is not None else 0.
-            if _distance(point, enemy.position) > radius + unit.radius:
+            if _distance(point, shared.get(enemy_id, enemy.position)) > radius + unit.radius:
                 continue
             amount = damage(context, peer, enemy_target=False)
             if amount is None:
@@ -392,6 +443,11 @@ def _better_point_within_window(context, actor, exchange, remaining, margin):
     budget = speed * context.H / 16.
     threshold = exchange['net_hp'] + margin * max(exchange['source_cost_hp'], 1.)
     best, best_net = None, exchange['net_hp']
+    # Alternatives reachable within one window are compared at the SAME
+    # future moment (T=H) as their own evaluation, never against a mixture
+    # of current and predicted enemy positions.
+    horizon_map, _ = _predicted_enemy_positions(
+        context, context.snapshot.game_loop + max(context.H, 1))
     for move in sorted(context.move_destinations(actor)):
         point = context.predict_position(actor, move).position
         # Only actual legal move endpoints with a compatible trigger anchor;
@@ -401,7 +457,8 @@ def _better_point_within_window(context, actor, exchange, remaining, margin):
                        for enemy in context.snapshot.enemies.values())
         if not anchored or _distance(source.position, point) > budget + .1:
             continue
-        alternative = exchange_value(context, actor, point, remaining)
+        alternative = exchange_value(context, actor, point, remaining,
+                                     enemy_positions=horizon_map)
         if not alternative['known'] or alternative['net_hp'] <= best_net \
                 or alternative['net_hp'] <= threshold:
             continue
@@ -444,7 +501,6 @@ def trigger_assignments(context):
     commit_log = getattr(context, '_burst_commit_reasons', None)
     if commit_log is None:
         commit_log = context._burst_commit_reasons = {}
-    from .combat_exchange import danger_evidence
     progress = getattr(context, 'burst_progress', None)
     candidates = []
     for actor, cap in sorted(context.capabilities.items()):
@@ -464,7 +520,8 @@ def trigger_assignments(context):
             if actor in selected:
                 continue
             exchange = exchange_value(context, actor, result.position, remaining,
-                opportunity=result.opportunity, consumed=selected, positions=positions)
+                opportunity=result.opportunity, consumed=selected, positions=positions,
+                enemy_positions=result.enemy_positions)
             if not exchange['worthwhile']:
                 continue
             better = _better_point_within_window(context, actor, exchange,
@@ -504,21 +561,42 @@ def trigger_assignments(context):
 
 
 def _strong_commitment_basis(context, actor, result, progress):
-    """State-based reason a positive exchange MUST be cashed now, or None."""
+    """State-based reason a positive exchange MUST be cashed now, or None.
+
+    Tightened criteria (no label-level shortcuts):
+      * imminent death uses danger_evidence's IMMEDIATE flag AND a
+        supported incoming amount that plausibly removes the source's
+        remaining effective health — any damage or any threat alone is
+        not "dying now";
+      * deadline/cashout markers only: a plain last_failure (blocked
+        route, detour) never forces an explosion;
+      * a completing key exchange needs an immediate trigger (trigger_loops
+        ~ 0) AND more than one ready covering shot AND the covered value
+        to actually be team-level (multi-enemy coverage) — one nearby
+        shooting opportunity alone proves nothing.
+    Returns None when no basis holds; the attack then stays a normal
+    positive candidate and is never forced.
+    """
+    from .combat_exchange import danger_evidence
     unit = context.snapshot.allies[actor]
-    if danger_evidence(context, actor, horizon_h=1.)['immediate']:
-        return {'reason': 'evidence_backed_imminent_death'}
+    evidence = danger_evidence(context, actor, horizon_h=1.)
+    if evidence['immediate'] and not evidence['unknown'] \
+            and evidence['supported_amount'] >= .5 * max(unit.effective_health, 1.):
+        return {'reason': 'evidence_backed_imminent_death',
+                'supported_amount': round(evidence['supported_amount'], 2),
+                'effective_health': round(unit.effective_health, 2)}
     record = progress.records.get(actor) if progress is not None else None
     if record is not None and (record.get('deadline_expired')
-                               or record.get('cashout_reason')
-                               or record.get('last_failure')):
+                               or record.get('cashout_reason')):
         return {'reason': 'approach_deadline_or_cashout_reached',
-                'marker': record.get('cashout_reason') or record.get('last_failure')}
+                'marker': record.get('cashout_reason') or 'deadline_expired'}
     if result.trigger_loops <= 1e-6:
         ready, arriving = cover_window(context, actor, result.target_id or '')
-        if ready > 0:
+        covered = sum(1 for amount in result.damage_potential.values()
+                      if amount and amount > 0.)
+        if ready > 1 and covered > 1:
             return {'reason': 'key_exchange_completing_now_with_cover',
-                    'ready_cover': ready}
+                    'ready_cover': ready, 'covered_enemies': covered}
     return None
 
 

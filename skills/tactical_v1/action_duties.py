@@ -122,14 +122,16 @@ def sustained_fire_actions(context, actor, memory=None):
     if not targets:
         return ()
     attacks = tuple(context.attack_action(actor, e) for e in targets)
-    # Bounded "delay one shot" budget: with budget left, moves with a
-    # CONCRETE benefit (supported-fire relief, explosion-coverage loss
-    # reduction) may postpone the next shot by up to the budget and still
-    # satisfy this fire duty. "Neater formation" or "more spread out" alone
-    # is never a benefit here.
+    # Bounded "delay one shot" budget in LOOPS: zero-delay repositioning
+    # keeps the legacy safety/support criteria; moves that POSTPONE the next
+    # shot need a concrete damage reduction (supported-fire relief or
+    # explosion-coverage loss) AND must fit the remaining budget. "Neater
+    # formation" or "closer to a wounded teammate" is never enough for a
+    # costly delay. At most ONE expected attack opportunity may be lost,
+    # and the loss stays priced in the full-plan scoring.
     delay_budget = memory.fire_delay_available(context, actor) \
         if memory is not None else 0.
-    if unit.weapon_cooldown_loops <= context.H and delay_budget <= 0.:
+    if unit.weapon_cooldown_loops <= context.H and delay_budget <= 1e-9:
         return attacks
     before = danger_evidence(context, actor, horizon_h=1.)
     peers = [u for a, u in context.snapshot.allies.items() if a != actor and u.alive
@@ -149,7 +151,10 @@ def sustained_fire_actions(context, actor, memory=None):
             continue
         timing = next_fire_timing(context, actor, action, position=point,
                                   eligible_targets=retained)
-        if timing['delay_h'] > delay_budget or timing['lost_cycle_opportunities'] > 0:
+        delay_loops = max(0., timing['delay_h']) * max(context.H, 1)
+        if timing['lost_cycle_opportunities'] > 1:
+            continue                    # one postponed opportunity at most
+        if timing['lost_cycle_opportunities'] > 0 and delay_loops > delay_budget + 1e-6:
             continue
         # A cooldown move must not widen ORDINARY enemy weapon coverage
         # unless a teammate can actually deliver window fire on the new
@@ -171,8 +176,14 @@ def sustained_fire_actions(context, actor, memory=None):
             explosion_loss(context, actor, point) < origin_blast_loss
         closes_support = any(distance(point, u.position) + .25 < distance(unit.position, u.position)
                              for u in peers)
-        if relief or blast_relief or closes_support:
-            moves.append(action)
+        if delay_loops <= 1e-9:
+            # Zero-delay repositioning: legacy safety/support criteria.
+            if relief or blast_relief or closes_support:
+                moves.append(action)
+        else:
+            # Costly delay: concrete damage reduction ONLY, within budget.
+            if (relief or blast_relief) and delay_loops <= delay_budget + 1e-6:
+                moves.append(action)
     return attacks + tuple(moves)
 
 
@@ -284,11 +295,22 @@ def joint_rescue_substitution(context, actions, actor, memory):
         return None
     from .impact_timing import joint_kill_time
     kill = joint_kill_time(context, members, target)
-    if kill['kill_after_loops'] is None:
-        return None
-    return {'target': target, 'members': tuple(sorted(members)),
-            'kill_status': kill['status'],
-            'kill_after_loops': kill['kill_after_loops']}
+    # Strong exemption requires BOTH: sufficient executable fire AND a
+    # conservative completion time (upper bound). Today the upper bound is
+    # always unknown (no wind-up/projectile data), so the strong rescue
+    # exemption is not granted; the plain joint attack candidate stays in
+    # the comparison. Pre-kill damage, the target's death effects and the
+    # actor's other threats all remain priced by the evaluator.
+    if not kill['damage_sufficient'] or kill['kill_after_loops_upper'] is None:
+        return {'substituted': False, 'target': target,
+                'members': kill['contributors'],
+                'timing_status': kill['timing_status'],
+                'damage_sufficient': kill['damage_sufficient'],
+                'reason': 'timing_unknown_no_strong_exemption'}
+    return {'substituted': True, 'target': target,
+            'members': kill['contributors'],
+            'timing_status': kill['timing_status'],
+            'kill_after_loops_upper': kill['kill_after_loops_upper']}
 
 
 def assess(context, actions, memory):
@@ -306,9 +328,6 @@ def assess(context, actions, memory):
     counts = dict.fromkeys(PRIORITIES, 0)
     rows = {}
     joint = None
-    joint_rescue_log = getattr(context, '_joint_rescue_log', None)
-    if joint_rescue_log is None:
-        joint_rescue_log = context._joint_rescue_log = {}
     burst_allowed = memory.burst_progress.joint_allowed(context, actions)
     for actor, action in actions.items():
         duty = actor_duty(context, actor, memory)
@@ -338,20 +357,22 @@ def assess(context, actions, memory):
             if exchange and exchange['after']['amount'] >= context.snapshot.allies[actor].effective_health:
                 satisfied = False
                 branch_reason = 'joint_route_still_lethal_compare_exchange'
+        substitution = None
         if not satisfied and duty['required'] and duty['kind'] == 'rescue':
             # Complete-plan alternative: a final joint kill of the actor's
             # actual threatening enemy satisfies the rescue duty without
-            # withdrawal. The plain retreat options stay available; both
-            # branches compete at the same duty level through scoring.
+            # withdrawal — but ONLY with a conservative completion time
+            # (see joint_rescue_substitution). The plain retreat options
+            # stay available; both branches compete at the same duty level.
             substitution = joint_rescue_substitution(context, actions, actor, memory)
-            if substitution is not None:
+            if substitution is not None and substitution.get('substituted'):
                 satisfied = True
                 branch_reason = 'joint_kill_rescue_substitution'
-                joint_rescue_log.setdefault(actor, substitution)
         if not satisfied:
             counts[duty['kind'] or 'burst'] += 1
         rows[actor] = {**duty, 'selected_action': action, 'satisfied': satisfied,
-                       'branch_reason': branch_reason}
+                       'branch_reason': branch_reason,
+                       **({'joint_rescue': substitution} if substitution else {})}
     result = {'priority': tuple(counts[k] for k in PRIORITIES),
               'violations': counts, 'actors': rows,
               'semantics': 'survivable rescue, worthwhile burst, continuous fire, coordinated entry; then utility'}

@@ -230,10 +230,10 @@ def intercept_plan(context, memory=None, config=None):
         loss_plan = bool(loss_control and exposed and shooters and remaining <= 0)
         plan_type = ('safe_intercept' if safe
                      else 'loss_control_intercept' if loss_plan else None)
-        # Failed/late attempts without exposure do not reserve shooters or
-        # create hard attack duties.
-        if plan_type is None:
-            shooters = []
+        # Shooters stay in the plan row in ALL cases: without proven timing
+        # (or before anyone is exposed) they are still ordinary joint-fire
+        # CANDIDATES for focus_fire — they simply receive no hard duty,
+        # because actor_intercept_duty only binds safe_intercept plans.
         used.update(a for a, _, _ in shooters)
         spread = []
         if plan_type != 'safe_intercept':
@@ -257,7 +257,7 @@ def intercept_plan(context, memory=None, config=None):
             plans.append({**row, 'shooters': shooters, 'spread': spread,
                           'safe': safe, 'type': plan_type or 'spread_only',
                           'kill_loops': kill_loops,
-                          'kill_time_status': kill['status'],
+                          'kill_time_status': kill['timing_status'],
                           'conservative_kill_loops': conservative_kill,
                           'already_exposed': [v['actor'] for v in exposed],
                           'protected_members': [v['actor'] for v in protected],
@@ -270,14 +270,21 @@ def intercept_plan(context, memory=None, config=None):
 
 
 def actor_intercept_duty(context, actor, memory=None, config=None):
+    """Only SAFE interceptions become hard duties.
+
+    loss_control_intercept and spread-only plans stay COMPETING atomic
+    candidates: because the final ranking compares duty-violation counts
+    BEFORE joint_score, granting them required=True here would lock an
+    unproven plan ahead of the comparison. Their spread members with real
+    emergency evidence are picked up by the ordinary rescue path instead.
+    """
     for plan in intercept_plan(context, memory, config):
-        choices = [(a, action,
-                    'safe_intercept_window' if plan['safe'] else 'loss_control_intercept')
-                   for a, action, _ in plan['shooters']]
-        choices += [(a, action, 'spread_from_enemy_burst_cover') for a, action in plan['spread']]
-        for member, action, reason in choices:
+        if not plan.get('safe'):
+            continue
+        for member, action, _ in plan['shooters']:
             if member == actor:
-                return {'required': True, 'actions': (action,), 'kind': 'intercept', 'reason': reason}
+                return {'required': True, 'actions': (action,),
+                        'kind': 'intercept', 'reason': 'safe_intercept_window'}
     guard = entry_guard_actions(context, actor, memory)
     if guard:
         return {'required': True, 'actions': guard, 'kind': 'intercept',
@@ -286,14 +293,17 @@ def actor_intercept_duty(context, actor, memory=None, config=None):
 
 
 def final_valid(context, actions, actor, memory):
-    """Validate by plan type after combination/repair; never prepaid fire.
+    """Validate whole plans after combination/repair, never prepaid fire.
 
-    safe_intercept: protected members must stay unexposed before the
-    (conservatively timed) kill. loss_control_intercept: the final member
-    set, their window fire and the spread positions must still hold, and
-    the exchange cost (including the bomber's death explosion, priced by
-    the evaluator) stays in the comparison — already-exposed members are
-    NOT required to be unexposed, and their losses are not zeroed.
+    Group check for the actor's plan: EVERY required shooter still executes
+    its attack with window fire and the cumulative known damage still meets
+    the target's remaining health; EVERY spread member still executes a
+    valid spread move without new overlaps or unacceptable joint risk.
+    safe_intercept additionally requires protected members to stay outside
+    the (conservatively timed) kill window — using the same conservative
+    kill time the plan was built with, never the legacy cooldown value.
+    Killing the bomber never zeroes its death explosion; that cost stays in
+    the evaluator for every branch compared here.
     """
     for plan in intercept_plan(context, memory):
         if any(a == actor for a, _, _ in plan['shooters']):
@@ -306,6 +316,9 @@ def final_valid(context, actions, actor, memory):
             if damage < context.snapshot.enemies[plan['enemy']].effective_health:
                 return False
             if plan['type'] == 'safe_intercept':
+                conservative = plan.get('conservative_kill_loops')
+                if conservative is None:
+                    return False        # no proven timing: not a safe plan
                 from .joint_combat import action_position
                 for member, command in actions.items():
                     unit = context.snapshot.allies[member]
@@ -315,30 +328,42 @@ def final_valid(context, actions, actor, memory):
                     middle = tuple((x + y) / 2. for x, y in zip(unit.position, point))
                     for position in (unit.position, middle, point):
                         entry = _entry(context, member, plan['enemy'], position)
-                        if entry is None or entry <= plan['kill_loops'] + 1.:
+                        if entry is None or entry <= conservative + 1.:
                             return False
                 return plan['safe']
-            # loss_control: group fire and final positions hold; exposure of
-            # already-exposed members remains priced, not forbidden.
-            return plan['type'] == 'loss_control_intercept'
+            # Non-safe plans validated through group integrity only; their
+            # costs (death burst, residual exposure) are priced by the
+            # evaluator for every compared branch.
+            return _spread_members_valid(context, actions, plan, memory)
         if any(a == actor for a, _ in plan['spread']):
-            command = actions.get(actor)
-            if not spread_valid(context, actor, command, memory):
-                return False
-            from .joint_combat import action_position, assess_joint
-            positions = {a: action_position(context, a, c)[0] for a, c in actions.items()
-                         if context.snapshot.allies[a].alive}
-            if memory is not None and memory.movement_blockage(context, actor, command,
-                    joint_actions=actions, joint_positions=positions) >= .5:
-                return False
-            unit = context.snapshot.allies[actor]
-            if any(a != actor and context.snapshot.allies[a].is_flying == unit.is_flying
-                   and distance(positions[actor], point) < unit.radius + context.snapshot.allies[a].radius
-                   for a, point in positions.items()):
-                return False
-            exchange = assess_joint(context, actions)['team_exchange']['actors'].get(actor)
-            return not exchange or exchange['after']['amount'] < unit.effective_health
+            return _spread_members_valid(context, actions, plan, memory)
     return actions.get(actor) in entry_guard_actions(context, actor, memory)
+
+
+def _spread_members_valid(context, actions, plan, memory):
+    """All of one plan's spread moves must still hold after combination."""
+    from .joint_combat import action_position, assess_joint
+    positions = {a: action_position(context, a, c)[0] for a, c in actions.items()
+                 if context.snapshot.allies[a].alive}
+    for member, command in plan['spread']:
+        if actions.get(member) != command \
+                or not spread_valid(context, member, command, memory):
+            return False
+        unit = context.snapshot.allies[member]
+        if memory is not None and memory.movement_blockage(context, member, command,
+                joint_actions=actions, joint_positions=positions) >= .5:
+            return False
+        if any(a != member and context.snapshot.allies[a].is_flying == unit.is_flying
+               and distance(positions[member], point) < unit.radius + context.snapshot.allies[a].radius
+               for a, point in positions.items()):
+            return False
+    if plan['spread']:
+        member = plan['spread'][0][0]
+        exchange = assess_joint(context, actions)['team_exchange']['actors'].get(member)
+        if exchange and exchange['after']['amount'] \
+                >= context.snapshot.allies[member].effective_health:
+            return False
+    return True
 
 
 def summary(context, memory=None, limit=3):
