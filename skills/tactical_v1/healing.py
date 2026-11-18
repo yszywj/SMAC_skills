@@ -115,7 +115,10 @@ def rescue_priority(context, patient):
         return 0.
     unit = context.snapshot.allies[patient]
     need = (unit.max_health - unit.health) / max(unit.max_health, 1.)
-    return need * (1. + capability_retention(context, patient))
+    from .unit_value_view import preservation_value
+    weight = getattr(context, 'unit_value_parameters', {}).get('heal_value_weight', .1)
+    return need * (1. + capability_retention(context, patient)
+                   + weight * preservation_value(context, patient))
 
 
 def healing_opportunity(context, healer, patient, positions=None):

@@ -242,6 +242,10 @@ class CombatProgress:
             'overdue': False}
 
     def _survival_emergency(self, context, actor, memory):
+        if context.capabilities[actor].key == 'zergling':
+            from .action_duties import zergling_blast_exposure
+            amount, _ = zergling_blast_exposure(context, actor)
+            return amount is not None and amount > 0.
         if self.joint_enabled:
             # combat_emergency also signals newly encountered threats for task
             # interruption. That alone cannot erase the next-shot obligation.
@@ -251,12 +255,20 @@ class CombatProgress:
         return memory.combat_emergency(context, actor) or imminent_exchange_danger(context, actor)
 
     def _safety_override(self, context, actor, action, memory):
-        if self._survival_emergency(context, actor, memory):
+        zergling = context.capabilities[actor].key == 'zergling'
+        if zergling:
+            from .action_duties import zergling_blast_exposure
+            from .joint_combat import action_position
+            before, sources = zergling_blast_exposure(context, actor)
+            after, later = zergling_blast_exposure(context, actor, action_position(context, actor, action)[0])
+            if before is not None and after is not None and after < before and not set(later) - set(sources):
+                return True
+        elif self._survival_emergency(context, actor, memory):
             if not self.joint_enabled or not attack_requires_approach(context, actor, action) \
                     or attack_approach_relief(context, actor, action,
                         pressure_memory_enabled=self.pressure_memory_enabled):
                 return True
-        if not self.joint_enabled:
+        if not self.joint_enabled and not zergling:
             unit = context.snapshot.allies[actor]
             point = context.predict_position(actor, action).position
             before = exposure_at(context, actor, unit.position)

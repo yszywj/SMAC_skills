@@ -9,7 +9,27 @@ from .context import distance
 from .joint_combat import action_position
 
 
-PRIORITIES = ('rescue', 'burst', 'fire', 'entry')
+PRIORITIES = ('rescue', 'intercept', 'burst', 'fire', 'entry')
+
+
+def zergling_blast_exposure(context, actor, position=None):
+    """Known one-window explosion exposure, separate from ordinary gunfire.
+
+    Zerglings keep contact through ordinary injury. Only a calibrated blast
+    can justify their emergency departure; unknown effects do not establish
+    a safe escape. The original route checks still price ordinary fire.
+    """
+    unit = context.snapshot.allies[actor]
+    point = unit.position if position is None else position
+    sources = tuple(context.forecast_risk(actor, point, horizon=context.H).effect_weapon_near)
+    if not sources:
+        return 0., sources
+    if not context.burst_profile().geometry_known:
+        return None, sources
+    amounts = [context.enemy_attack_damage(enemy, actor) for enemy in sources]
+    if any(amount is None for amount in amounts):
+        return None, sources
+    return sum(max(0., amount) for amount in amounts), sources
 
 
 def rescue_actions(context, actor, memory=None):
@@ -28,8 +48,13 @@ def rescue_actions(context, actor, memory=None):
     if unit is None or not unit.alive or cap is None or cap.healer or cap.suicide_attack:
         cache[key] = ()
         return ()
+    zergling = cap.key == 'zergling'
+    blast_before, _ = zergling_blast_exposure(context, actor) if zergling else (0., ())
+    if zergling and (blast_before is None or blast_before <= 0.):
+        cache[key] = ()
+        return ()
     before = danger_evidence(context, actor, horizon_h=2.)
-    if not before['immediate']:
+    if not zergling and not before['immediate']:
         cache[key] = ()
         return ()
     origin_effects = set(context.forecast_risk(actor, unit.position).effect_weapon_near)
@@ -45,6 +70,12 @@ def rescue_actions(context, actor, memory=None):
         mid_effects = set(context.forecast_risk(actor, midpoint).effect_weapon_near)
         if (effects | mid_effects) - origin_effects:
             continue
+        if zergling:
+            blast_after, _ = zergling_blast_exposure(context, actor, point)
+            blast_middle, _ = zergling_blast_exposure(context, actor, midpoint)
+            if blast_after is None or blast_middle is None \
+                    or blast_after >= blast_before or blast_middle > blast_before:
+                continue  # ordinary pressure relief alone cannot pull a ling out
         after = danger_evidence(context, actor, point, horizon_h=2.)
         middle = danger_evidence(context, actor, midpoint, horizon_h=1.)
         # A relative improvement is not a rescue. Both the traversed route
@@ -105,6 +136,14 @@ def sustained_fire_actions(context, actor, memory=None):
                                   eligible_targets=retained)
         if timing['delay_h'] > 1e-6 or timing['lost_cycle_opportunities'] > 0:
             continue
+        # A cooldown move must not widen ORDINARY enemy weapon coverage
+        # unless a teammate can actually deliver window fire on the new
+        # threat (the lone-advancing-shooter failure). The same standard is
+        # applied to an out-of-range ATTACK's implied approach point by the
+        # guard's point-based interface.
+        from .deployment import unsupported_cooldown_advance
+        if unsupported_cooldown_advance(context, actor, point)['blocked']:
+            continue
         after = danger_evidence(context, actor, point, horizon_h=1.)
         midway = danger_evidence(context, actor, middle, horizon_h=1.)
         if max(after['supported_amount'], midway['supported_amount']) > before['supported_amount'] + .1:
@@ -155,16 +194,34 @@ def actor_duty(context, actor, memory):
                           'reason': 'survivable_rescue_or_threat_finish' if finishes
                                     else 'lethal_pressure_with_survivable_route'}
             else:
-                fire = sustained_fire_actions(context, actor, memory)
-                if fire:
-                    result = {'required': True, 'actions': fire, 'kind': 'fire',
-                              'reason': 'current_executable_shot' if unit.weapon_cooldown_loops <= context.H
-                                        else 'preserve_contact_through_cooldown'}
+                # Safe interception of an approaching enemy bomber precedes
+                # ordinary sustained fire: a window-qualified kill before the
+                # bomber first covers a victim prevents a multi-unit loss
+                # that one more volley of ordinary output cannot buy back.
+                # The duty set is rebuilt from this snapshot's facts only, so
+                # it releases itself when the window closes. Spread moves
+                # here are exactly the bounded override of the ready-weapon
+                # fire constraint: only threatened members move, and each
+                # single explosion is not lethal on its own.
+                from .intercept import actor_intercept_duty
+                intercept = actor_intercept_duty(context, actor, memory)
+                if intercept["required"]:
+                    result = intercept
                 else:
-                    progress = getattr(memory, 'contact_progress', None)
-                    if progress is not None:
-                        result = dict(progress.execution(context, actor, memory))
-                        result['kind'] = 'entry'
+                    fire = sustained_fire_actions(context, actor, memory)
+                    if fire:
+                        result = {'required': True, 'actions': fire, 'kind': 'fire',
+                                  'reason': 'current_executable_shot' if unit.weapon_cooldown_loops <= context.H
+                                            else 'preserve_contact_through_cooldown'}
+                    else:
+                        from .deployment import deployment_duty
+                        deployment = deployment_duty(context, actor, memory)
+                        progress = getattr(memory, 'contact_progress', None)
+                        if deployment is not None:
+                            result = deployment
+                        elif progress is not None:
+                            result = dict(progress.execution(context, actor, memory))
+                            result['kind'] = 'entry'
     result['actions'] = tuple(a for a in result.get('actions', ()) if a in context.legal_actions(actor))
     result['required'] = bool(result.get('required') and result['actions'])
     cache[key] = result
@@ -186,10 +243,23 @@ def assess(context, actions, memory):
     counts = dict.fromkeys(PRIORITIES, 0)
     rows = {}
     joint = None
+    burst_allowed = memory.burst_progress.joint_allowed(context, actions)
     for actor, action in actions.items():
         duty = actor_duty(context, actor, memory)
         satisfied = not duty['required'] or action in duty['actions']
         branch_reason = None
+        if actor in burst_allowed and burst_allowed[actor]:
+            valid = burst_allowed[actor]
+            if action not in valid:
+                satisfied = False
+                branch_reason = 'joint_burst_route_or_residual_invalid'
+            elif not any(a in valid for a in duty['actions']):
+                satisfied = True  # original forced target lost its marginal value
+        if satisfied and duty['required'] and duty['kind'] == 'intercept':
+            from .intercept import final_valid
+            satisfied = final_valid(context, actions, actor, memory)
+            if not satisfied:
+                branch_reason = 'interception_or_spread_invalid_after_combination'
         if satisfied and duty['required'] and duty['kind'] == 'rescue' \
                 and context.decode(actor, action).kind == 'move':
             from .joint_combat import assess_joint
@@ -203,7 +273,7 @@ def assess(context, actions, memory):
                 satisfied = False
                 branch_reason = 'joint_route_still_lethal_compare_exchange'
         if not satisfied:
-            counts[duty['kind']] += 1
+            counts[duty['kind'] or 'burst'] += 1
         rows[actor] = {**duty, 'selected_action': action, 'satisfied': satisfied,
                        'branch_reason': branch_reason}
     result = {'priority': tuple(counts[k] for k in PRIORITIES),
@@ -222,8 +292,10 @@ def seed_actions(context, actions, memory):
     """
     chosen = dict(actions)
     duties = {a: actor_duty(context, a, memory) for a in actions}
+    from .unit_value_view import preservation_value
     ordered = sorted(actions, key=lambda a: (
-        PRIORITIES.index(duties[a]['kind']) if duties[a]['required'] else len(PRIORITIES), a))
+        PRIORITIES.index(duties[a]['kind']) if duties[a]['required'] else len(PRIORITIES),
+        -preservation_value(context, a), a))
     for actor in ordered:
         duty = duties[actor]
         if not duty['required'] or chosen[actor] in duty['actions']:
@@ -242,4 +314,16 @@ def seed_actions(context, actions, memory):
                 joint_actions=trial, joint_positions={**positions, actor: point}) if memory is not None else 0.
             return blockage >= .5, overlaps, duty['actions'].index(action)
         chosen[actor] = min(duty['actions'], key=route_rank)
+    # Repair residual conflicts using the very same branch-local check.
+    for actor in sorted(chosen):
+        allowed = memory.burst_progress.joint_allowed(context, chosen).get(actor, ())
+        if allowed and chosen[actor] not in allowed:
+            from .burst import outcome, exchange_value
+            def burst_rank(action):
+                result = outcome(context, actor, action)
+                value = exchange_value(context, actor, result.position,
+                                       opportunity=result.opportunity)['net_hp'] if result.opportunity else 0.
+                semantic = context.decode(actor, action)
+                return (-value, semantic.kind == 'stop', action)
+            chosen[actor] = min(allowed, key=burst_rank)
     return chosen

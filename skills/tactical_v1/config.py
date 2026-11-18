@@ -22,7 +22,7 @@ def _float_spec(lo, hi):  return (float, lo, hi)
 
 
 def _str_spec(options):
-    return ("str", options)
+    return (str, tuple(options), None)
 
 
 # schema: section -> {key: (type, lo/min, hi/max or options)}
@@ -165,6 +165,28 @@ _SCHEMA = {
         "self_cost": _float_spec(0.0, 5.0),
         "lonely_enemy_exception": _bool_spec(),
     },
+    # Legacy pure-evaluator weights reused through unit_value_view; manual
+    # engineering priors, bounded by the legacy parameter surface.
+    "unit_value": {
+        "enabled": _bool_spec(),
+        "mode": _str_spec(("off", "basic", "contextual")),
+        "spatial_context": _bool_spec(),
+        "w_matchup": _float_spec(0.0, 1.0),
+        "w_support": _float_spec(0.0, 1.0),
+        "w_scarcity": _float_spec(0.0, 1.0),
+        "scale": _float_spec(0.1, 10.0),
+        "focus_value_weight": _float_spec(0.0, 0.5),
+        "focus_switch_margin": _float_spec(0.0, 1.0),
+        "retreat_value_margin": _float_spec(0.0, 0.2),
+        "retreat_threshold_upper_bound": _float_spec(0.0, 1.0),
+        "heal_value_weight": _float_spec(0.0, 0.5),
+    },
+    "intercept": {
+        "enabled": _bool_spec(),
+        # Relative margin required before deferring a currently positive
+        # one-use exchange for a strictly better reachable point.
+        "burst_defer_margin": _float_spec(0.0, 5.0),
+    },
     "telemetry": {"top_k_candidates": _int_spec(1, 20)},
 }
 _BOOL_KEYS = {"_fingerprint"}
@@ -177,8 +199,8 @@ def _check(value, spec, path):
         if not isinstance(value, bool):
             raise ConfigError(f"{path} must be a boolean, got {value!r}")
         return
-    if kind == "str":
-        if value not in lo:
+    if kind is str:
+        if not isinstance(value, str) or value not in lo:
             raise ConfigError(f"{path} must be one of {sorted(lo)}")
         return
     if isinstance(value, bool) or not isinstance(value, kind):

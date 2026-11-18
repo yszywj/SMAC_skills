@@ -59,6 +59,14 @@ class BurstEngageSkill:
             instance = memory.instance_for(self.name, actor)
             progress = getattr(context, 'burst_progress', None)
             execution = progress.execution(context, actor) if progress is not None else None
+            if execution and execution['required'] and execution.get('target') is None:
+                for action in execution['actions']:
+                    plans.append(make_plan(
+                        self.name, [actor], 'support', {actor: action}, [],
+                        ResourceClaims(controls=(actor,), space=(space_claim(context, actor, action),)),
+                        Commitment('supporting', 0, max_loops=context.H), {},
+                        context.snapshot.snapshot_id, fingerprint, provider=self.name,
+                        goal_kind='area', rationale=execution['reason']))
             allow_wait = progress is not None and progress.wait_available(context, actor)
             options = candidate_actions(context, actor, allow_wait=allow_wait,
                                         weights=self.config.get('weights'))

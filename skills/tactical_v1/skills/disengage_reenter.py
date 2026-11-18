@@ -40,6 +40,8 @@ class DisengageReenterSkill:
         self.recovery_enabled = config.get('common_combat', {}).get('mechanism_recovery_enabled', True)
 
     def _recovery_reason(self, context, actor, remaining=None):
+        if context.capabilities[actor].key == 'zergling':
+            return None  # healing/regeneration can accompany renewed contact
         from ..healing import potential_healing_services
         from ..recovery import recovery_opportunity
         services = potential_healing_services(context)
@@ -91,6 +93,8 @@ class DisengageReenterSkill:
         capability = context.capabilities[actor]
         if capability.suicide_attack or capability.healer:
             return False            # S3 / S2 replace survival value
+        if capability.key == 'zergling':
+            return False  # one-window blast escapes are emitted directly, never a new retreat cycle
         if self.joint_enabled:
             return self._escape_evidence(context, actor)['urgent'] \
                 and not self._protect_shot(context, actor)
@@ -133,12 +137,20 @@ class DisengageReenterSkill:
         return {"kind": "range_band", "target": target, "r_min": 0., "r_max": reach}
 
     def _escape_evidence(self, context, actor):
-        return escape_urgency(context, actor, critical_fraction=self.critical,
+        evidence = escape_urgency(context, actor, critical_fraction=self.critical,
             min_threats=self.risk_threshold,
             pressure_memory_enabled=self.pressure_memory_enabled)
+        if context.capabilities[actor].key == 'zergling':
+            from ..action_duties import zergling_blast_exposure
+            amount, _ = zergling_blast_exposure(context, actor)
+            evidence = {**evidence, 'urgent': amount is not None and amount > 0.,
+                        'immediate': amount is not None and amount > 0.}
+        return evidence
 
     def _severe(self, context: Context, actor: str) -> bool:
         unit = context.snapshot.allies[actor]
+        if context.capabilities[actor].key == 'zergling':
+            return self._escape_evidence(context, actor)['immediate']
         if self.joint_enabled:
             return self._escape_evidence(context, actor)['immediate']
         return imminent_exchange_danger(context, actor,
@@ -163,6 +175,8 @@ class DisengageReenterSkill:
             else h_loops(context, self.total_max_h)
         if loop - instance.start_loop >= total_max:
             return None             # total timeout: terminate, do not restart
+        if context.capabilities[actor].key == 'zergling':
+            return REENTER  # obsolete ESCAPE/STABILIZE cannot revive ordinary injury kiting
         unit = context.snapshot.allies[actor]
         risk = context.risk_at(actor, unit.position)
         healers = any(cap.healer and context.snapshot.allies[a].alive
@@ -213,7 +227,8 @@ class DisengageReenterSkill:
             if not unit.alive or context.capabilities[actor].healer \
                     or context.capabilities[actor].suicide_attack:
                 continue
-            if self.joint_enabled:
+            zergling = context.capabilities[actor].key == 'zergling'
+            if self.joint_enabled or zergling:
                 from ..action_duties import rescue_actions
                 rescue = rescue_actions(context, actor, memory)
                 if rescue:
@@ -262,6 +277,8 @@ class DisengageReenterSkill:
                 # Keep an escape alternative only while actual danger evidence
                 # supports it; the final joint score still prices return risk.
                 phase = ESCAPE if evidence is None or evidence['urgent'] else REENTER
+            if zergling:
+                phase = REENTER  # any feasible blast rescue was already emitted above
             risk = context.risk_at(actor, unit.position)
             killable = next((e for e in context.attackable_enemies(actor)
                              if (context.fire_estimate(actor, e).damage_est or 0)
@@ -384,7 +401,7 @@ class DisengageReenterSkill:
                     if self.joint_enabled:
                         danger = danger_evidence(context, actor, point, horizon_h=facts['eta_h'],
                             pressure_memory_enabled=self.pressure_memory_enabled)
-                        if danger['effect_danger'] or danger['immediate'] and not facts['relief']:
+                        if danger['effect_danger'] or (not zergling and danger['immediate'] and not facts['relief']):
                             continue
                     if not self.joint_enabled and not getattr(memory, 'reentry_allowed', lambda *_: True)(
                             context, actor, point, (target,)):
@@ -440,7 +457,9 @@ class DisengageReenterSkill:
                 instance_id=instance.instance_id if instance else None,
                 memory_delta=self._delta(instance, ESCAPE, actor, context=context) if instance else None,
                 goal_kind='internal', goal_data={'objective': {'kind': 'escape'},
-                    'execution_reason': 'lethal_pressure_with_survivable_route',
+                    'execution_reason': ('zergling_blast_escape_with_survivable_route'
+                        if context.capabilities[actor].key == 'zergling'
+                        else 'lethal_pressure_with_survivable_route'),
                     'one_window_rescue': True},
                 rationale='execute observed emergency relief before ordinary firing commitments'))
         return result

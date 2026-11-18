@@ -197,6 +197,25 @@ def action_position(context, actor, action):
     return tuple(context.predict_position(actor, action).position)
 
 
+def supported_death_point(context, actor, destination, horizon=None):
+    """First sampled lethal warning backed by loss, targeting or an effect.
+
+    The all-enemy volley remains a scoring bound in ``_exposure``. It does
+    not replace a reachable contact point with a hypothetical earlier death.
+    This pure query deliberately does not call region/assignment allocation.
+    """
+    from .combat_exchange import danger_evidence
+    source = context.snapshot.allies[actor]
+    horizon_h = max(1., float(context.H if horizon is None else horizon) / max(context.H, 1))
+    for fraction in (0., .5, 1.):
+        point = tuple(source.position[i] + (destination[i] - source.position[i]) * fraction
+                      for i in (0, 1))
+        facts = danger_evidence(context, actor, point, horizon_h=horizon_h)
+        if facts['immediate'] and facts['supported_amount'] >= source.effective_health:
+            return point, fraction, facts
+    return None
+
+
 def outcome(context, actor, action, position=None) -> BurstOutcome:
     """Snapshot-local cached mutually exclusive trigger opportunity."""
     cache = getattr(context, '_burst_outcome_cache', None)
@@ -214,9 +233,9 @@ def outcome(context, actor, action, position=None) -> BurstOutcome:
 def _outcome(context, actor, action, position=None) -> BurstOutcome:
     """One mutually exclusive opportunity: contact, origin, or path death.
 
-    Prefer an immediate legal trigger. Otherwise the first sampled potentially
-    lethal exposure bounds the useful source center, rather than also granting
-    a later arrival. A possible volley is discounted, never a certain death.
+    Prefer an immediate legal trigger. Otherwise supported lethal danger
+    bounds the useful source center, rather than also granting a later arrival.
+    An all-enemy volley only discounts value; it cannot prove an earlier death.
     Path sampling is explicitly uncertain; it is not a native timing model.
     """
     source = context.snapshot.allies[actor]
@@ -246,19 +265,19 @@ def _outcome(context, actor, action, position=None) -> BurstOutcome:
             incoming, unknown = _exposure(context, actor, point, horizon, physical=True)
             maximum_incoming = max(maximum_incoming, incoming)
             maximum_unknown = max(maximum_unknown, unknown)
-            if incoming >= source.effective_health and incoming > 0.:
-                center = point
-                trigger = ('death_at_origin_opportunity' if fraction == 0.
-                           else 'death_on_path_opportunity')
-                weight = incoming / (incoming + max(source.effective_health, 1.)) / (1. + unknown)
-                arrival = horizon * fraction
-                break
-        else:
-            if reachable:
-                center = predicted
-                trigger = 'active_contact_opportunity'
-                weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
-                weight /= 1. + maximum_unknown
+        death = supported_death_point(context, actor, predicted, horizon)
+        if death is not None:
+            center, fraction, facts = death
+            trigger = ('death_at_origin_opportunity' if fraction == 0.
+                       else 'death_on_path_opportunity')
+            supported = facts['supported_amount']
+            weight = supported / (supported + max(source.effective_health, 1.))
+            arrival = horizon * fraction
+        elif reachable:
+            center = predicted
+            trigger = 'active_contact_opportunity'
+            weight = source.effective_health / max(source.effective_health + maximum_incoming, 1.)
+            weight /= 1. + maximum_unknown
     potential = area_damage(context, center) if weight else {}
     if trigger.startswith('death_') and potential:
         target_id = max(potential, key=lambda enemy_id: (
@@ -332,16 +351,70 @@ def exchange_value(context, actor, center, remaining=None, *, opportunity=1.,
             'death_sources': tuple(death_sources)}
 
 
+def _better_point_within_window(context, actor, exchange, remaining, margin):
+    """Best strictly-better detonation point reachable within ONE decision
+    window, or None. A projected point only defers the current positive
+    exchange when it is legally reachable now, the straight route is not
+    plausibly lethal, and the net gain clears an explicit margin. Dying
+    sources, dispersing clusters and thin gains therefore still detonate
+    immediately — this never invents an unreachable cluster centre, every
+    point is a real native attack trigger anchor.
+    """
+    source = context.snapshot.allies[actor]
+    speed = context.speed(actor)
+    effect = profile(context)
+    if effect.trigger_reach is None or not speed:
+        return None
+    progress = getattr(context, 'burst_progress', None)
+    if progress is not None and (progress.overdue(context, actor)
+            or progress.records.get(actor, {}).get('cashout_reason')):
+        return None
+    from .combat_exchange import danger_evidence
+    if danger_evidence(context, actor, horizon_h=1.)['immediate']:
+        return None      # dying now: cash in the current positive exchange
+    budget = speed * context.H / 16.
+    threshold = exchange['net_hp'] + margin * max(exchange['source_cost_hp'], 1.)
+    best, best_net = None, exchange['net_hp']
+    for move in sorted(context.move_destinations(actor)):
+        point = context.predict_position(actor, move).position
+        # Only actual legal move endpoints with a compatible trigger anchor;
+        # a straight-line projection through an obstacle is not a route.
+        anchored = any(not enemy.is_flying and _distance(point, enemy.position)
+                       <= source.radius + enemy.radius + effect.trigger_reach
+                       for enemy in context.snapshot.enemies.values())
+        if not anchored or _distance(source.position, point) > budget + .1:
+            continue
+        alternative = exchange_value(context, actor, point, remaining)
+        if not alternative['known'] or alternative['net_hp'] <= best_net \
+                or alternative['net_hp'] <= threshold:
+            continue
+        midpoint = tuple((source.position[i] + point[i]) / 2. for i in (0, 1))
+        incoming, unknown = _exposure(context, actor, midpoint, context.H, physical=True)
+        end_incoming, end_unknown = _exposure(context, actor, point, context.H, physical=True)
+        if max(incoming, end_incoming) >= source.effective_health or unknown or end_unknown:
+            continue
+        best, best_net = point, alternative['net_hp']
+    return best
+
+
 def trigger_assignments(context):
     """One joint marginal assignment for *strong* native trigger duties.
 
     The assignment reserves real target HP across all sources, including
     current triggers. It never forbids other legal attacks from utility
     search, and never treats an uncertain death prediction as an order to die.
+    A currently positive exchange is still executed immediately unless a
+    clearly better, reachable-this-window point exists (bounded deferral);
+    the deferral is re-judged every observation, never a hidden commitment.
     """
     cache = getattr(context, '_burst_trigger_assignments', None)
     if cache is not None:
         return cache
+    margin = float(getattr(context, 'intercept_config', {}).get(
+        'burst_defer_margin', .5) or 0.)
+    defer_log = getattr(context, '_burst_defer_reasons', None)
+    if defer_log is None:
+        defer_log = context._burst_defer_reasons = {}
     candidates = []
     for actor, cap in sorted(context.capabilities.items()):
         if not cap.suicide_attack or not context.snapshot.allies[actor].alive:
@@ -361,9 +434,18 @@ def trigger_assignments(context):
                 continue
             exchange = exchange_value(context, actor, result.position, remaining,
                 opportunity=result.opportunity, consumed=selected, positions=positions)
-            if exchange['worthwhile']:
-                ranked.append((exchange['net_hp'], -result.trigger_loops,
-                               actor, action, result, exchange))
+            if not exchange['worthwhile']:
+                continue
+            better = _better_point_within_window(context, actor, exchange,
+                                                 remaining, margin)
+            if better is not None:
+                defer_log[actor] = {
+                    'reason': 'better_reachable_point_within_one_window',
+                    'current_net_hp': round(exchange['net_hp'], 2), 'point': list(better)}
+                continue
+            defer_log.pop(actor, None)
+            ranked.append((exchange['net_hp'], -result.trigger_loops,
+                           actor, action, result, exchange))
         if not ranked:
             break
         _, _, actor, action, result, exchange = max(ranked, key=lambda row: row[:4])
@@ -470,7 +552,12 @@ def action_region(context, actor, action):
     if memory is None:
         from .burst_progress import BurstProgress
         memory = BurstProgress()  # pure snapshot fallback, no installed duty
-    fixed = memory.region(context, actor)
+    cashout = memory.cashout_plan(context, actor)
+    fixed = cashout if cashout is not None else memory.region(context, actor)
+    if fixed is not None and (fixed.get('target_id') is None or fixed.get('position') is None):
+        # Following allies is an area movement duty, not an enemy burst region.
+        cache[key] = None
+        return None
     if fixed is None:
         # Unsupported damage (e.g. uncalibrated shield interactions) must
         # not erase a legal native attempt. It receives no numeric promise.
@@ -536,6 +623,10 @@ def candidate_actions(context, actor, *, allow_wait=True, weights=None, remainin
     advancing = sorted((action for action in moves if action_region(context, actor, action).progress > 0.
                         or outcome(context, actor, action).opportunity > 0.), key=rank)
     selected = attacks[:2] + advancing[:1]
+    deferred = getattr(context, '_burst_defer_reasons', {}).get(actor)
+    if deferred is not None:
+        selected.extend(a for a in moves if _distance(action_position(context, actor, a),
+                                                       deferred['point']) < .05)
     source = context.snapshot.allies[actor]
     origin_incoming, origin_unknown = _exposure(context, actor, source.position)
     if moves:
@@ -653,9 +744,9 @@ def _route_window(context, actor, region):
                       for i in (0, 1))
         incoming, uncertain = _exposure(context, actor, point, horizon, physical=True)
         greatest_exposure, unknown = max(greatest_exposure, incoming), max(unknown, uncertain)
-        if incoming >= source.effective_health and incoming > 0:
-            useful_center = point
-            break
+    death = supported_death_point(context, actor, region.position, horizon)
+    if death is not None:
+        useful_center = death[0]
     cover, _ = cover_window(context, actor, region.target_id)
     # Immediate cover makes the window urgent, but never reduces exposure.
     window = 1. + min(cover, 2) * .15

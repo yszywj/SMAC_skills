@@ -50,6 +50,10 @@ def config_fingerprint(config: Dict[str, Any]) -> str:
         target = shared / name
         if target.is_file():
             parts.append(target.read_bytes())
+    # The reused legacy object-value evaluator changes behaviour with us.
+    legacy_values = _WORKSPACE / "skills/current/unit_value.py"
+    if legacy_values.is_file():
+        parts.append(legacy_values.read_bytes())
     parts.append(json.dumps(config, sort_keys=True).encode())
     return hashlib.sha256(b"".join(parts)).hexdigest()[:16]
 
@@ -143,6 +147,12 @@ class SkillManager:
         self._snapshot_counter += 1
         self.memory.begin_step(snapshot)
         context = Context(snapshot)
+        context.deployment_memory = self.memory
+        # Shared per-snapshot object-value configuration (unit_value_view);
+        # queries read it lazily and never mutate tasks.
+        context.unit_value_parameters = dict(self.config.get("unit_value", {})) \
+            or {"enabled": False}
+        context.intercept_config = dict(self.config.get("intercept", {}))
         risk_now = {a: len(context.risk_at(a, snapshot.allies[a].position).threats)
                     for a in snapshot.allies if snapshot.allies[a].alive}
         # observation phase FIRST (single ordered entry, 3.1): record the
@@ -169,7 +179,7 @@ class SkillManager:
             for actor, row in summary.get("units", {}).items())
         self._cache = (digest, list(actions), copy.deepcopy(summary), plans,
                        snapshot)
-        self._pending_commit = (snapshot, plans, list(actions), risk_now)
+        self._pending_commit = (snapshot, plans, list(actions), risk_now, context)
         return list(actions), copy.deepcopy(summary)
 
     def commit_final_actions(self, final_actions: List[int]) -> None:
@@ -178,7 +188,7 @@ class SkillManager:
         self._pending_commit = None
         if pending is None:
             return
-        snapshot, plans, actions, risk_now = pending
+        snapshot, plans, actions, risk_now, context = pending
         actions_by_actor = {f"u{i}": a for i, a in enumerate(final_actions)}
         self.memory.commit(snapshot, actions_by_actor, plans, risk_now,
-                           context=Context(snapshot))
+                           context=context)

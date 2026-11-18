@@ -28,11 +28,15 @@ def _exposure(context, actor, point):
 def _pressure(context, enemy, positions):
     """An enemy threatening a fragile frontline matters more than its ID.
 
-    Only the two largest compatible exposures count. This bounds the number
-    of simultaneous victims attributed to one weapon; it does not assume a
-    single enemy can fire a separate full volley at every friendly unit.
+    Ordinary weapons are bounded by their two largest compatible exposures:
+    one enemy cannot fire a separate full volley at every friendly unit. A
+    one-use bomber is different — ONE explosion event settles against every
+    ally it can cover, so its pressure aggregates all covered victims' loss
+    fractions (capped at 1) instead of the two-largest bound. The same
+    explosion event is still settled once per victim, never twice per victim.
     """
     values, threatened = [], []
+    suicide = context.enemy_capabilities[enemy].suicide_attack
     for actor, unit in context.snapshot.allies.items():
         if not unit.alive:
             continue
@@ -43,10 +47,15 @@ def _pressure(context, enemy, positions):
         threatened.append(actor)
         weight, damage = exposure
         if damage is not None and damage > 0:
-            values.append(min(1., weight * damage / max(unit.effective_health, 1.)))
+            loss = (min(weight * damage, max(unit.effective_health, 1.))
+                    if suicide else weight * damage)
+            values.append(min(1., loss / max(unit.effective_health, 1.)))
     values.sort(reverse=True)
-    value = min(1., (values[0] if values else 0.)
-                + .25 * (values[1] if len(values) > 1 else 0.))
+    if suicide:
+        value = min(1., sum(values))
+    else:
+        value = min(1., (values[0] if values else 0.)
+                    + .25 * (values[1] if len(values) > 1 else 0.))
     return value, tuple(threatened)
 
 
@@ -103,8 +112,12 @@ def joint_pressure(context, actions, report):
         if unit.effective_health <= 0 or lower < unit.effective_health:
             continue
         values = sorted(pressure_values[enemy], reverse=True)
-        pressure = min(1., (values[0] if values else 0.)
-                       + .25 * (values[1] if len(values) > 1 else 0.))
+        if context.enemy_capabilities[enemy].suicide_attack:
+            # One explosion event settles against every covered victim.
+            pressure = min(1., sum(values))
+        else:
+            pressure = min(1., (values[0] if values else 0.)
+                           + .25 * (values[1] if len(values) > 1 else 0.))
         relieved += pressure
     unsupported = {}
     for actor, exposure in exposures.items():

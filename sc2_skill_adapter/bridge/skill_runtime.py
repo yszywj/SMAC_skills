@@ -152,9 +152,16 @@ def _tactical_v1_configuration(args, source):
             raise FileNotFoundError(f"--tactical-config: no such file: {path}")
         json.loads(path.read_text(encoding="utf-8"))  # strict JSON check
     manager_kwargs = {"tactical_config": str(config_path) if config_path else None}
-    value_metadata = {"unit_value_mode": "off", "unit_value_version": None,
+    # The joint controller now reuses the legacy pure object-value evaluator
+    # INTERNALLY through its own tactical config ("unit_value" section,
+    # enabled by default). The legacy --unit-value-* CLI surface stays
+    # rejected above: behaviour is configured by the tactical config alone,
+    # so no previously-refused flag is required to turn the feature on.
+    value_metadata = {"unit_value_mode": "tactical_v1_builtin_adapter",
+                      "unit_value_version": None,
                       "unit_value_parameters": None,
-                      "unit_value_semantics": "tactical_v1 built-in rule evaluator"}
+                      "unit_value_semantics": "legacy pure evaluator reused "
+                      "via skills/tactical_v1 unit_value config section"}
     return {"version": "tactical_v1", "source": str(source),
             "posture": getattr(args, "adaptive_posture", "balanced"),
             "skill_tree_policy": None,

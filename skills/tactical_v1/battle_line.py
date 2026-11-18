@@ -207,6 +207,40 @@ def _assignment(context, actor, targets, members, axis, ready):
         angle += max(-.45, min(.45, rank * (2. * unit.radius + .05) / max(radius, .1)))
     goal = (enemy.position[0] + math.cos(angle) * radius,
             enemy.position[1] + math.sin(angle) * radius)
+    if role == 'contact':
+        # Other wounded melee may favor the outer edge of their contact
+        # band. Zerglings keep their attacking position through ordinary
+        # injury; their explicit blast-escape rule owns emergency movement.
+        # Every melee still uses the same timely ranged-support geometry.
+        from .unit_value_view import preservation_value
+        protection = preservation_value(context, actor)
+        # A bounded positioning preference, never a new retreat trigger.
+        if context.capabilities[actor].key != 'zergling' \
+                and unit.effective_health < (.5 + .1 * protection) * max(unit.max_health + unit.max_shield, 1.):
+            radius = min(reach, radius + .35)
+            goal = (enemy.position[0] + math.cos(angle) * radius,
+                    enemy.position[1] + math.sin(angle) * radius)
+        ranged_peers = [a for a in members if a != actor
+                        and context.capabilities[a].combat_class == 'ranged'
+                        and distance(units[a].position, enemy.position) <= 14.]
+        if ranged_peers:
+            anchor = min(ranged_peers, key=lambda a: distance(units[a].position, goal))
+            anchor_unit = units[anchor]
+            peer_reach = 0.
+            relation = context.snapshot.relations.get(anchor, {}).get(target)
+            if relation is not None and relation.native_weapon_range is not None:
+                peer_reach = relation.native_weapon_range
+            # Stay inside one short sprint of the nearest rear shooter's own
+            # firing band: this bounds short local flanks while forbidding
+            # lone deep charges and long back-around routes (the shared axis
+            # clamp above already blocks crossing through the enemy).
+            support_limit = peer_reach + anchor_unit.radius + (
+                (context.speed(anchor) or 0.) * context.H / 16.)
+            gap = distance(goal, anchor_unit.position)
+            if gap > support_limit:
+                fraction = support_limit / gap
+                goal = (anchor_unit.position[0] + (goal[0] - anchor_unit.position[0]) * fraction,
+                        anchor_unit.position[1] + (goal[1] - anchor_unit.position[1]) * fraction)
     return {'front': tuple(targets), 'target': target, 'role': role, 'goal': goal,
             'reach': reach, 'eta_h': _eta(context, actor, target, unit.position),
             'ready_targets': tuple(e for e in ready if e in targets), 'peers': peers}

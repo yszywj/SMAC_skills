@@ -212,6 +212,7 @@ class TacticalMemory:
         recorded as ARRIVED, never as a failed timeout."""
         events: List[str] = []
         if context is not None:
+            context.deployment_memory = self
             self._observe_movement(snapshot, context)
             self.pressure_memory.observe(context)
             self.recovery.observe(context)
@@ -285,6 +286,12 @@ class TacticalMemory:
                     snapshot.game_loop - progress_start >= stall_limit):
                 self.finish_task(instance_id, "no_progress", snapshot)
                 events.append(f"task_no_progress:{instance_id}")
+        # Observation may complete/shrink tasks or update their anchor. The
+        # coordinator must build facts from that resulting state, not from a
+        # squad cache populated while judging an earlier instance.
+        if context is not None:
+            for name in ('_deployment_squads', '_deployment_phases', '_deployment_anchors'):
+                context.__dict__.pop(name, None)
         return events
 
     def _combat_ttl(self, snapshot):
@@ -433,9 +440,18 @@ class TacticalMemory:
         return 0.
 
     def movement_conflict(self, context, actor, action):
-        """Intent reversal and actual barren-loop costs share one bound."""
+        """Intent reversal, barren-loop and observed round-trip costs share one bound.
+
+        The round-trip term is the cross-skill ping-pong guard: a move that
+        returns to a position abandoned within the last few windows, after a
+        real walk and observed damage, costs 1.0 unless the same move is
+        genuine relief. It reaches candidate filtering, joint scoring,
+        repair and baseline through this single channel.
+        """
+        from .deployment import roundtrip_cost
         return max(self._intent_movement_conflict(context, actor, action),
-                   self.movement_cycle_cost(context, actor, action))
+                   self.movement_cycle_cost(context, actor, action),
+                   roundtrip_cost(context, actor, action, self))
 
     def movement_cycle_cost(self, context, actor, action):
         return self.combat_progress.cycle_cost(context, actor, action, self)
@@ -812,7 +828,8 @@ class TacticalMemory:
             for actor in instance.actors:
                 self.burst_progress.release_goal(actor, instance.goal)
         if instance.skill == "precombat_rally":
-            self.encounters.close(instance.extra.get("encounter_id"), reason)
+            if reason not in ('rally_ready', 'member_lost', 'switched_or_baseline'):
+                self.encounters.close(instance.extra.get("encounter_id"), reason)
         if reason == "waypoint_reached":
             waypoint = instance.extra.get("waypoint")
             if waypoint is not None:
@@ -855,6 +872,12 @@ class TacticalMemory:
             tags_by_actor = dict(zip(instance.actors, instance.ally_tags))
             retained = {a for a in actors_alive if a not in tags_by_actor
                         or snapshot.allies[a].tag == tags_by_actor[a]}
+            if instance.skill == 'precombat_rally' and retained:
+                # Observation-owned shrink preserves the original deadline.
+                instance.actors = tuple(a for a in instance.actors if a in retained)
+                instance.ally_tags = tuple(snapshot.allies[a].tag for a in instance.actors)
+                instance.extra['members'] = list(instance.actors)
+                actors_alive = list(instance.actors)
             can_shrink = instance.skill == 'combat_rejoin' \
                 and instance.extra.get('local_cover_enabled', False) \
                 and bool(retained.intersection(instance.extra.get('joiners', ()))) \
@@ -957,6 +980,18 @@ class TacticalMemory:
             raise RuntimeError(
                 "conflicting commit at the same decision step: "
                 f"{self.last_committed_actions} vs {actions}")
+        deployment_facts = {}
+        if context is not None:
+            context.deployment_memory = self
+            from .action_duties import actor_duty
+            # Capture the original prioritized duty BEFORE applying deltas
+            # or retiring tasks. A coincidentally equal rescue/fire command
+            # must not start an unrelated deployment task.
+            for actor, action in actions.items():
+                duty = actor_duty(context, actor, self)
+                if duty.get('required') and duty.get('reason', '').startswith('deployment_') \
+                        and action in duty['actions']:
+                    deployment_facts[actor] = dict(duty)
         self.committed = True
         self.last_committed_actions = dict(actions)
         for actor, action in actions.items():
@@ -1004,15 +1039,82 @@ class TacticalMemory:
         self._commit_movement(snapshot, context, actions, committed_plans)
         self.committed_risk = dict(getattr(self, "observed_risk", {})
                                    or self.committed_risk)
-        self._retire_switched(snapshot, committed_plans, actions, context)
+        self._retire_switched(snapshot, committed_plans, actions, context, deployment_facts)
+        if context is not None:
+            self._commit_deployment(snapshot, context, actions, deployment_facts)
         self.last_committed_loop = snapshot.game_loop
+
+    def _commit_deployment(self, snapshot, context, actions, deployment_facts):
+        """Persist the deployment commitment actually EXECUTED this step.
+
+        Deployment duties frequently win through repair/baseline execution
+        rather than a selected rally plan; without this hook the next step
+        re-groups and re-picks an anchor every observation (the observed
+        "anchor changes every step" regression). Only COMMITTED actions can
+        create the task; unselected candidates never touch state. The task
+        reuses the ordinary instance machinery (retry key, deadlines,
+        observation-phase completion) — no parallel state system.
+        """
+        from .encounters import rally_readiness
+        created = set()
+        for actor, action in sorted(actions.items()):
+            unit = snapshot.allies.get(actor)
+            if unit is None or not unit.alive:
+                continue
+            active = next((t for t in self.instances.values()
+                           if t.skill == 'precombat_rally' and actor in t.actors
+                           and not t.termination_reason), None)
+            if active is not None:
+                continue        # a selected rally plan already owns the task
+            duty = deployment_facts.get(actor)
+            if duty is None or action not in duty['actions']:
+                continue
+            if duty['squad'] in created:
+                continue
+            members = list(duty['members'])
+            goal = f"encounter:{self.encounters.current_id}"
+            key = self.task_retry_key('precombat_rally', members, 'internal', goal)
+            if self.retry_blocked(*key, snapshot.game_loop):
+                continue
+            params = self.encounter_config.get('precombat_rally', {})
+            step = max(snapshot.step_mul, 1)
+            remaining = int(round(step * float(params.get('max_h', 8.)))) \
+                - (snapshot.game_loop - self.encounters.started_loop)
+            if remaining <= 0:
+                continue
+            instance = self.create_instance(
+                'precombat_rally', members, goal, 'rallying', snapshot.game_loop,
+                remaining,
+                tuple(snapshot.allies[a].tag for a in sorted(members)
+                      if a in snapshot.allies),
+                goal_kind='area',
+                extra={'anchor': list(duty['anchor']), 'waypoint': list(duty['anchor']),
+                       'members': members, 'encounter_id': self.encounters.current_id,
+                       'enemy_ids': sorted(snapshot.enemies),
+                       'ready_radius': float(params.get('ready_radius', 4.)),
+                       'ready_fraction': float(params.get('ready_fraction', .8)),
+                       'best_gap': rally_readiness(context, duty['pending_members'], duty['anchor'],
+                           float(params.get('ready_radius', 4.)))['gap'],
+                       'squad_id': duty['squad'],
+                       'front_actor': duty.get('front_actor'),
+                       'deployment_phase': duty['deployment_phase'],
+                       'rally_last_progress_loop': snapshot.game_loop,
+                       'no_progress_loops': int(round(
+                           step * float(params.get('no_progress_h', 3.)))),
+                       'retry_key': key,
+                       'created_by': 'deployment_duty_commit',
+                       'duty_benefit': duty.get('benefit', '')})
+            instance.executed_steps = 1
+            self._count_lifecycle(instance.skill, 'created')
+            created.add(duty['squad'])
 
     def _count_lifecycle(self, skill, event):
         counts = self.lifecycle_counts.setdefault(
             skill, {"created": 0, "continued": 0, "exited": 0})
         counts[event] += 1
 
-    def _retire_switched(self, snapshot, accepted_plans, actions, context=None) -> None:
+    def _retire_switched(self, snapshot, accepted_plans, actions, context=None,
+                         deployment_facts=None) -> None:
         selected_ids = {plan.instance_id for plan in accepted_plans
                         if plan.instance_id}
         for instance_id in list(self.instances):
@@ -1044,6 +1146,20 @@ class TacticalMemory:
                         instance.executed_steps += 1
                         self._count_lifecycle(instance.skill, 'continued')
                         continue  # no new deadline or claimed observed progress
+            # A duty-executed deployment task continues while its actors'
+            # COMMITTED actions still satisfy the same duty; the ordinary
+            # retirement rule would otherwise kill it every step it wins
+            # through repair/baseline instead of a selected rally plan.
+            if context is not None and instance.skill == 'precombat_rally':
+                executing = any(a in (deployment_facts or {}) for a in instance.actors)
+                if executing:
+                    instance.executed_steps += 1
+                    self._count_lifecycle(instance.skill, 'continued')
+                # A fire/rescue interruption pauses movement, not the task's
+                # identity. Observation alone completes/fails it; original
+                # deadline and stall timer keep running, never renewed.
+                if not self._deadline_reached(instance, snapshot.game_loop):
+                    continue
             # A different duty of the SAME skill also replaces the old task.
             # New instances are bound to their accepted plan in apply_delta.
             self.finish_task(instance_id, "switched_or_baseline", snapshot)

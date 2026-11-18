@@ -62,6 +62,7 @@ class EncounterTracker:
         self.quiet_since = None
         self.quiet_budget = None
         self._observed = None
+        self.started_loop = None
 
     def __eq__(self, other):
         return isinstance(other, EncounterTracker) and self.__dict__ == other.__dict__
@@ -72,6 +73,8 @@ class EncounterTracker:
         if key == self._observed:
             return
         self._observed = key
+        if self.started_loop is None:
+            self.started_loop = snapshot.game_loop
         self.current_hostile = unsafe_to_rally(context, combat_members(context))
         if self.current_hostile:
             self.had_contact = True
@@ -83,20 +86,28 @@ class EncounterTracker:
                 self.quiet_budget = max(1, int(round(self.rearm_quiet_h * context.H)))
             elif snapshot.game_loop - self.quiet_since >= self.quiet_budget:
                 self.current_id += 1
+                self.started_loop = snapshot.game_loop
                 self.had_contact = False
                 self.quiet_since = None
                 self.quiet_budget = None
 
     def can_rally(self):
-        return (not self.current_hostile and not self.had_contact
-                and self.current_id not in self.closed_ids)
+        # Threat starts covered assembly; it does not veto organization.
+        return self.current_id not in self.closed_ids
 
     def close(self, encounter_id, reason):
         if encounter_id is not None:
             self.closed_ids.setdefault(encounter_id, reason)
 
     def task_outcome(self, context, instance):
-        """Observation-phase outcome, before total/phase deadline handling."""
+        """Observation-phase outcome, before total/phase deadline handling.
+
+        Partial engagement no longer terminates the organization: engaged
+        members keep fighting in their own skills while the remaining task
+        continues as COVERED_JOIN. The task ends only when EVERY ordinary
+        member is engaged, when executable readiness is met, or on the
+        existing no-progress/identity rules.
+        """
         if instance.skill != "precombat_rally":
             return None
         data = instance.extra
@@ -105,14 +116,35 @@ class EncounterTracker:
         if any(a not in context.snapshot.allies
                or not context.snapshot.allies[a].alive for a in instance.actors):
             return "member_lost"
-        if unsafe_to_rally(context, instance.actors):
-            return "engagement_started"
-        quality = rally_readiness(context, instance.actors, data["anchor"],
-                                  data["ready_radius"])
-        if quality["fraction"] >= data["ready_fraction"]:
-            return "rally_ready"
+        from .deployment import ENGAGE, deployment_target
+        ordinary = tuple(a for a in instance.actors
+                         if not context.capabilities[a].healer
+                         and not context.capabilities[a].suicide_attack)
+        group = {'id': data.get('squad_id', instance.instance_id),
+                 'members': ordinary, 'ordinary': ordinary}
+        target = deployment_target(context, group, instance)
+        if target['phase'] == ENGAGE:
+            # Geometry releases opening control; this is NOT a claim that
+            # every rear weapon is already firing. G2/G6 own that advance.
+            return 'rally_ready'
+        engaged = target['engaged']
+        pending = tuple(a for a in ordinary if a not in engaged)
+        anchor = target['anchor']
+        if anchor is None:
+            return 'no_safe_anchor'
+        changed = (tuple(data['anchor']) != tuple(anchor)
+                   or data.get('deployment_phase') != target['phase']
+                   or data.get('front_actor') != target['front_actor'])
+        data.update(anchor=list(anchor), waypoint=list(anchor),
+                    deployment_phase=target['phase'], front_actor=target['front_actor'])
+        quality = rally_readiness(context, pending or ordinary, anchor,
+                                  data['ready_radius'])
         loop = context.snapshot.game_loop
-        if quality["gap"] < data.get("best_gap", float("inf")) - 0.05:
+        if changed:
+            # New target coordinates are not observed movement progress and
+            # must not renew either the stall clock or the original deadline.
+            data['best_gap'] = quality['gap']
+        elif quality["gap"] < data.get("best_gap", float("inf")) - 0.05:
             data["best_gap"] = quality["gap"]
             data["rally_last_progress_loop"] = loop
             instance.last_progress_loop = loop

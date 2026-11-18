@@ -80,18 +80,31 @@ class CombatRepositionSkill:
                               and risk_now.threats) or risk_now.effect_weapon_near
             cooldown_window = unit.weapon_cooldown_loops > context.H
             melee = capability.combat_class == "melee"
-            # full-health ranged may still reposition inside a valuable
-            # cooldown window; melee only when contact can be kept
+            # Full-health ranged may still reposition inside a valuable
+            # cooldown window; melee only when contact can be kept. Injury
+            # alone never opens another reposition window for a zergling.
             worth_moving = cooldown_window or not shot_available or \
                 (under_pressure and not melee) or \
-                (under_pressure and melee and unit.health_fraction < 0.5)
+                (under_pressure and melee and capability.key != 'zergling'
+                 and unit.health_fraction < 0.5)
             if not worth_moving:
                 continue
             # one candidate per class, classified by geometry (D3)
             by_class: Dict[str, int] = {}
+            from ..deployment import unsupported_cooldown_advance
+            def cooldown_blocked(action):
+                return cooldown_window and unsupported_cooldown_advance(
+                    context, actor,
+                    context.predict_position(actor, action).position)["blocked"]
             for action in sorted(context.move_destinations(actor)):
                 label = self._classify(context, actor, action, target_id,
                                        risk_now.threats)
+                # During cooldown, a pursuit step that adds ordinary enemy
+                # weapon coverage without teammate window-fire support is
+                # not offered at all — the joint scorer's fallback must not
+                # be able to re-select the same lone advance either.
+                if label == "pursuit" and cooldown_blocked(action):
+                    continue
                 if label not in by_class:
                     by_class[label] = action
             # keep one candidate per class, but never fewer than the plain
@@ -103,6 +116,8 @@ class CombatRepositionSkill:
             for action in sorted(context.move_destinations(actor)):
                 if action not in seen_actions and len(ordered) < \
                         self.max_candidates:
+                    if cooldown_blocked(action):
+                        continue
                     ordered.append((self._classify(context, actor, action,
                                                    target_id, risk_now.threats), action))
                     seen_actions.add(action)

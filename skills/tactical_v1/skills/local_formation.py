@@ -91,8 +91,13 @@ class LocalFormationSkill:
                       if self.joint_assessment else [])
         if plans:
             telemetry.count(self.name, "applicable")
-        splash_threats = [e for e, cap in sorted(context.enemy_capabilities.items())
-                          if cap.splash_attack]
+        # Shared short-horizon bomber facts: same truth as G1 interception
+        # and the final execution duties. "Near a bomber" alone never
+        # triggers anything — only the bounded predicted loss does.
+        from ..intercept import threat_facts, explosion_loss
+        bomber_facts = threat_facts(context)
+        other_splash = [e for e, cap in context.enemy_capabilities.items()
+                        if cap.splash_attack and not cap.suicide_attack]
         predicted = {a: u.position for a, u in
                      context.snapshot.allies.items() if u.alive}
         atomic_budget = 2
@@ -101,15 +106,25 @@ class LocalFormationSkill:
                 continue
             if self.joint_assessment and context.capabilities[actor].suicide_attack:
                 continue  # S3 owns productive contact, approach and burst avoidance
-            # medivac role goals are produced by S2; G6 skips healers fully
             destinations = context.move_destinations(actor)
             if not destinations:
                 continue
             crowded = self._crowding(context, actor, predicted)
-            under_splash = any(distance(unit.position,
-                                        context.snapshot.enemies[e].position)
-                               <= self.spread_radius
-                               for e in splash_threats)
+            under_splash = any(v["entry_h"] is not None and v["entry_h"] <= 1. and v["loss"] is not None
+                               and v["loss"] > 0.
+                               for row in bomber_facts["bombers"]
+                               for v in row["victims"] if v["actor"] == actor)
+            # Bounded loss fractions this actor currently risks from bomber
+            # explosion coverage; a move is scored by the loss it removes,
+            # weighed against its displacement, never by bomber proximity.
+            def splash_loss(position):
+                return min(1., explosion_loss(context, actor, position) / max(unit.effective_health, 1.))
+            def other_splash_near(position):
+                return any(distance(position, context.snapshot.enemies[e].position)
+                           <= self.spread_radius for e in other_splash)
+            origin_splash_loss = splash_loss(unit.position)
+            origin_other_splash = other_splash_near(unit.position)
+            under_splash = under_splash or origin_splash_loss > 0. or origin_other_splash
             role_goal = self._role_goal(context, actor)
             if not (crowded >= 1 or under_splash or role_goal is not None):
                 continue
@@ -131,14 +146,19 @@ class LocalFormationSkill:
                 prediction = context.predict_position(actor, action)
                 after = self._crowding_at(context, actor, prediction.position,
                                           predicted)
-                new_splash = any(distance(prediction.position,
-                                          context.snapshot.enemies[e].position)
-                                 <= self.spread_radius
-                                 for e in splash_threats)
+                after_splash_loss = splash_loss(prediction.position)
                 gain = float(crowded - after)
                 gain -= 2. * memory.movement_blockage(context, actor, action)
-                if under_splash and not new_splash:
-                    gain += 1.0
+                # Preventive spread earns exactly the bounded predicted loss
+                # it removes (fraction of own effective health); this is the
+                # documented override of pure output continuity — the final
+                # duty layer also lets such moves supersede ready-fire when
+                # the bomber window demands it.
+                gain += 2. * (origin_splash_loss - after_splash_loss)
+                if origin_other_splash and not other_splash_near(prediction.position):
+                    gain += 1.
+                if under_splash and after_splash_loss < origin_splash_loss:
+                    gain += .25   # tie-break toward actually leaving coverage
                 if role_goal is not None:
                     gain += min(distance(unit.position, role_goal)
                                 - distance(prediction.position, role_goal), 2.0)

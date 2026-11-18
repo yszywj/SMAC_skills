@@ -255,6 +255,7 @@ class Coordinator:
                memory, telemetry: Telemetry,
                n_agents: int) -> Tuple[List[int], Dict[str, object], List]:
         started = time.perf_counter()
+        context.deployment_memory = memory
         self._cache = {}
         self._screened = set()
         self._contract_keys = {}
@@ -553,6 +554,27 @@ class Coordinator:
         summary["candidate_search"] = copy.deepcopy(self._search_coverage)
         summary['execution_duties'] = final.execution
         summary['execution_seed_candidates'] = self._execution_seeds
+        # --- shared diagnostics (predictions, never observed damage) -------
+        try:
+            from .unit_value_view import summary as value_summary
+            summary['unit_value'] = value_summary(context)
+        except Exception:
+            summary['unit_value'] = {"enabled": False, "error": "summary_failed"}
+        try:
+            from .intercept import summary as intercept_summary
+            summary['enemy_bomber_intercept'] = intercept_summary(context, memory)
+        except Exception:
+            summary['enemy_bomber_intercept'] = {"enabled": False,
+                                                 "error": "summary_failed"}
+        summary['burst_defer_reasons'] = dict(
+            getattr(context, '_burst_defer_reasons', {}))
+        summary['burst_decline_reasons'] = dict(
+            getattr(context, '_burst_decline_log', {}))
+        try:
+            from .deployment import summary as deployment_summary
+            summary['deployment'] = deployment_summary(context)
+        except Exception:
+            summary['deployment'] = {"error": "summary_failed"}
         if self.config.get('common_combat', {}).get('joint_assessment_enabled', True):
             from .joint_combat import summary as combat_summary
             from .local_entry import assess_local_entry

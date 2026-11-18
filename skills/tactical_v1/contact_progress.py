@@ -1,8 +1,8 @@
 """Cross-skill participation debt discharged by an observed weapon cycle.
 
 Empty recommendations, brief contact and tiny gap reductions do not complete
-a duty. Debt ranks alternatives; it never authorizes ignoring an observed
-lethal threat or entering a known explosion.
+a duty. Debt ranks alternatives; ordinary fragile-contact damage does not
+erase participation, while explosion hazards retain their own safeguards.
 """
 import math
 
@@ -10,6 +10,14 @@ from .battle_intent import contacts, enemy_identity
 from .combat_exchange import exposure_window, danger_evidence
 from .context import STOP, distance, GAME_LOOPS_PER_SPEED_SECOND
 from .joint_combat import action_position
+
+
+def _blocks_contact(context, actor, evidence):
+    # Fragile contact attackers keep engaging through ordinary weapon damage.
+    # This is not permission to enter an explosion or to bypass route failures.
+    if context.capabilities[actor].key == 'zergling':
+        return bool(evidence['effect_danger'])
+    return evidence['immediate']
 
 
 class ContactProgress:
@@ -265,7 +273,7 @@ class ContactProgress:
             relief = before['supported_amount'] - after['supported_amount'] >= max(
                 .1, .15 * before['supported_amount'])
             # Potential all-enemy fire remains a ranking bound, not a veto.
-            if after['immediate'] and not relief:
+            if _blocks_contact(context, actor, after) and not relief:
                 continue
             distance_gap = old_gap if semantic.kind == 'attack' else gap
             eta = distance_gap / stride if stride > 0. else (0. if distance_gap <= .05 else float('inf'))
@@ -473,7 +481,7 @@ class ContactProgress:
                           reason='current_contact_keeps_fire')
         elif coordinated and coordinated['required']:
             result.update(coordinated)
-        elif danger_evidence(context, actor, horizon_h=2.)['immediate']:
+        elif _blocks_contact(context, actor, danger_evidence(context, actor, horizon_h=2.)):
             result['reason'] = 'observed_danger_requires_rescue_comparison'
         else:
             recovery = self.recovery(context, actor, memory)
@@ -530,7 +538,14 @@ class ContactProgress:
         after = danger_evidence(context, actor, point, horizon_h=2.)
         relief = before['supported_amount'] - after['supported_amount'] >= max(
             .1, .15 * before['supported_amount'])
-        if before['immediate'] and (relief or before['effect_danger'] and not after['effect_danger']):
+        emergency_relief = relief or before['effect_danger'] and not after['effect_danger']
+        if context.capabilities[actor].key == 'zergling':
+            from .action_duties import zergling_blast_exposure
+            blast_before, sources = zergling_blast_exposure(context, actor)
+            blast_after, later = zergling_blast_exposure(context, actor, point)
+            emergency_relief = (blast_before is not None and blast_after is not None
+                                and blast_after < blast_before and not set(later) - set(sources))
+        if _blocks_contact(context, actor, before) and emergency_relief:
             return {'cost': 0., 'reason': 'observed_emergency_relief'}
         semantic = context.decode(actor, action)
         target = semantic.target if semantic.kind == 'attack' else recovery['target']

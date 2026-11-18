@@ -150,6 +150,24 @@
     "self_cost": 1.0,
     "lonely_enemy_exception": true
   },
+  "unit_value": {
+    "enabled": true,
+    "mode": "contextual",
+    "spatial_context": true,
+    "w_matchup": 0.2,
+    "w_support": 0.2,
+    "w_scarcity": 0.2,
+    "scale": 2.0,
+    "focus_value_weight": 0.2,
+    "focus_switch_margin": 0.05,
+    "retreat_value_margin": 0.05,
+    "retreat_threshold_upper_bound": 0.6,
+    "heal_value_weight": 0.1
+  },
+  "intercept": {
+    "enabled": true,
+    "burst_defer_margin": 0.5
+  },
   "telemetry": {
     "top_k_candidates": 3
   }

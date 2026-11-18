@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 from ..context import Context, IN_RANGE
 from ..battle_pressure import enemy_pressure
 from ..targeting import next_shot_target, planning_enabled, shared_target_plan
+from ..unit_value_view import target_value as enemy_target_value
 from ..contracts import (Commitment, Dependency, EffectClaim, HEURISTIC,
                          ResourceClaims)
 from .common import h_loops, make_plan, space_claim
@@ -71,13 +72,19 @@ class FocusFireSkill:
         # by ID, so an eligible high-pressure rear attacker can miss the
         # candidate quota entirely. Rank compatible objective pressure;
         # known immediate kills and the established target remain classes.
+        # Object-value ordering (legacy pure evaluator, adapted): a bounded
+        # candidate-generation preference ONLY — damage, kills and threat
+        # relief stay in their own evaluator ledgers, so this never adds a
+        # second score for the same volley.
+        valuable = sorted((e for e in issuable if enemy_target_value(context, e) > 0),
+                          key=lambda e: (-enemy_target_value(context, e), e))
         high_threat = sorted((e for e in issuable if enemy_pressure(context, e) > 0),
                              key=lambda e: (-enemy_pressure(context, e), e))
         nearby = sorted(issuable, key=lambda e: (
             context.snapshot.relations[actor][e].distance, e))
         classes = [killable, [original] if original else [],
                    [assigned] if assigned in issuable else [], high_threat,
-                   nearby, *classes]
+                   valuable, nearby, *classes]
         # round-robin interleave: one from each class per round
         ordered, seen = [], set()
         for round_index in range(max(len(c) for c in classes if c)):
@@ -167,6 +174,52 @@ class FocusFireSkill:
         produced = 0
         allocated_targets = {assignment.target for assignment in
                              (target_plan.assignments.values() if target_plan else ())}
+        # -- enemy bombers: complete spread + minimal-sufficient fire plans,
+        # built from the shared intercept facts (same short-horizon truth as
+        # the execution duties). The death-burst risk floor stays in the
+        # evaluator; these plans claim only the window-qualified shots.
+        from ..intercept import intercept_plan
+        for row in intercept_plan(context, memory, self.config):
+            if produced >= max_atomic:
+                break
+            members = {actor: action for actor, action, _ in row["shooters"]}
+            members.update(dict(row["spread"]))
+            if len(members) < 1:
+                continue
+            effects, fire = [], []
+            for actor, action, damage_lo in row["shooters"]:
+                estimate = context.fire_estimate(actor, row["enemy"])
+                effects.append(EffectClaim(
+                    "damage", row["enemy"], estimate.damage_est, context.H,
+                    estimate.evidence, "shared_damage_model_window_shot",
+                    lower=estimate.damage_lo, upper=estimate.damage_hi))
+                fire.append((row["enemy"], damage_lo))
+            for actor, _ in row["spread"]:
+                effects.append(EffectClaim("position", actor, .5,
+                                           max(context.H, 1), HEURISTIC,
+                                           "burst_spread_loss_reduction"))
+            produced += 1
+            plans.append(make_plan(
+                self.name, dict(members), row["enemy"], dict(members),
+                effects,
+                ResourceClaims(controls=tuple(sorted(members)), fire=tuple(fire)),
+                Commitment("intercepting", 0,
+                           max_loops=h_loops(context, self.kill_window_h)),
+                {}, snapshot_id, fingerprint, atomic=True,
+                goal_kind="enemy",
+                goal_data={"target_id": row["enemy"],
+                           "intercept_safe": row["safe"],
+                           "entry_h": round(row["entry_h"], 3),
+                           "spread_members": [a for a, _ in row["spread"]]},
+                dependencies=(Dependency("member", tuple(sorted(members))),
+                              Dependency("target_valid", (row["enemy"],))) + (
+                                  (Dependency("fire_window", (row["enemy"],)),)
+                                  if row['shooters'] else ()),
+                rationale=("joint explosion defense against " + row["enemy"]
+                           + f" with {len(row['shooters'])} shooters"
+                           + (f", {len(row['spread'])} spreading" if row["spread"] else ""))))
+        # -- ordinary allocated high-pressure targets keep the generic
+        # minimal-sufficient joint kill path.
         for enemy_id, enemy in sorted(context.snapshot.enemies.items()):
             if not context.enemy_capabilities[enemy_id].suicide_attack and not (
                     enemy_id in allocated_targets

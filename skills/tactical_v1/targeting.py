@@ -11,6 +11,7 @@ from typing import Dict, Optional
 
 from .battle_pressure import enemy_pressure
 from .context import IN_RANGE, distance
+from .unit_value_view import target_value as _object_value
 
 
 @dataclass(frozen=True)
@@ -168,6 +169,11 @@ def shared_target_plan(context, memory, config=None):
             value = 3. * useful / maximum
             if amount is not None and available > 0 and amount >= available:
                 value += 2.
+            # Object value (adapted legacy evaluator) is a bounded ORDERING
+            # preference for equally useful volleys, not a second damage,
+            # kill or relief ledger entry.
+            value += getattr(context, 'unit_value_parameters', {}).get(
+                'focus_value_weight', .2) * _object_value(context, target) if useful > 0 else 0.
             # A useful primary volley advances the local objective even
             # against a large health pool. Normalize this separate bounded
             # preference by the source's volley, not by enemy EHP again.

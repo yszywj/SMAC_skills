@@ -492,6 +492,14 @@ class CoordinatedEngageSkill:
                     if self.joint_assessment and (not math.isfinite(exchange['eta_h'])
                             or exchange['after']['effect_danger']):
                         continue
+                if self.joint_assessment and unit.weapon_cooldown_loops > context.H:
+                    # Shared cooldown-advance guard (same facts as G3 and the
+                    # final duty layer): a cooling shooter may not open added
+                    # ordinary enemy weapon coverage without teammate
+                    # window-fire support on the new threat.
+                    from ..deployment import unsupported_cooldown_advance
+                    if unsupported_cooldown_advance(context, actor, prediction)["blocked"]:
+                        continue
                 gain = distance(unit.position, goal) - distance(prediction, goal)
                 travel = distance(unit.position, prediction)
                 contact_after = context.projected_attack_opportunity(
