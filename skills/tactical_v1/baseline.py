@@ -81,7 +81,7 @@ def complete_plan(context: Context, memory, skills,
                   locked_plans: Iterable = ()) -> Dict[str, int]:
     locked_plans = tuple(sorted(locked_plans,
                                 key=lambda p: p.proposal_id))
-    locked_actions: Dict[str, int] = {}
+    locked_actions: Dict[str, int] = dict(getattr(context, 'formation_orders', {}))
     # -- 1. validate + reserve locked tasks (control rights, hard slots) --
     from .ledger import Ledger
     ledger = Ledger()
@@ -109,7 +109,9 @@ def complete_plan(context: Context, memory, skills,
             actions[actor] = 0
             continue
         capability = context.capabilities[actor]
-        if capability.healer:
+        if getattr(context, 'zerg_policy', None) and actor in context.zerg_policy.fallback:
+            action = context.zerg_policy.fallback[actor]
+        elif capability.healer:
             action = _medivac_baseline(context, actor, memory, resources)
         elif capability.suicide_attack:
             action = _baneling_baseline(context, actor, memory, skills,
@@ -161,6 +163,10 @@ def _search_goal(context: Context, memory) -> Optional[tuple]:
 
 def _combat_baseline(context: Context, actor: str, memory,
                      resources: _Resources) -> int:
+    forced = context.forced_hydra_targets(actor)
+    if forced:
+        target = next((e for e in forced if not resources.target_covered(e)), forced[0])
+        return context.attack_action(actor, target)
     instance = memory.instance_for("focus_fire", actor)
     if instance is not None and instance.goal_kind == "enemy" \
             and instance.goal in context.snapshot.enemies \

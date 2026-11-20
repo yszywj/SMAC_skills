@@ -4,7 +4,8 @@ param(
     [string]$BaselinePath = '',
     [string]$OutputName = '',
     [switch]$Resume,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [Alias('Group')][string]$Composition = ''
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -15,7 +16,20 @@ if (-not $selectedRaces.Count -or $selectedRaces.Count -ne $Races.Count) {
 if ($Resume -and (-not $PSBoundParameters.ContainsKey('OutputName') -or -not $OutputName)) {
     throw 'Resume requires an explicit existing OutputName.'
 }
-if (-not $OutputName) { $OutputName = ('tactical_{0}x{1}x3_{2}' -f $GamesPerGroup, $selectedRaces.Count, (Get-Date -Format 'yyyyMMdd_HHmmss')) }
+$allGroups = @('p_6z4s', 'p_4z5s1c', 'p_2z6s2c', 't_6m4r', 't_4m5r1h',
+               't_2m6r2h', 'z_6l4h', 'z_4l5h1b', 'z_2l6h2b')
+$raceByPrefix = @{ p = 'protoss'; t = 'terran'; z = 'zerg' }
+$groups = @($allGroups | Where-Object { $raceByPrefix[$_.Substring(0, 1)] -in $selectedRaces })
+if ($Composition) {
+    $groups = @($groups | Where-Object { $_ -eq $Composition })
+    if ($groups.Count -eq 0) { throw "Unknown composition or composition outside selected races: $Composition" }
+    $selectedRaces = @($raceByPrefix[$groups[0].Substring(0, 1)])
+}
+if (-not $OutputName) {
+    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+    if ($Composition) { $OutputName = "tactical_${GamesPerGroup}x1_$($groups[0])_$stamp" }
+    else { $OutputName = ('tactical_{0}x{1}x3_{2}' -f $GamesPerGroup, $selectedRaces.Count, $stamp) }
+}
 if ($OutputName -notmatch '^[a-zA-Z0-9][a-zA-Z0-9_-]*$') {
     throw 'OutputName must be a single directory name.'
 }
@@ -27,10 +41,6 @@ $prior = Join-Path $repoRoot 'runs\tactical_all_races_10v10_9x20_mechanisms_2026
 if (-not $BaselinePath) { $BaselinePath = Join-Path $repoRoot 'runs\tactical_10x3x3_20261115_212459' }
 $comparisonRoot = (Resolve-Path -LiteralPath $BaselinePath -ErrorAction Stop).ProviderPath
 $outputRoot = Join-Path $repoRoot ('runs\' + $OutputName)
-$allGroups = @('p_6z4s', 'p_4z5s1c', 'p_2z6s2c', 't_6m4r', 't_4m5r1h',
-               't_2m6r2h', 'z_6l4h', 'z_4l5h1b', 'z_2l6h2b')
-$raceByPrefix = @{ p = 'protoss'; t = 'terran'; z = 'zerg' }
-$groups = @($allGroups | Where-Object { $raceByPrefix[$_.Substring(0, 1)] -in $selectedRaces })
 function Read-Json { param([string]$Path)
     return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
 }
@@ -485,7 +495,7 @@ if ($Resume) {
     Write-Host ("Resume validated {0} complete prefix groups ({1} games); skipping them and scheduling {2} games." -f
         $resumeResults.Count, $resumeRecord.retained_games, ($totalGames - $resumeRecord.retained_games))
 }
-Write-Host "Native 10v10: $($selectedRaces.Count) races ($($selectedRaces -join ', ')) x 3 fixed mirror compositions x $GamesPerGroup games = $totalGames games."
+Write-Host "Native 10v10: $($groups.Count) mirror compositions ($($groups -join ', ')) x $GamesPerGroup games = $totalGames games."
 Write-Host "Seeds 170..$lastSeed; difficulty 7; step_mul 8; balanced; skill_max_steps 4."
 Write-Host "Primary comparison: $comparisonRoot ($availablePairs available pairs; missing seeds remain unpaired)."
 Write-Host "Output: $outputRoot"
@@ -638,3 +648,9 @@ try {
     Pop-Location
 }
 Write-Host "All $totalGames games complete. Summary: $statusPath"
+if ('zerg' -in $selectedRaces) {
+    & $python -B (Join-Path $PSScriptRoot 'summarize_zerg_damage.py') $outputRoot
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning 'Games are complete. Zerg damage analysis failed; rerun summarize_zerg_damage.py on this batch.'
+    }
+}

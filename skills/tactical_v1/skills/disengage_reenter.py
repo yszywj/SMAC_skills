@@ -8,6 +8,7 @@ never resets, exhausted escapes terminate with a retry record.
 import math
 from typing import Dict, List, Optional
 
+from ..action_duties import ready_hydralisk_shots, rescue_actions
 from ..context import Context, STOP, distance
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
 from ..combat_exchange import (escape_urgency, exposure_window, imminent_exchange_danger,
@@ -227,9 +228,10 @@ class DisengageReenterSkill:
             if not unit.alive or context.capabilities[actor].healer \
                     or context.capabilities[actor].suicide_attack:
                 continue
+            if ready_hydralisk_shots(context, actor):
+                continue  # take this volley; reassess danger on the next observation
             zergling = context.capabilities[actor].key == 'zergling'
             if self.joint_enabled or zergling:
-                from ..action_duties import rescue_actions
                 rescue = rescue_actions(context, actor, memory)
                 if rescue:
                     # Current death evidence must not wait for a failed

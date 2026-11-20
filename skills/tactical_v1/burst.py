@@ -616,6 +616,95 @@ def exchange_value(context, actor, center, remaining=None, *, opportunity=1.,
             'death_sources': tuple(death_sources)}
 
 
+def reserve_actions(context, actor, actions, valid, reservations, residual_for):
+    """Compare a second burst with a concrete screen or alternate contact."""
+    from .combat_exchange import danger_evidence
+    if not reservations or not valid:
+        return valid
+    redundant = set()
+    claimed = {e for _, _, hits in reservations for e, hp in hits.items() if hp > 0.}
+    if not claimed:
+        return valid
+    hydras = {peer: context.predict_position(peer, actions[peer]).position
+              for peer, unit in context.snapshot.allies.items()
+              if unit.alive and unit.type_name == 'hydralisk' and peer in actions}
+    # A surviving melee unit already in reach of a hydra has breached the
+    # screen. An observed attacker or one-shot threat also justifies a finish.
+    breakers = set()
+    for peer, point in hydras.items():
+        risk = context.forecast_risk(peer, point)
+        for enemy in set(risk.current_threats) - set(risk.heuristic_enemies):
+            cap = context.enemy_capabilities[enemy]
+            amount = risk.damage_estimates.get(enemy)
+            if (cap.combat_class == 'melee' or cap.suicide_attack
+                    or amount is not None and amount >= context.snapshot.allies[peer].effective_health
+                    or enemy in danger_evidence(context, peer, point)['targeted_sources']):
+                breakers.add(enemy)
+    for action in context.legal_actions(actor):
+        result = outcome(context, actor, action)
+        if result.trigger != 'active_contact_opportunity':
+            continue
+        overlap = any(t <= result.trigger_loops and any(
+            hp > 0. and e in result.damage_potential for e, hp in hits.items())
+            for t, _, hits in reservations)
+        if not overlap:
+            continue
+        remaining = residual_for(result)
+        exchange = exchange_value(context, actor, result.position, remaining,
+            opportunity=result.opportunity, enemy_positions=result.enemy_positions,
+            consumed={source for t, source, _ in reservations if t <= result.trigger_loops})
+        # A second blast may pay for itself or finish the surviving group.
+        finishes = sum(1 for e, hp in result.damage_potential.items()
+                       if hp is not None and 0. < remaining[e] <= hp * result.opportunity)
+        urgent_finish = any(e in breakers
+                            and hp is not None and 0. < remaining[e] <= hp * result.opportunity
+                            for e, hp in result.damage_potential.items())
+        if (exchange['known'] and not exchange['worthwhile']
+                and finishes < 2 and not urgent_finish):
+            redundant.add(action)
+    if not redundant:
+        return valid
+    source = context.snapshot.allies[actor]
+    alternatives = []
+    screen_moves = [a for a in valid if context.decode(actor, a).kind in ('move', 'stop')
+                    and outcome(context, actor, a).opportunity == 0.]
+    for action in valid:
+        semantic = context.decode(actor, action)
+        if action not in redundant and (outcome(context, actor, action).opportunity > 0.
+                or semantic.kind == 'attack' and semantic.target not in claimed):
+            alternatives.append(action)
+    others = [e for e, unit in context.snapshot.enemies.items()
+              if not unit.is_flying and e not in claimed]
+    if others and screen_moves:
+        target = min(others, key=lambda e: _distance(source.position, context.snapshot.enemies[e].position))
+        point, reachable = trigger_position(context, actor, target, 4 * max(context.H, 1))
+        if reachable:
+            advance = min(screen_moves, key=lambda a: _distance(action_position(context, actor, a), point))
+            if _distance(action_position(context, actor, advance), point) < _distance(source.position, point) - .05:
+                alternatives.append(advance)
+    # Screen the exposed side of a living hydra at its commanded position.
+    # The role lasts only for this joint branch, while a first burst is due.
+    ground = [u.position for u in context.snapshot.enemies.values() if not u.is_flying]
+    if screen_moves and hydras and ground:
+        anchor = min(hydras.values(), key=lambda p: _distance(source.position, p))
+        threat = min(ground, key=lambda p: _distance(anchor, p))
+        gap = _distance(anchor, threat)
+        # One body width ahead of the anchor keeps the bomber close enough
+        # to intercept without sending it down the first bomber's route.
+        offset = min(gap, 2. * source.radius)
+        point = tuple(a + (b - a) * offset / max(gap, 1e-6) for a, b in zip(anchor, threat))
+        safe_screen = []
+        for action in screen_moves:
+            end = action_position(context, actor, action)
+            risk = danger_evidence(context, actor, end)
+            if (not risk['immediate'] and not risk['effect_danger']
+                    and _distance(end, point) <= _distance(source.position, point) + .05):
+                safe_screen.append((_distance(end, point), action))
+        if safe_screen:
+            alternatives.append(min(safe_screen)[1])
+    return tuple(dict.fromkeys(alternatives)) or valid
+
+
 def _better_point_within_window(context, actor, exchange, remaining, margin):
     """Best strictly-better detonation point reachable within ONE decision
     window, or None. A projected point only defers the current positive
@@ -963,7 +1052,7 @@ def candidate_actions(context, actor, *, allow_wait=True, weights=None, remainin
                         or outcome(context, actor, action).opportunity > 0.), key=rank)
     selected = attacks[:2] + advancing[:1]
     deferred = getattr(context, '_burst_defer_reasons', {}).get(actor)
-    if deferred is not None:
+    if deferred is not None and 'point' in deferred:
         selected.extend(a for a in moves if _distance(action_position(context, actor, a),
                                                        deferred['point']) < .05)
     source = context.snapshot.allies[actor]

@@ -6,6 +6,7 @@
     "disengage_reenter": true,
     "regroup": true,
     "local_formation": true,
+    "ranged_fire_formation": true,
     "cohesive_search": true,
     "splash_fire": true,
     "heal_support": true,
@@ -25,6 +26,7 @@
     "planned_loss": 1.5,
     "hold_value": 0.3,
     "tactic_progress": 0.6,
+    "ranged_fire_formation": 2.0,
     "link": 0.8,
     "meeting": 0.8,
     "role": 0.6,
@@ -146,6 +148,9 @@
   "heal_support": {
     "follow_distance": 5.0,
     "switch_margin": 0.3
+  },
+  "hydra_micro": {
+    "enabled": false
   },
   "burst_engage": {
     "proxy_radius": 2.5,

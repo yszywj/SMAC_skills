@@ -5,7 +5,10 @@ import unittest
 
 from skills.tactical_v1.config import ConfigError, load, validate
 from skills.tactical_v1.context import Context, build_snapshot, distance
+from skills.tactical_v1.contracts import Commitment, ResourceClaims
+from skills.tactical_v1.evaluator import Evaluator
 from skills.tactical_v1.memory import TacticalMemory
+from skills.tactical_v1.skills.common import make_plan
 from skills.tactical_v1.skills.coordinated_engage import CoordinatedEngageSkill
 from skills.tactical_v1.targeting import shared_target_plan
 from skills.tactical_v1.telemetry import Telemetry
@@ -17,6 +20,42 @@ def context(state):
 
 
 class SharedEngageFrontTests(unittest.TestCase):
+    def test_dispersed_hydras_keep_shots_and_release_screen_on_shared_contact(self):
+        allies = [((0., 0.), 'hydralisk'), ((5.5, 0.), 'hydralisk'),
+                  ((5.5, -4.), 'zergling'), ((20., 15.), 'zergling'),
+                  ((18., 16.), 'zergling')]
+        memory = TacticalMemory()
+        for loop, enemies in [(2, {}), (10, {'e0': enemy((3., 1.))})]:
+            c = context(scene(allies, enemies, loop=loop, enemy_can_reach=False))
+            memory.encounters.observe(c)
+            plans = CoordinatedEngageSkill({}).propose(c, memory, Telemetry())
+            plan = next(p for p in plans if p.goal_data.get('screen') == ['u2'])
+            self.assertEqual(plan.goal_data['fire_group'], ['u0', 'u1'])
+            self.assertEqual(plan.goal_data['screen_released'], bool(enemies))
+            if enemies:
+                self.assertEqual(plan.goal_data['shared_target'], 'e0')
+                for actor in ('u0', 'u1'):
+                    self.assertEqual(plan.current_actions[actor], c.attack_action(actor, 'e0'))
+                self.assertEqual(c.decode('u2', plan.current_actions['u2']).kind, 'move')
+            else:
+                self.assertIsNone(plan.goal_data['shared_target'])
+                self.assertEqual(c.decode('u2', plan.current_actions['u2']).kind, 'stop')
+
+    def test_shared_fire_progress_requires_a_second_shooter_to_close(self):
+        c = context(scene([((4., 0.), 'hydralisk'), ((0., 0.), 'hydralisk'),
+                           ((0., 1.), 'zergling')], {'e0': enemy((8., 0.))}))
+        evaluator = Evaluator()
+        for rear_action, screen_action, advances in ((1, 4, False), (4, 1, True)):
+            with self.subTest(rear_action=rear_action):
+                actions = {'u0': 6, 'u1': rear_action, 'u2': screen_action}
+                plan = make_plan('coordinated_engage', actions, 'e0', actions, [],
+                    ResourceClaims(controls=tuple(actions)), Commitment('opening_fire_group'),
+                    {}, c.snapshot.snapshot_id, '', goal_kind='enemy', atomic=True,
+                    goal_data={'objective': {'kind': 'shared_fire', 'target': 'e0',
+                                             'shooters': ['u0', 'u1']}})
+                _, parts = evaluator.task_quality(c, actions, [plan], evaluator.effects(c, actions))
+                self.assertEqual(parts['progress'] > 0., advances)
+
     def plans(self, state, config=None, memory=None):
         c = context(state)
         memory = TacticalMemory() if memory is None else memory
@@ -117,10 +156,15 @@ class SharedEngageFrontTests(unittest.TestCase):
     def test_common_controls_are_independent_strict_booleans_and_preserve_s1(self):
         config = load()
         controls = config['common_combat']
-        self.assertEqual(len(controls), 8)
-        self.assertTrue(all(controls.values()))
+        # Boolean mechanism switches plus the bounded fire-delay horizon
+        # (a float, validated separately below).
+        bool_controls = {k: v for k, v in controls.items()
+                         if isinstance(v, bool)}
+        self.assertGreaterEqual(len(bool_controls), 8)
+        self.assertTrue(all(bool_controls.values()))
+        self.assertIn('fire_delay_max_h', controls)
         splash = copy.deepcopy(config['splash_fire'])
-        for key in controls:
+        for key in bool_controls:
             changed = copy.deepcopy(config)
             changed['common_combat'][key] = False
             validate(changed)

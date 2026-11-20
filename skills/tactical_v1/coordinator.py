@@ -22,6 +22,7 @@ from .evaluator import Evaluator
 from .ledger import Ledger
 from .telemetry import Telemetry
 from .validator import repair, validate_actions, validate_plans
+from .zerg_roster_policy import ZERGLING_SKILLS, ZergRosterPolicy, is_zerg_roster, ling_candidate
 
 REPAIR_RESERVE = 2
 
@@ -103,6 +104,21 @@ class Coordinator:
                       n_agents: int) -> Optional[_CompletePlan]:
         """The ONLY full-scoring entry point: counted, cached, validated.
         budget[0] decrements before every real score_joint (D3)."""
+        if getattr(context, 'zerg_policy', None):
+            plans, actions = context.zerg_policy.complete(plans, actions)
+        formation = getattr(context, 'formation_orders', {})
+        if any(actions.get(a) != cmd for a, cmd in formation.items()):
+            return None
+        if formation and actions != context.baseline_actions:
+            from .hydra_support import support_path_clear
+            if any(not support_path_clear(context, a, end, actions)
+                   for a, end in context.formation_reserved_paths.items()):
+                return None
+        if not getattr(context, 'zerg_policy', None):
+            for actor, action in actions.items():
+                targets = context.forced_hydra_targets(actor)
+                if targets and context.decode(actor, action).target not in targets:
+                    return None
         probe = _CompletePlan(plans, actions, 0.0, {})
         # Retaining a live instance changes the minimum-commitment cost.
         # Unknown/stale IDs still share a score cache entry, while the
@@ -257,13 +273,43 @@ class Coordinator:
                n_agents: int) -> Tuple[List[int], Dict[str, object], List]:
         started = time.perf_counter()
         context.deployment_memory = memory
+        context.zerg_policy = None
+        if is_zerg_roster(context):
+            context.zerg_policy = ZergRosterPolicy(context, skills, self.config.get('_fingerprint', ''))
+            skills = {name: skill for name, skill in skills.items() if name in ZERGLING_SKILLS}
         self._cache = {}
         self._screened = set()
         self._contract_keys = {}
         self._execution_seeds = 0
         budget = Budget(self.max_evaluations)
         # ---- A3/D1: P0 built ONCE through the single completion entry ----
+        context.formation_orders = {}
         p0_actions = complete_plan(context, memory, skills)
+        if context.zerg_policy:
+            _, p0_actions = context.zerg_policy.complete([], p0_actions)
+        context.baseline_actions = p0_actions
+        context.ranged_fire_reference = ()
+        formation = skills.get("ranged_fire_formation")
+        context.ranged_fire_formation_enabled = bool(getattr(formation, "enabled", False)
+            and self.config.get("common_combat", {}).get("joint_assessment_enabled", True))
+        if context.ranged_fire_formation_enabled:
+            from .skills.ranged_fire_formation import formation_orders
+            context.formation_orders = formation_orders(context, memory, p0_actions)
+        if context.formation_orders:
+            from .hydra_support import support_path_clear
+            from .joint_combat import action_position
+            p0_actions = {**p0_actions, **context.formation_orders}
+            context.baseline_actions = p0_actions
+            context.formation_reserved_paths = {}
+            for actor, cmd in context.formation_orders.items():
+                end = action_position(context, actor, cmd)[0]
+                if support_path_clear(context, actor, end, p0_actions):
+                    context.formation_reserved_paths[actor] = end
+        elif context.ranged_fire_formation_enabled:
+            from .skills.ranged_fire_formation import formation_fronts, formation_value
+            context.ranged_fire_reference = tuple(
+                (anchor, enemy, formation_value(context, anchor, enemy, p0_actions))
+                for anchor, enemy in formation_fronts(context))
         p0 = self.evaluate_once(context, [], p0_actions, memory,
                                 budget.search_budget,
                                 len(p0_actions))
@@ -271,15 +317,36 @@ class Coordinator:
             raise RuntimeError(
                 "baseline plan P0 failed validation: "
                 f"{validate_actions([p0_actions[f'u{i}'] for i in range(len(p0_actions))], context, len(p0_actions))}")
+        # Use the same validated outsiders for arc construction and the
+        # first full-team comparison, including any interception duties.
+        frontier: List[_CompletePlan] = [p0]
+        formation_seed = p0
+        if self.config.get('common_combat', {}).get('joint_assessment_enabled', True):
+            from .action_duties import seed_actions
+            duty_actions = seed_actions(context, p0_actions, memory)
+            if duty_actions != p0_actions:
+                duty_seed = self.evaluate_once(context, [], duty_actions, memory,
+                    budget.search_budget, len(p0_actions))
+                if duty_seed is not None:
+                    frontier.append(duty_seed)
+                    formation_seed = min((p0, duty_seed), key=lambda entry: self._rank(entry, memory))
+                    self._execution_seeds += 1
+        context.formation_seed_actions = formation_seed.actions
         # ---- candidates ---------------------------------------------------
         candidates: List[CandidatePlan] = []
         for name in sorted(skills):
             skill = skills[name]
             if not getattr(skill, "enabled", True):
                 continue
+            if context.formation_orders and name == 'ranged_fire_formation':
+                continue  # The formation already owns these units this window.
             proposals = skill.propose(context, memory, telemetry, None)
+            if context.zerg_policy:
+                proposals = (candidate for plan in proposals
+                             if (candidate := ling_candidate(context, plan)) is not None)
             candidates.extend(p for p in proposals
-                              if p.snapshot_id == context.snapshot.snapshot_id)
+                              if p.snapshot_id == context.snapshot.snapshot_id and
+                              context.formation_orders.keys().isdisjoint(p.controlled_actors))
         generated = len(candidates)
         candidates = self._schedule_candidates(candidates, context)
         self._search_coverage = {
@@ -294,28 +361,19 @@ class Coordinator:
                     actor, {"proposed": 0, "screened": 0})["proposed"] += 1
         atomics = sorted((plan for plan in candidates if plan.atomic), key=lambda plan: (
             0 if plan.instance_id in memory.instances else
-            1 if (plan.goal_data.get("objective") or {}).get("kind") in
-                 ("rally", "combat_rejoin") else 2))
-        # ---- frontier: P0 + validated continuation seeds (D1) -------------
-        frontier: List[_CompletePlan] = [p0]
-        # A strong duty needs an actual complete alternative. This seed is
-        # scored/validated within the same budget, including all free actors.
-        if self.config.get('common_combat', {}).get('joint_assessment_enabled', True):
-            from .action_duties import seed_actions
-            duty_actions = seed_actions(context, p0_actions, memory)
-            if duty_actions != p0_actions:
-                duty_seed = self.evaluate_once(context, [], duty_actions, memory,
-                    budget.search_budget, len(p0_actions))
-                if duty_seed is not None:
-                    frontier.append(duty_seed)
-                    self._execution_seeds += 1
+            1 if plan.goal_data.get("first_engagement") else
+            2 if (plan.goal_data.get("objective") or {}).get("kind") in
+                 ("rally", "combat_rejoin") else 3))
         # Important joint candidates get a full comparison even with a tiny
         # budget. They still compete on the same objective as other actions.
         for plan in atomics:
             if budget.search_budget[0] <= 0:
                 break
             self._mark_screened(plan)
-            seed = self._substitute(p0, plan, context, memory,
+            # A local firing line changes only its members. Preserve the
+            # best full-team orders for unrelated interceptors and attackers.
+            parent = formation_seed if plan.primary_skill == "ranged_fire_formation" else p0
+            seed = self._substitute(parent, plan, context, memory,
                                     budget.search_budget, len(p0_actions))
             if seed is not None:
                 frontier.append(seed)
@@ -461,9 +519,13 @@ class Coordinator:
                    for a in p.current_actions}
         for actor in released:
             actions[actor] = None
+        local_support = (candidate.goal_data.get('objective') or {}).get('kind') in (
+            'counter_fire_support', 'ranged_fire_formation')
+        if local_support and released - targets:
+            return None  # keep a third member's atomic contract intact
         from .baseline import LockedPlanConflict
         try:
-            fill = complete_plan(context, memory, None,
+            fill = dict(entry.actions) if local_support else complete_plan(context, memory, None,
                                  locked_plans=[*kept, candidate])
         except LockedPlanConflict:
             return None        # reject the branch; never rewrite a locked task
@@ -485,6 +547,12 @@ class Coordinator:
     def _summary(self, final: _CompletePlan, context, telemetry, candidates,
                  repair_log, duration_ms, n_agents, budget, memory=None):
         per_unit = {}
+        for actor, cmd in getattr(context, 'formation_orders', {}).items():
+            target = (context.decode(actor, cmd).target or
+                      getattr(context, 'hydra_formation_target', None))
+            per_unit[actor] = {"skill": "ranged_fire_formation", "provider": None,
+                               "goal": target or "", "goal_kind": "enemy" if target else "",
+                               "action": cmd, "plan": None, "phase": "exclusive_control"}
         for plan in final.plans:
             for actor in plan.controlled_actors:
                 per_unit[actor] = {
@@ -509,7 +577,7 @@ class Coordinator:
                                        "plans_selected": 0})
                 stats["plans_selected"] += 1
         for actor, cap in context.capabilities.items():
-            if cap.specialization:
+            if cap.specialization and not getattr(context, 'zerg_policy', None):
                 stats = telemetry.specialization_stats.setdefault(
                     cap.specialization, {"providers_active": 0,
                                          "plans_selected": 0})

@@ -8,6 +8,7 @@ damage, the move does not); it is NOT charged a second time as switch cost.
 """
 from typing import Dict, List, Optional
 
+from ..action_duties import ready_hydralisk_shots
 from ..context import Context, distance, GAME_LOOPS_PER_SPEED_SECOND
 from ..contracts import Commitment, EffectClaim, HEURISTIC, ResourceClaims
 from ..targeting import next_shot_target, planning_enabled, shared_target_plan
@@ -142,6 +143,8 @@ class CombatRepositionSkill:
             provider = self.providers.get("splash_fire")
             budget = h_loops(context, 8.0)
             for target_id, label, move in candidates:
+                if label == 'retreat' and ready_hydralisk_shots(context, actor):
+                    continue
                 enemy = context.snapshot.enemies[target_id]
                 relation = context.snapshot.relations[actor][target_id]
                 r_max = relation.native_weapon_range or 5.0

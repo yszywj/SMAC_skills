@@ -5,13 +5,107 @@ an order. Only one primary volley per available source is reserved here.
 Prospective movement/visibility remain uncertain, and ordinary nonlethal
 fire never removes incoming weapon exposure. The final evaluator must
 reconstruct all physical effects from the selected actions.
+
+Damage value uses a FIXED reference pool (``DAMAGE_SCALE``), not the
+target's own health pool: a 12-point volley is worth the same base amount
+whether it lands on a 35 HP zergling or a 90 HP hydralisk. The cap stays
+the target's remaining effective health (overkill deducts), and lethal
+shots keep their separate kill credit — so low-pool targets no longer earn
+inflated base damage while real finishing value is preserved.
 """
+import math
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 from .battle_pressure import enemy_pressure
-from .context import IN_RANGE, distance
+from .context import GAME_LOOPS_PER_SPEED_SECOND, IN_RANGE, distance
 from .unit_value_view import target_value as _object_value
+
+# Fixed damage-value reference shared by candidate allocation, the final
+# team scoring and the mixed gun/burst settlement. One scale for every
+# candidate in the same comparison; deliberately NOT any unit's HP pool.
+DAMAGE_SCALE = 30.0
+# Same interval for every target, roughly 2.4 native Hydra attack cycles.
+OUTPUT_HORIZON_LOOPS = 32.
+
+
+def _enemy_fire_lanes(context, target):
+    """Visible victims, enemy approach time and potential ordinary HP per loop."""
+    enemy = context.snapshot.enemies[target]
+    profile = context.snapshot.raw_state.get('unit_type_profiles', {}).get(str(enemy.unit_type_id), {})
+    speed = profile.get('movement_speed_native')
+    lanes = []
+    for actor, unit in context.snapshot.allies.items():
+        if not unit.alive:
+            continue
+        domain = 'air' if unit.is_flying else 'ground'
+        damage = context.enemy_attack_damage(target, actor)
+        if not damage or damage <= 0.:
+            continue
+        for weapon in profile.get('weapons', ()):
+            if weapon.get('target_type') not in (domain, 'any'):
+                continue
+            period = weapon.get('attack_period_loops')
+            reach = weapon.get('range')
+            if not isinstance(period, (int, float)) or not math.isfinite(period) or period <= 0.:
+                continue
+            if not isinstance(reach, (int, float)) or not math.isfinite(reach) or reach < 0.:
+                continue
+            gap = max(0., distance(enemy.position, unit.position) - reach - enemy.radius - unit.radius)
+            if gap and (not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed <= 0.):
+                continue
+            arrival = gap * GAME_LOOPS_PER_SPEED_SECOND / speed if gap else 0.
+            if arrival < OUTPUT_HORIZON_LOOPS:
+                lanes.append((arrival, damage / period))
+    return lanes
+
+
+def avoided_output(context, target, shooters):
+    """Possible later output lost if currently firing sources maintain contact.
+
+    Cooldown schedules firing opportunities. Wind-up and projectile arrival
+    remain unknown; this forecast never cancels the observed enemy volley.
+    """
+    key = target, tuple(sorted(shooters))
+    if not key[1]:
+        return 0.
+    cache = getattr(context, '_avoided_output_cache', None)
+    if cache is None:
+        cache = context._avoided_output_cache = {}
+    if key in cache:
+        return cache[key]
+
+    events = []
+    for actor in key[1]:
+        estimate = context.fire_estimate(actor, target)
+        if not estimate.window_shots or not estimate.damage_est or estimate.damage_est <= 0.:
+            continue
+        ready = context.snapshot.allies[actor].weapon_cooldown_loops
+        period = context.weapon_period(actor, target)
+        while ready < OUTPUT_HORIZON_LOOPS:
+            events.append((ready, estimate.damage_est))
+            if period is None:
+                break
+            ready += max(1., period)
+
+    remaining = context.snapshot.enemies[target].effective_health
+    value = 0.
+    for ready, damage in sorted(events):
+        remaining -= damage
+        if remaining > 0.:
+            continue
+        # Immediate kill and this window's risk have their own ledgers.
+        lanes = getattr(context, '_output_lanes', None)
+        if lanes is None:
+            lanes = context._output_lanes = {}
+        if target not in lanes:
+            lanes[target] = _enemy_fire_lanes(context, target)
+        lost = max((max(0., OUTPUT_HORIZON_LOOPS - max(context.H, ready, arrival)) * damage_rate
+                    for arrival, damage_rate in lanes[target]), default=0.)
+        value = lost / DAMAGE_SCALE
+        break
+    cache[key] = value
+    return value
 
 
 @dataclass(frozen=True)
@@ -135,7 +229,7 @@ def shared_target_plan(context, memory, config=None):
         return cache[key]
     options = {a: {} for a in actors}
     for actor in actors:
-        for target in enemies:
+        for target in context.forced_hydra_targets(actor) or enemies:
             opportunity = _opportunity(context, actor, target, horizon)
             if opportunity is not None:
                 options[actor][target] = opportunity
@@ -143,6 +237,7 @@ def shared_target_plan(context, memory, config=None):
                  for e in enemies}
     pressure = {e: enemy_pressure(context, e) for e in enemies}
     assignments = {}
+    reserved_shooters = {e: [] for e in enemies}
     immediate_options = {a: {e: option for e, option in options[a].items()
                              if option[1]} for a in actors}
     # Allocate actual current-window sources first, restricted to their
@@ -159,25 +254,31 @@ def shared_target_plan(context, memory, config=None):
 
         def rank(target):
             amount, immediate, moving = choices[target]
-            enemy = context.snapshot.enemies[target]
             available = remaining[target]
             useful = min(max(amount or 0., 0.), available)
-            maximum = max(enemy.max_health + enemy.max_shield,
-                          enemy.effective_health, 1.)
-            # Main value is useful primary damage and feasible completion.
-            # Pressure is a bounded objective preference, never suppression.
-            value = 3. * useful / maximum
-            if amount is not None and available > 0 and amount >= available:
-                value += 2.
+            # Fixed reference pool: base value tracks the damage actually
+            # applied, capped by the target's remaining effective health.
+            # A full-health zergling and a full-health hydralisk hit by the
+            # same volley now score the same base amount.
+            value = 3. * useful / DAMAGE_SCALE
+            lethal = amount is not None and available > 0 and amount >= available
+            if lethal:
+                value += (config or {}).get('weights', {}).get('kill', 2.)
             # Object value (adapted legacy evaluator) is a bounded ORDERING
             # preference for equally useful volleys, not a second damage,
             # kill or relief ledger entry.
             value += getattr(context, 'unit_value_parameters', {}).get(
                 'focus_value_weight', .2) * _object_value(context, target) if useful > 0 else 0.
-            # A useful primary volley advances the local objective even
-            # against a large health pool. Normalize this separate bounded
-            # preference by the source's volley, not by enemy EHP again.
-            value += pressure[target] * useful / max(amount or 0., 1.)
+            # A finishing shot removes the remaining threat even when most
+            # of its raw damage is overkill. This orders candidates only;
+            # the final evaluator owns the actual lethal-pressure credit.
+            pressure_fraction = 1. if lethal else useful / max(amount or 0., 1.)
+            value += pressure[target] * pressure_fraction
+            if immediate and useful > 0.:
+                assigned = reserved_shooters[target]
+                marginal = (avoided_output(context, target, [*assigned, actor])
+                            - avoided_output(context, target, assigned))
+                value += (config or {}).get('weights', {}).get('target_threat', .25) * marginal
             if not immediate:
                 value *= .5
             if moving:
@@ -190,6 +291,8 @@ def shared_target_plan(context, memory, config=None):
         amount, immediate, moving = choices[target]
         assignments[actor] = TargetAssignment(
             target, previous[actor], amount, immediate, moving, horizon)
+        if immediate and amount is not None and amount > 0.:
+            reserved_shooters[target].append(actor)
         if amount is not None:
             remaining[target] = max(0., remaining[target] - max(amount, 0.))
     result = TargetPlan(assignments, horizon)

@@ -6,7 +6,8 @@ checks run on the COMPLETE final action list (baseline entries included).
 """
 from typing import Dict, List, Optional, Tuple
 
-from .actions import DEAD_NOOP, KEEP_HEAL_ORDER
+from .actions import DEAD_NOOP, KEEP_HEAL_ORDER, MOVE_ACTIONS
+from .action_duties import ready_hydralisk_shots, rescue_actions
 from .context import Context
 from .contracts import CandidatePlan, Dependency
 from .ledger import Ledger
@@ -54,22 +55,48 @@ def validate_actions(actions: List[int], context: Context,
     return problems
 
 
+def _support_obstruction(plan, context, actions):
+    """A local support move must still fit after the other units get their orders."""
+    from .hydra_support import support_paths_overlap
+    from .joint_combat import action_position
+
+    units = context.snapshot.allies
+    for actor in plan.controlled_actors:
+        unit, action = units.get(actor), actions.get(actor)
+        if unit is None or action is None or context.decode(actor, action).kind != "move":
+            continue
+        endpoint = action_position(context, actor, action)[0]
+        for peer, other in units.items():
+            if peer == actor or not other.alive or unit.is_flying != other.is_flying:
+                continue
+            other_end = (action_position(context, peer, actions[peer])[0]
+                         if peer in actions else other.position)
+            if support_paths_overlap(unit, endpoint, other, other_end):
+                return actor, peer
+    return None
+
+
 def validate_plans(plans: List[CandidatePlan], context: Context,
                    actions: Dict[str, int], report=None,
                    memory=None) -> List[Dict[str, object]]:
     """Structural + dependency validation of the plan set against the FINAL
     actions. ``report`` is the physical effects of ``actions`` and carries
     the window-qualified fire sources and heal assignments. ``memory`` is
-    optional for backwards compatibility; it feeds ONLY the specialized
-    bomber-intercept contract checks below — missing memory degrades the
-    blockage sub-check to route-agnostic, it never waives the contract."""
+    optional for backwards compatibility; it supplies observed route blockage
+    to the checks for interception and withdrawal."""
     problems: List[Dict[str, object]] = []
     seen_control: Dict[str, str] = {}
     plan_by_id = {p.proposal_id: p for p in plans}
-    from .intercept import validate_intercept_plan
+    from .intercept import spread_moves, validate_intercept_plan
     for plan in plans:
-        if (getattr(plan, 'goal_data', None) or {}).get(
-                'validation_kind') == 'bomber_intercept':
+        data = plan.goal_data or {}
+        if (data.get("objective") or {}).get("kind") in ("counter_fire_support", "ranged_fire_formation") \
+                or data.get("validation_kind") == "zerg_screen":
+            obstruction = _support_obstruction(plan, context, actions)
+            if obstruction:
+                problems.append(_problem("support_path_obstructed", True,
+                                         plan.proposal_id, *obstruction))
+        if data.get('validation_kind') == 'bomber_intercept':
             # Specialized whole-group check runs on EVERY complete plan that
             # declares the contract — independent of whether any actor
             # currently carries a required intercept duty, and for all
@@ -203,6 +230,14 @@ def validate_plans(plans: List[CandidatePlan], context: Context,
                         problems.append(_problem("heal_capacity_exceeded", True,
                                                  plan.proposal_id, healer,
                                                  patient))
+    # Other providers and baseline substitutions can select the same escape
+    # routes as the retreat skill. Check the real orders in the final branch.
+    for actor, action in actions.items():
+        if action in MOVE_ACTIONS and ready_hydralisk_shots(context, actor) and (
+                action in rescue_actions(context, actor, memory)
+                or action in spread_moves(context, actor, memory)):
+            problems.append(_problem("ready_shot_before_withdrawal", True,
+                                     seen_control.get(actor, ""), actor))
     # protocol heal capacity across the WHOLE final plan: a patient newly
     # treated by two healers is a hard violation even for baseline rows (D8)
     if report is not None:

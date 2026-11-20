@@ -112,9 +112,22 @@ class FutureFireBudgetTests(unittest.TestCase):
             c = context(pair(count=count)); e = Evaluator()
             actions = {a: 6 for a in c.snapshot.allies}
             values.append(e._future_attack_value(c, actions, e.effects(c, actions), []))
-        self.assertAlmostEqual(values[0], .35 * CONTINGENCY_CREDIT)
+        # Only five HP of damage can still be useful even if the primary fails.
+        self.assertAlmostEqual(values[0], .35 * CONTINGENCY_CREDIT * .5)
         for value in values[1:]:
             self.assertAlmostEqual(value, values[0])
+
+    def test_opening_the_same_future_shot_is_independent_of_target_health_pool(self):
+        values = []
+        for health in (35., 90.):
+            raw = pair(health=health, count=0)
+            raw['allies']['u0']['weapon_cooldown_loops'] = 16.
+            c = context(raw)
+            e = Evaluator()
+            actions = {'u0': 6}
+            values.append(e._future_attack_value(c, actions, e.effects(c, actions), []))
+        self.assertGreater(values[0], 0.)
+        self.assertEqual(values[0], values[1])
 
     def test_many_backup_actors_cannot_restore_full_support(self):
         values = []

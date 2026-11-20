@@ -35,6 +35,8 @@ class TacticalMemory:
         self.no_progress_window_h = no_progress_window_h
         self.encounter_config = copy.deepcopy(encounter_config or {})
         self.encounters = EncounterTracker(self.encounter_config)
+        self.first_hydra_sighting = None
+        self.shared_hydra_contact = False
         self.battle = BattleIntent(self.encounter_config)
         self.combat_progress = CombatProgress(self.encounter_config)
         self.contact_progress = ContactProgress(self.encounter_config)
@@ -58,6 +60,7 @@ class TacticalMemory:
         self.observed_key = None             # (snapshot_id, game_loop) guard
         self.instances: Dict[str, SkillInstance] = {}
         self.last_committed_actions: Dict[str, int] = {}
+        self.last_hydra_support_move = None
         self.committed: bool = False         # commit idempotence (C2)
         self.committed_positions: Dict[str, Tuple[int, Tuple[float, float]]] = {}
         self.committed_risk: Dict[str, int] = {}
@@ -85,6 +88,7 @@ class TacticalMemory:
         self.observed_key = None
         self.instances.clear()
         self.last_committed_actions.clear()
+        self.last_hydra_support_move = None
         self.committed = False
         self.committed_positions.clear()
         self.committed_risk.clear()
@@ -101,6 +105,8 @@ class TacticalMemory:
         self.blocked_directions.clear()
         self.fire_delay_budget.clear()
         self.enemy_motion.clear()
+        self.first_hydra_sighting = None
+        self.shared_hydra_contact = False
         self.encounters = EncounterTracker(self.encounter_config)
         self.battle = BattleIntent(self.encounter_config)
         self.combat_progress = CombatProgress(self.encounter_config)
@@ -249,6 +255,15 @@ class TacticalMemory:
             self.reentry_window.observe(context)
             self._observe_combat_memory(snapshot, context)
             self.encounters.observe(context)
+            if not self.shared_hydra_contact:
+                shooters = [a for a, u in snapshot.allies.items() if u.alive and u.type_name == 'hydralisk']
+                targets = [e for e, u in snapshot.enemies.items() if u.type_name == 'hydralisk']
+                if len(shooters) >= 2 and targets:
+                    if self.first_hydra_sighting is None:
+                        self.first_hydra_sighting = snapshot.game_loop
+                    self.shared_hydra_contact = any(sum(
+                        context.can_issue_attack(a, e) and context.fire_estimate(a, e).window_shots > 0
+                        for a in shooters) >= 2 for e in targets)
             self.battle.observe(context)
         self.cleanup_retry_records(snapshot.game_loop)
         events.extend(self.retire_invalid(snapshot))   # identity/protocol
@@ -663,7 +678,7 @@ class TacticalMemory:
         duration = max(0, int(round(snapshot.step_mul * self.encounter_config.get(
             "lifecycle", {}).get("combat_cycle_commit_h", 2.))))
         by_actor = {a: p for p in plans for a in p.controlled_actors}
-        purposeful = {"coordinated_engage", "combat_reposition", "disengage_reenter",
+        purposeful = {"coordinated_engage", "ranged_fire_formation", "combat_reposition", "disengage_reenter",
                       "combat_rejoin", "regroup", "precombat_rally"}
         for actor, action in actions.items():
             unit = snapshot.allies.get(actor)
@@ -1129,9 +1144,15 @@ class TacticalMemory:
                 "conflicting commit at the same decision step: "
                 f"{self.last_committed_actions} vs {actions}")
         deployment_facts = {}
+        support_move = None
         if context is not None:
             context.deployment_memory = self
             from .action_duties import actor_duty
+            from .hydra_support import isolated_shooter_support
+            support = isolated_shooter_support(context, self, actions)
+            if support and support['satisfied'] and context.decode(
+                    support['supporter'], support['action']).kind == 'move':
+                support_move = (support['lead'], support['target'], support['supporter'])
             # Capture the original prioritized duty BEFORE applying deltas
             # or retiring tasks. A coincidentally equal rescue/fire command
             # must not start an unrelated deployment task.
@@ -1141,6 +1162,7 @@ class TacticalMemory:
                         and action in duty['actions']:
                     deployment_facts[actor] = dict(duty)
         self.committed = True
+        self.last_hydra_support_move = support_move
         self.last_committed_actions = dict(actions)
         for actor, action in actions.items():
             if actor in snapshot.allies:

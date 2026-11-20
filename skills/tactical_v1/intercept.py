@@ -99,6 +99,23 @@ def spread_valid(context, actor, action, memory=None):
     return True
 
 
+def spread_moves(context, actor, memory=None):
+    """Legal moves that reduce this ranged unit's imminent explosion loss."""
+    cache = getattr(context, '_blast_spread_moves', None)
+    if cache is None:
+        cache = context._blast_spread_moves = {}
+    key = actor, id(memory)
+    if key not in cache:
+        unit = context.snapshot.allies[actor]
+        if context.capabilities[actor].combat_class == 'ranged' and unit.alive \
+                and not unit.is_flying and explosion_loss(context, actor, unit.position) > 0.:
+            cache[key] = tuple(a for a in context.move_destinations(actor)
+                               if spread_valid(context, actor, a, memory))
+        else:
+            cache[key] = ()
+    return cache[key]
+
+
 def _safe_shooter(context, actor, enemy):
     cap = context.capabilities[actor]
     unit = context.snapshot.allies[actor]
@@ -133,6 +150,9 @@ def entry_guard_actions(context, actor, memory=None):
         return ()
     bombers = [r['enemy'] for r in threat_facts(context)['bombers']
                if (entry := _entry(context, actor, r['enemy'], unit.position)) is not None and entry > 0.]
+    if not bombers:
+        cache[key] = ()
+        return ()
     from .joint_combat import action_position
     safe, firing_actions, unsafe = [], [], False
     targets = [e for e in context.snapshot.enemies
@@ -162,7 +182,17 @@ def entry_guard_actions(context, actor, memory=None):
             firing_actions.append(action)
     # The guard must not grant a new right to drop an existing melee shot.
     preferred = firing_actions if firing_actions and unit.weapon_cooldown_loops <= context.H else safe
-    cache[key] = tuple(preferred) if unsafe else ()
+    # A route reducing imminent blast loss can be worthwhile even when an
+    # ATTACK is legal. Keep both choices for the final exchange comparison.
+    if unsafe:
+        escapes = spread_moves(context, actor, memory)
+        if memory is not None and firing_actions:
+            budget = memory.fire_delay_available(context, actor)
+            escapes = [a for a in escapes if memory._fire_delay_postponement(
+                context, actor, a) <= budget + 1e-6]
+        cache[key] = tuple(dict.fromkeys((*preferred, *escapes)))
+    else:
+        cache[key] = ()
     return cache[key]
 
 
@@ -171,7 +201,7 @@ def intercept_plan(context, memory=None, config=None):
     key = id(memory)
     if key in cache:
         return cache[key]
-    plans, used = [], set()
+    plans, alternatives, committed = [], [], set()
     from .impact_timing import attack_impact_timing, joint_kill_time
     from .unit_value_view import preservation_value
     timing_guard = getattr(context, 'intercept_config', {}).get(
@@ -189,15 +219,15 @@ def intercept_plan(context, memory=None, config=None):
                      if v['entry_h'] is not None and 0. < v['entry_h'] <= 2.]
         pool = []
         for actor in sorted(context.snapshot.allies):
-            if actor in used:
+            if actor in committed:
                 continue
             estimate = _safe_shooter(context, actor, enemy)
             # Rescue-eligible shooters are NOT unconditionally excluded here:
             # whether the group substitution is admissible is decided by the
             # joint rescue check and final group validation, not per member.
             if estimate is not None:
-                delay = estimate.effective_after_loops
-                pool.append((float(context.H if delay is None else delay), -estimate.damage_lo, actor))
+                delay = attack_impact_timing(context, actor, enemy).ready_after_loops
+                pool.append((delay, -estimate.damage_lo, actor))
         pool.sort()
         remaining, shooters, kill_loops = context.snapshot.enemies[enemy].effective_health, [], 0.
         for delay, negative_damage, actor in pool:
@@ -206,6 +236,13 @@ def intercept_plan(context, memory=None, config=None):
             kill_loops = max(kill_loops, delay)
             if remaining <= 0:
                 break
+        if remaining <= 0:
+            # An early small hit can become redundant when a heavier shot
+            # joins. Release such members without delaying the lethal volley.
+            for member in sorted(shooters, key=lambda item: item[2]):
+                if remaining + member[2] <= 0.:
+                    remaining += member[2]
+                    shooters.remove(member)
         # Timing split (task 1): cooldown end is when the gun CAN fire, not
         # when damage LANDS. Without wind-up/projectile data the kill-time
         # has a lower bound only — that can never prove a timely intercept.
@@ -228,42 +265,70 @@ def intercept_plan(context, memory=None, config=None):
         # current position stays priced (evaluator enemy_death_burst floor);
         # killing it never zeroes that cost here.
         loss_plan = bool(loss_control and exposed and shooters and remaining <= 0)
-        plan_type = ('safe_intercept' if safe
-                     else 'loss_control_intercept' if loss_plan else None)
-        # Shooters stay in the plan row in ALL cases: without proven timing
-        # (or before anyone is exposed) they are still ordinary joint-fire
-        # CANDIDATES for focus_fire — they simply receive no hard duty,
-        # because actor_intercept_duty only binds safe_intercept plans.
-        used.update(a for a, _, _ in shooters)
-        spread = []
-        if plan_type != 'safe_intercept':
-            spread_pool = exposed if loss_plan else row['victims']
-            for victim in sorted(spread_pool, key=lambda v: (
+        plan_type = ('safe_intercept' if safe else 'loss_control_intercept'
+                     if loss_plan else 'ordinary_joint_fire' if shooters else 'spread_only')
+        firing = {a for a, _, _ in shooters}
+        spread_options = []
+        if safe:
+            committed.update(firing)
+        else:
+            for victim in sorted(row['victims'], key=lambda v: (
                     v['entry_h'] if v['entry_h'] is not None else float('inf'),
                     -preservation_value(context, v['actor']), v['actor'])):
                 actor = victim['actor']
                 cap = context.capabilities[actor]
-                if actor in used or cap.healer or cap.suicide_attack or victim['entry_h'] is None \
+                if actor in committed or cap.healer or cap.suicide_attack or victim['entry_h'] is None \
                         or victim['entry_h'] > 1. or not victim['loss']:
                     continue
-                moves = [a for a in context.move_destinations(actor) if spread_valid(context, actor, a, memory)]
+                moves = (spread_moves(context, actor, memory) if cap.combat_class == 'ranged'
+                         else [a for a in context.move_destinations(actor)
+                               if spread_valid(context, actor, a, memory)])
                 if moves:
                     action = min(moves, key=lambda a: (
                         explosion_loss(context, actor, context.predict_position(actor, a).position),
                         distance(context.snapshot.allies[actor].position, context.predict_position(actor, a).position), a))
-                    spread.append((actor, action))
-                    used.add(actor)
+                    spread_options.append((actor, action))
+        spread = [(a, move) for a, move in spread_options if a not in firing]
         if shooters or spread:
-            plans.append({**row, 'shooters': shooters, 'spread': spread,
-                          'safe': safe, 'type': plan_type or 'spread_only',
-                          'kill_loops': kill_loops,
-                          'kill_time_status': kill['timing_status'],
-                          'conservative_kill_loops': conservative_kill,
-                          'already_exposed': [v['actor'] for v in exposed],
-                          'protected_members': [v['actor'] for v in protected],
-                          'death_burst_priced_elsewhere': True,
-                          'victims': [v['actor'] for v in row['victims']
-                              if v['entry_h'] is not None and v['entry_h'] <= 1.]})
+            primary = {**row, 'shooters': shooters, 'spread': spread,
+                       'safe': safe, 'type': plan_type,
+                       'kill_loops': kill_loops, 'kill_time_status': kill['timing_status'],
+                       'conservative_kill_loops': conservative_kill,
+                       'already_exposed': [v['actor'] for v in exposed],
+                       'protected_members': [v['actor'] for v in protected],
+                       'death_burst_priced_elsewhere': True,
+                       'victims': [v['actor'] for v in row['victims']
+                                   if v['entry_h'] is not None and v['entry_h'] <= 1.]}
+            plans.append(primary)
+            # A blocked spread member must not invalidate the whole firing
+            # opportunity. The beam can combine these smaller contracts
+            # with legal moves from other actors.
+            if shooters and spread:
+                alternatives.append(dict(primary, spread=[]))
+            if len(spread) > 1:
+                singles = sorted(spread, key=lambda item: (
+                    explosion_loss(context, item[0],
+                        context.predict_position(*item).position)
+                    - explosion_loss(context, item[0], context.snapshot.allies[item[0]].position),
+                    item[0]))
+                for movement in singles[:2]:
+                    alternatives.append(dict(primary, spread=[movement]))
+            if shooters and spread_options:
+                alternatives.append(dict(primary, shooters=[], spread=spread_options,
+                                         type='spread_only', kill_loops=None,
+                                         conservative_kill_loops=None, kill_time_status='no_fire_claim'))
+            if remaining <= 0. and conservative_kill is None:
+                for delay, negative_damage, actor in pool:
+                    if delay == 0. and actor not in firing:
+                        backup = (actor, context.attack_action(actor, enemy), -negative_damage)
+                        # Leave the other members free. A redundant shot
+                        # must be comparable even if one spread route fails.
+                        alternatives.append(dict(primary, shooters=[*shooters, backup],
+                                                 backup_shooter=actor, spread=[]))
+                        break
+    # Every imminent enemy gets its first candidate before spending the
+    # atomic search slots on a redundant shot or a spread-only branch.
+    plans.extend(alternatives)
     cache[key] = plans
     context._intercept_plans = cache
     return plans
@@ -382,20 +447,13 @@ def validate_intercept_plan(context, actions, plan, memory=None, report=None):
 
 
 def final_valid(context, actions, actor, memory):
-    """Validate whole plans after combination/repair, never prepaid fire.
+    """Validate the hard duty issued by actor_intercept_duty.
 
-    Group check for the actor's plan: EVERY required shooter still executes
-    its attack with window fire and the cumulative known damage still meets
-    the target's remaining health; EVERY spread member still executes a
-    valid spread move without new overlaps or unacceptable joint risk.
-    safe_intercept additionally requires protected members to stay outside
-    the (conservatively timed) kill window — using the same conservative
-    kill time the plan was built with, never the legacy cooldown value.
-    Killing the bomber never zeroes its death explosion; that cost stays in
-    the evaluator for every branch compared here.
+    Optional interception contracts are checked by validate_intercept_plan
+    when selected. They do not constrain a member's independent entry guard.
     """
     for plan in intercept_plan(context, memory):
-        if any(a == actor for a, _, _ in plan['shooters']):
+        if plan['safe'] and any(a == actor for a, _, _ in plan['shooters']):
             damage = 0.
             for member, command, _ in plan['shooters']:
                 estimate = _safe_shooter(context, member, plan['enemy'])
@@ -404,59 +462,32 @@ def final_valid(context, actions, actor, memory):
                 damage += estimate.damage_lo
             if damage < context.snapshot.enemies[plan['enemy']].effective_health:
                 return False
-            if plan['type'] == 'safe_intercept':
-                conservative = plan.get('conservative_kill_loops')
-                if conservative is None:
-                    return False        # no proven timing: not a safe plan
-                from .joint_combat import action_position
-                for member, command in actions.items():
-                    unit = context.snapshot.allies[member]
-                    if not unit.alive or unit.is_flying:
-                        continue
-                    point = action_position(context, member, command)[0]
-                    middle = tuple((x + y) / 2. for x, y in zip(unit.position, point))
-                    for position in (unit.position, middle, point):
-                        entry = _entry(context, member, plan['enemy'], position)
-                        if entry is None or entry <= conservative + 1.:
-                            return False
-                return plan['safe']
-            # Non-safe plans validated through group integrity only; their
-            # costs (death burst, residual exposure) are priced by the
-            # evaluator for every compared branch.
-            return _spread_members_valid(context, actions, plan, memory)
-        if any(a == actor for a, _ in plan['spread']):
-            return _spread_members_valid(context, actions, plan, memory)
+            conservative = plan.get('conservative_kill_loops')
+            if conservative is None:
+                return False
+            from .joint_combat import action_position
+            for member, command in actions.items():
+                unit = context.snapshot.allies[member]
+                if not unit.alive or unit.is_flying:
+                    continue
+                point = action_position(context, member, command)[0]
+                middle = tuple((x + y) / 2. for x, y in zip(unit.position, point))
+                for position in (unit.position, middle, point):
+                    entry = _entry(context, member, plan['enemy'], position)
+                    if entry is None or entry <= conservative + 1.:
+                        return False
+            return True
     return actions.get(actor) in entry_guard_actions(context, actor, memory)
 
 
-def _spread_members_valid(context, actions, plan, memory):
-    """All of one plan's spread moves must still hold after combination."""
-    from .joint_combat import action_position, assess_joint
-    positions = {a: action_position(context, a, c)[0] for a, c in actions.items()
-                 if context.snapshot.allies[a].alive}
-    joint = assess_joint(context, actions)   # once; per-member reads below
-    for member, command in plan['spread']:
-        if actions.get(member) != command \
-                or not spread_valid(context, member, command, memory):
-            return False
-        unit = context.snapshot.allies[member]
-        if memory is not None and memory.movement_blockage(context, member, command,
-                joint_actions=actions, joint_positions=positions) >= .5:
-            return False
-        if any(a != member and context.snapshot.allies[a].is_flying == unit.is_flying
-               and distance(positions[member], point) < unit.radius + context.snapshot.allies[a].radius
-               for a, point in positions.items()):
-            return False
-        exchange = joint['team_exchange']['actors'].get(member)
-        if exchange and exchange['after']['amount'] \
-                >= unit.effective_health:
-            return False
-    return True
-
-
 def summary(context, memory=None, limit=3):
-    rows = []
-    for plan in intercept_plan(context, memory)[:limit]:
+    rows, seen = [], set()
+    for plan in intercept_plan(context, memory):
+        if len(rows) >= limit:
+            break
+        if plan['enemy'] in seen:
+            continue
+        seen.add(plan['enemy'])
         rows.append({'enemy': plan['enemy'], 'type': plan.get('type'),
                      'safe': plan['safe'],
                      'kill_time_status': plan.get('kill_time_status'),

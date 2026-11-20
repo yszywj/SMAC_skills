@@ -179,7 +179,8 @@ class FocusFireSkill:
         # the execution duties). The death-burst risk floor stays in the
         # evaluator; these plans claim only the window-qualified shots.
         from ..intercept import intercept_plan
-        for row in intercept_plan(context, memory, self.config):
+        interceptions = intercept_plan(context, memory, self.config)
+        for row in interceptions:
             if produced >= max_atomic:
                 break
             members = {actor: action for actor, action, _ in row["shooters"]}
@@ -193,11 +194,7 @@ class FocusFireSkill:
             # from these declared facts.
             shooter_actions = {actor: action for actor, action, _ in row["shooters"]}
             spread_actions = dict(row["spread"])
-            intercept_type = ('safe_intercept' if row.get('safe')
-                              else 'loss_control_intercept'
-                              if row.get('type') == 'loss_control_intercept'
-                              else 'ordinary_joint_fire' if row['shooters']
-                              else 'spread_only')
+            intercept_type = row['type']
             requires_lethal = intercept_type in ('safe_intercept',
                                                  'loss_control_intercept')
             effects, fire = [], []
@@ -301,6 +298,9 @@ class FocusFireSkill:
                     effects.extend(self._impact(context, actor, enemy_id))
                     fire.append((enemy_id, damage))
                     cumulative += damage
+                    if context.enemy_capabilities[enemy_id].suicide_attack and len(members) == 1 \
+                            and cumulative >= enemy.effective_health:
+                        break  # single-actor fire is already available
                     if cumulative >= enemy.effective_health and len(members) >= 2:
                         produced += 1
                         plans.append(make_plan(

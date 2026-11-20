@@ -31,13 +31,14 @@ _SCHEMA = {
         "focus_fire", "coordinated_engage", "combat_reposition",
         "disengage_reenter", "regroup", "local_formation", "cohesive_search",
         "splash_fire", "heal_support", "burst_engage", "precombat_rally",
-        "combat_rejoin")},
+        "combat_rejoin", "ranged_fire_formation")},
     "weights": {
         "useful_damage": _float_spec(0.0, 10.0),
         "kill": _float_spec(0.0, 10.0),
         "heal": _float_spec(0.0, 10.0),
         "coverage": _float_spec(0.0, 10.0),
         "tactic_progress": _float_spec(0.0, 10.0),
+        "ranged_fire_formation": _float_spec(0.0, 10.0),
         "link": _float_spec(0.0, 10.0),
         "meeting": _float_spec(0.0, 10.0),
         "role": _float_spec(0.0, 10.0),
@@ -166,6 +167,13 @@ _SCHEMA = {
     "heal_support": {
         "follow_distance": _float_spec(1.0, 15.0),
         "switch_margin": _float_spec(0.0, 1.0),
+    },
+    "hydra_micro": {
+        # Experimental counter-fire grabs / lane fills / flank-target joins
+        # for the hydra line. The seed-170..189 对照 showed 4/20 vs the
+        # 7/20 baseline (seeds 172/180/187 flipped to loss), so this ships
+        # OFF until the first-hydra-loss regression is solved.
+        "enabled": _bool_spec(),
     },
     "burst_engage": {
         "proxy_radius": _float_spec(0.5, 10.0),

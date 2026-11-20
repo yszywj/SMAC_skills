@@ -651,6 +651,53 @@ class Context:
         return result
 
     # ---------------------------------------------------------------- helpers
+    def forced_hydra_targets(self, actor: str) -> tuple:
+        """Mandatory targets when this Hydra can shoot both Hydras and Lings this window.
+
+        A zergling that is finishing-shot killable AND currently engaged with
+        an ally is kept alongside the hydras: killing it removes a real
+        active attacker, which is not the low-health-pool bias this rule
+        exists to suppress. Healthy or disengaged lings stay suppressed.
+        """
+        cache = getattr(self, '_forced_hydra_targets', None)
+        if cache is None:
+            cache = self._forced_hydra_targets = {}
+        if actor not in cache:
+            unit = self.snapshot.allies.get(actor)
+            hydras = []
+            finishing_lings = []
+            ling_available = False
+            if unit and unit.alive and unit.type_name == 'hydralisk':
+                for target in self.attackable_enemies(actor):
+                    kind = self.snapshot.enemies[target].type_name
+                    if kind not in ('hydralisk', 'zergling') or self.fire_estimate(actor, target).window_shots < 1:
+                        continue
+                    if kind == 'hydralisk':
+                        hydras.append(target)
+                    else:
+                        ling_available = True
+                        enemy = self.snapshot.enemies[target]
+                        estimate = self.fire_estimate(actor, target)
+                        killable = (estimate.damage_lo is not None
+                                    and estimate.damage_lo >= enemy.effective_health)
+                        engaged = any(
+                            mate.health < mate.max_health
+                            and distance(mate.position, enemy.position)
+                            <= 2.0 + mate.radius + enemy.radius
+                            and target in self.forecast_risk(
+                                ally_id, mate.position).current_threats
+                            for ally_id, mate in self.snapshot.allies.items())
+                        if killable and engaged:
+                            finishing_lings.append(target)
+            # A finishing ling joins the mandatory set only in the BOTH-
+            # shootable case, where the suppression rule would otherwise
+            # discard a real one-shot kill. For a ling-only shooter the
+            # forced set stays empty: mandating lings there would reject
+            # every repositioning move this formation relies on.
+            keep = hydras + (finishing_lings if hydras else [])
+            cache[actor] = tuple(keep) if ling_available else ()
+        return cache[actor]
+
     def attackable_enemies(self, actor: str) -> List[str]:
         """Issuable attacks, nearest FIRST (ascending distance)."""
         return sorted((e for e in self.snapshot.enemies

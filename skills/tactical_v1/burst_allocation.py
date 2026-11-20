@@ -6,6 +6,8 @@ there is no invented exact ordering of missiles or death-triggered effects.
 """
 import math
 
+from .targeting import DAMAGE_SCALE
+
 
 def allocate_exchange(context, actions, report):
     buckets = {}
@@ -39,7 +41,10 @@ def allocate_exchange(context, actions, report):
             if total <= 0.:
                 continue
             useful = min(remaining, total)
-            gun += useful * ordinary / total / max(target.effective_health, 1.)
-            burst += useful * explosion / total / max(target.effective_health, 1.)
+            # Same fixed reference pool as candidate allocation and the
+            # final team scoring — the mixed gun/burst settlement must not
+            # keep a small-health-pool bias the other two paths dropped.
+            gun += useful * ordinary / total / DAMAGE_SCALE
+            burst += useful * explosion / total / DAMAGE_SCALE
             remaining -= useful
     return gun, burst

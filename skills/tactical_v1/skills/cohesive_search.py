@@ -67,14 +67,8 @@ class CohesiveSearchSkill:
                 return point
         return context.snapshot.search_location
 
-    def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
-        fingerprint = self.config.get("_fingerprint", "")
-        snapshot_id = context.snapshot.snapshot_id
-        plans: List = []
-        if context.snapshot.enemies:
-            return plans                      # contact info: not a search step
-        telemetry.count(self.name, "applicable", len(context.snapshot.allies))
-        budget = h_loops(context, self.waypoint_max_h)
+    def group_routes(self, context: Context, memory):
+        """Shared group destinations for search and pre-contact spacing."""
         groups = context.engagement_groups(self.cohesion_radius)
         for group in groups:
             squad_positions = [context.snapshot.allies[a].position
@@ -93,6 +87,17 @@ class CohesiveSearchSkill:
             waypoint = self._waypoint(context, memory, group, tracked)
             if waypoint is None:
                 continue
+            yield group, centre, waypoint
+
+    def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
+        fingerprint = self.config.get("_fingerprint", "")
+        snapshot_id = context.snapshot.snapshot_id
+        plans: List = []
+        if context.snapshot.enemies:
+            return plans                      # contact info: not a search step
+        telemetry.count(self.name, "applicable", len(context.snapshot.allies))
+        budget = h_loops(context, self.waypoint_max_h)
+        for group, centre, waypoint in self.group_routes(context, memory):
             for actor in sorted(group):
                 unit = context.snapshot.allies.get(actor)
                 if unit is None or not unit.alive \

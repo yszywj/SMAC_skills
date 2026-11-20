@@ -17,6 +17,7 @@ from ..targeting import local_front_targets, shared_target_plan
 from ..battle_line import actor_line, line_action_rank
 from ..combat_exchange import danger_evidence
 from ..joint_combat import action_position
+from ..opening_fire_group import opening_fire_groups
 from .common import best_move_toward, h_loops, make_plan, move_progress
 
 
@@ -276,8 +277,22 @@ class CoordinatedEngageSkill:
     def propose(self, context: Context, memory, telemetry, ledger=None) -> List:
         fingerprint = self.config.get("_fingerprint", "")
         snapshot_id = context.snapshot.snapshot_id
-        plans: List = []
+        plans: List = opening_fire_groups(context, memory, fingerprint) if self.joint_assessment else []
+        if self.joint_assessment:
+            # Mid-game counter-fire support for pressured Hydralisks plus
+            # zergling guard routes aligned with the same support direction.
+            # Ordinary atomic candidates: no duty, no opening deadline, and
+            # they compete through the normal joint scoring.
+            from ..hydra_support import (approach_support_plans,
+                                         counter_fire_support_plans,
+                                         zergling_guard_plans)
+            plans.extend(counter_fire_support_plans(context, memory, fingerprint))
+            # Pre-exposure pairs: judged one window before A steps into an
+            # enemy firing line, comparing proceed / sidestep+fill / hold.
+            plans.extend(approach_support_plans(context, memory, fingerprint))
+            plans.extend(zergling_guard_plans(context, memory, fingerprint))
         if not context.snapshot.enemies:
+            telemetry.count(self.name, "proposed", len(plans))
             return plans
         target_plan = shared_target_plan(context, memory, self.config) if self.shared_front else None
         melee_index = 0
@@ -336,8 +351,13 @@ class CoordinatedEngageSkill:
                     target_id = self._squad_target(context, squad, front_targets)
                 assignment = target_plan.assignments.get(actor)
                 if assignment is not None and assignment.target in front_targets:
+                    # The shared allocation (fire exchange: pressure, kill,
+                    # early-kill timing, object value) owns the main target.
+                    # The battle-line lane only supplies it when no
+                    # allocation exists — a plain ETA-nearest override must
+                    # not silently discard the exchange decision.
                     target_id = assignment.target
-                if line is not None and line['target'] in front_targets:
+                elif line is not None and line['target'] in front_targets:
                     target_id = line['target']
                 # Keep a live, progressing approach/wait rather than letting
                 # a fresh allocation reset its total task deadline each tick.

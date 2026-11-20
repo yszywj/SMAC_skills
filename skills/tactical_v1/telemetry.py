@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 SKILL_NAMES = ("focus_fire", "coordinated_engage", "combat_reposition",
                "disengage_reenter", "regroup", "local_formation",
-               "cohesive_search", "precombat_rally", "combat_rejoin",
+               "cohesive_search", "precombat_rally", "combat_rejoin", "ranged_fire_formation",
                "splash_fire", "heal_support", "burst_engage")
 
 USAGE_COUNTERS = ("applicable", "proposed", "selected", "continued", "exited")

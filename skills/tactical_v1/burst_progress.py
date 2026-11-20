@@ -455,6 +455,8 @@ class BurstProgress:
 
     def guarded_actions(self, context, actor):
         """A feasible safe alternative makes bad approach an actual violation."""
+        if not context.capabilities[actor].suicide_attack:
+            return tuple(context.legal_actions(actor))
         cache = getattr(context, '_burst_guard_actions', None)
         if cache is None:
             cache = context._burst_guard_actions = {}
@@ -467,7 +469,7 @@ class BurstProgress:
 
     def joint_allowed(self, context, actions):
         """Branch-local residual budgets; never reserve across candidates."""
-        from .burst import outcome
+        from .burst import outcome, reserve_actions
         key = tuple(sorted(actions.items()))
         cache = getattr(context, '_burst_joint_allowed', None)
         if cache is None:
@@ -479,11 +481,17 @@ class BurstProgress:
                    if context.snapshot.allies[actor].alive
                    and context.capabilities[actor].suicide_attack]
         reservations, allowed = [], {}
-        for actor, result in sorted(sources, key=lambda row: (row[1].trigger_loops, row[0])):
+        def order(source):
+            actor, result = source
+            useful = sum(min(hp, context.snapshot.enemies[e].effective_health)
+                         for e, hp in result.damage_potential.items() if hp is not None)
+            return (result.opportunity <= 0., result.trigger_loops,
+                    -useful * result.opportunity, actor)
+        for actor, result in sorted(sources, key=order):
             def residual_for(candidate):
                 reserved = {}
                 for trigger_loop, source, damage in reservations:
-                    if (trigger_loop, source) >= (candidate.trigger_loops, actor):
+                    if trigger_loop > candidate.trigger_loops:
                         continue
                     for enemy, amount in damage.items():
                         reserved[enemy] = reserved.get(enemy, 0.) + amount
@@ -507,6 +515,7 @@ class BurstProgress:
             valid = tuple(a for a in self.guarded_actions(context, actor)
                           if self.viable_step(context, actor, a,
                                               residual_for(outcome(context, actor, a))))
+            valid = reserve_actions(context, actor, actions, valid, reservations, residual_for)
             allowed[actor] = valid
             if actions[actor] in valid and result.opportunity > 0.:
                 remaining = residual_for(result)
@@ -764,6 +773,8 @@ class BurstProgress:
 
     def execution(self, context, actor):
         """Pure final-command duty. No feasible alternative means no empty veto."""
+        if not context.capabilities[actor].suicide_attack:
+            return {'required': False, 'actions': (), 'reason': 'ordinary_actor'}
         cache = getattr(context, '_burst_execution', None)
         if cache is None:
             cache = context._burst_execution = {}
@@ -889,6 +900,8 @@ class BurstProgress:
         return answer([], 'blocked_no_progressing_action')
 
     def action_cost(self, context, actor, action):
+        if not context.capabilities[actor].suicide_attack:
+            return 0.
         from .burst import outcome, exchange_value
         duty = self.execution(context, actor)
         if duty['required']:

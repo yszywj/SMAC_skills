@@ -9,7 +9,29 @@ from .context import distance
 from .joint_combat import action_position
 
 
-PRIORITIES = ('rescue', 'intercept', 'burst', 'fire', 'entry')
+PRIORITIES = ('rescue', 'intercept', 'burst', 'fire', 'crossfire', 'support', 'entry')
+
+
+def ready_hydralisk_shots(context, actor):
+    """Legal, native-range shots available at this observation, before retreat."""
+    unit = context.snapshot.allies.get(actor)
+    if unit is None or not unit.alive or unit.type_name != 'hydralisk':
+        return ()
+    raw = context.snapshot.raw_state.get('allies', {}).get(actor, {})
+    cooldown = raw.get('weapon_cooldown_loops')
+    if cooldown is None:
+        if raw.get('weapon_ready') is not True:
+            return ()
+    elif not unit.weapon_ready or unit.weapon_cooldown_loops > 0.:
+        return ()
+    cache = getattr(context, '_ready_hydralisk_shots', None)
+    if cache is None:
+        cache = context._ready_hydralisk_shots = {}
+    if actor not in cache:
+        cache[actor] = tuple(context.attack_action(actor, enemy)
+                             for enemy in context.attackable_enemies(actor)
+                             if context.contact_status(actor, enemy) == 'in_range')
+    return cache[actor]
 
 
 def zergling_blast_exposure(context, actor, position=None):
@@ -122,6 +144,8 @@ def sustained_fire_actions(context, actor, memory=None):
     if not targets:
         return ()
     attacks = tuple(context.attack_action(actor, e) for e in targets)
+    if ready_hydralisk_shots(context, actor):
+        return attacks
     # Bounded "delay one shot" budget in LOOPS: zero-delay repositioning
     # keeps the legacy safety/support criteria; moves that POSTPONE the next
     # shot need a concrete damage reduction (supported-fire relief or
@@ -137,7 +161,7 @@ def sustained_fire_actions(context, actor, memory=None):
     peers = [u for a, u in context.snapshot.allies.items() if a != actor and u.alive
              and u.health_lost + u.shield_lost > 0.
              and distance(unit.position, u.position) <= 10.]
-    from .intercept import explosion_loss
+    from .intercept import explosion_loss, spread_moves
     origin_blast_loss = explosion_loss(context, actor, unit.position)
     moves = []
     for action in context.move_destinations(actor):
@@ -148,6 +172,12 @@ def sustained_fire_actions(context, actor, memory=None):
         retained = [e for e in targets if all(context.projected_attack_opportunity(
             actor, e, p).available for p in (middle, point))]
         if not retained:
+            # A surplus shooter can leave contact for this window if doing
+            # so actually reduces explosion loss and its shot delay is funded.
+            if origin_blast_loss > 0. and memory is not None \
+                    and action in spread_moves(context, actor, memory) \
+                    and memory._fire_delay_postponement(context, actor, action) <= delay_budget + 1e-6:
+                moves.append(action)
             continue
         timing = next_fire_timing(context, actor, action, position=point,
                                   eligible_targets=retained)
@@ -192,6 +222,12 @@ def sustained_fire_actions(context, actor, memory=None):
 
 def actor_duty(context, actor, memory):
     """One active duty per actor, with explicit precedence and fallback."""
+    owned = getattr(context, 'formation_orders', {})
+    if actor in owned:
+        cmd = owned[actor]
+        return {'required': True, 'actions': (cmd,),
+                'kind': 'fire' if context.decode(actor, cmd).kind == 'attack' else 'entry',
+                'reason': 'exclusive_hydra_formation'}
     cache = getattr(context, '_execution_actor_duties', None)
     if cache is None:
         cache = context._execution_actor_duties = {}
@@ -201,14 +237,22 @@ def actor_duty(context, actor, memory):
     unit, cap = context.snapshot.allies.get(actor), context.capabilities.get(actor)
     result = {'required': False, 'actions': (), 'reason': 'no_execution_duty', 'kind': None}
     if unit is not None and unit.alive and cap is not None and not cap.healer:
-        if cap.suicide_attack:
+        targets = context.forced_hydra_targets(actor)
+        if targets:
+            result = {'required': True, 'actions': tuple(context.attack_action(actor, e) for e in targets),
+                      'kind': 'fire', 'reason': 'hydralisk_priority_over_zergling'}
+        elif cap.suicide_attack:
             progress = getattr(memory, 'burst_progress', None)
             if progress is not None:
                 result = dict(progress.execution(context, actor))
                 result['kind'] = 'burst'
         else:
             rescue = rescue_actions(context, actor, memory)
-            if rescue:
+            shots = ready_hydralisk_shots(context, actor) if rescue else ()
+            if shots:
+                result = {'required': True, 'actions': shots, 'kind': 'rescue',
+                          'reason': 'ready_shot_before_withdrawal'}
+            elif rescue:
                 threats = set(context.forecast_risk(actor, unit.position).reachable_threats)
                 finishes = []
                 for enemy in context.attackable_enemies(actor):
@@ -329,6 +373,9 @@ def assess(context, actions, memory):
     if key in cache:
         return cache[key]
     counts = dict.fromkeys(PRIORITIES, 0)
+    from .skills.ranged_fire_formation import opening_crossfire, opening_entry_action
+    crossfire = opening_crossfire(context, actions)
+    counts['crossfire'] = len(crossfire)
     rows = {}
     joint = None
     burst_allowed = memory.burst_progress.joint_allowed(context, actions)
@@ -336,6 +383,10 @@ def assess(context, actions, memory):
         duty = actor_duty(context, actor, memory)
         satisfied = not duty['required'] or action in duty['actions']
         branch_reason = None
+        if not satisfied and duty.get('kind') == 'entry' and actor not in crossfire:
+            if opening_entry_action(context, actor, actions):
+                satisfied = True
+                branch_reason = 'shared_first_engagement'
         if actor in burst_allowed and burst_allowed[actor]:
             valid = burst_allowed[actor]
             if action not in valid:
@@ -373,12 +424,19 @@ def assess(context, actions, memory):
                 branch_reason = 'joint_kill_rescue_substitution'
         if not satisfied:
             counts[duty['kind'] or 'burst'] += 1
+        if actor in crossfire:
+            branch_reason = 'unsupported_entry_into_crossfire'
         rows[actor] = {**duty, 'selected_action': action, 'satisfied': satisfied,
                        'branch_reason': branch_reason,
                        **({'joint_rescue': substitution} if substitution else {})}
+    from .hydra_support import isolated_shooter_support
+    support = isolated_shooter_support(context, memory, actions)
+    if support:
+        counts['support'] = int(not support['satisfied'])
+        rows[support['supporter']]['isolated_shooter_support'] = support
     result = {'priority': tuple(counts[k] for k in PRIORITIES),
               'violations': counts, 'actors': rows,
-              'semantics': 'survivable rescue, worthwhile burst, continuous fire, coordinated entry; then utility'}
+              'semantics': 'rescue, intercept, burst, continuous fire, crossfire, isolated shooter support, coordinated entry; then utility'}
     cache[key] = result
     return result
 
@@ -427,4 +485,9 @@ def seed_actions(context, actions, memory):
                 semantic = context.decode(actor, action)
                 return (-value, semantic.kind == 'stop', action)
             chosen[actor] = min(allowed, key=burst_rank)
-    return chosen
+    from .hydra_support import isolated_shooter_support
+    support = isolated_shooter_support(context, memory, chosen)
+    if support:
+        chosen[support['supporter']] = support['action']
+    from .skills.ranged_fire_formation import repair_crossfire
+    return repair_crossfire(context, chosen, duties)

@@ -11,6 +11,7 @@ from ..context import Context, STOP, distance
 from ..contracts import (Commitment, Dependency, EffectClaim, HEURISTIC,
                          ResourceClaims, SpaceClaim)
 from .common import best_move_toward, h_loops, make_plan, move_progress, space_claim
+from .cohesive_search import CohesiveSearchSkill
 from ..battle_line import battle_line, actor_line, line_action_rank, ready_targets
 from ..combat_exchange import escape_urgency
 from ..joint_combat import action_position
@@ -21,6 +22,7 @@ class LocalFormationSkill:
 
     def __init__(self, config: Dict):
         self.config = config
+        self.search = CohesiveSearchSkill(config)
         lifecycle = config.get("lifecycle", {})
         self.max_h = lifecycle.get("formation_max_h", 3.0)
         self.spread_radius = config.get("local_formation", {}).get(
@@ -31,6 +33,31 @@ class LocalFormationSkill:
             "joint_assessment_enabled", True)
         self.body_margin = config.get("coordinated_engage", {}).get(
             "contact_slot_margin", .05)
+
+    def _blind_spacing_moves(self, context, memory):
+        """Keep Hydra spacing compatible with the group's current search route."""
+        if context.snapshot.enemies or not any(u.alive and u.type_name == 'hydralisk'
+                                               for u in context.snapshot.allies.values()):
+            return {}
+        allowed = {}
+        for group, centre, waypoint in self.search.group_routes(context, memory):
+            for actor in group:
+                unit = context.snapshot.allies[actor]
+                if unit.type_name != 'hydralisk' or unit.health_lost or unit.shield_lost:
+                    continue
+                goal = centre if distance(unit.position, centre) > self.search.cohesion_radius else waypoint
+                direction = tuple(g - p for g, p in zip(goal, unit.position))
+                moves = context.move_destinations(actor)
+                forward = set()
+                for move in moves:
+                    end = context.predict_position(actor, move).position
+                    if sum((q - p) * d for q, p, d in zip(end, unit.position, direction)) >= -1e-6:
+                        forward.add(move)
+                # A blocked forward route or a mask offering only retreat
+                # warrants a detour even if it costs search progress.
+                if forward and not any(memory.movement_blockage(context, actor, m) >= .5 for m in forward):
+                    allowed[actor] = forward
+        return allowed
 
     # -- role targets --------------------------------------------------------
     def _rear_direction(self, context: Context, actor: str) -> tuple:
@@ -101,6 +128,7 @@ class LocalFormationSkill:
         predicted = {a: u.position for a, u in
                      context.snapshot.allies.items() if u.alive}
         atomic_budget = 2
+        blind_spacing = self._blind_spacing_moves(context, memory)
         for actor, unit in sorted(context.snapshot.allies.items()):
             if not unit.alive or context.capabilities[actor].healer:
                 continue
@@ -137,6 +165,8 @@ class LocalFormationSkill:
             attackable = context.attackable_enemies(actor)
             best_action, best_gain = None, 0.0
             for action in sorted(destinations):
+                if actor in blind_spacing and action not in blind_spacing[actor]:
+                    continue
                 if self.joint_assessment and context.risk_at(actor,
                         context.predict_position(actor, action).position).effect_weapon_near \
                         and not context.risk_at(actor, unit.position).effect_weapon_near:
@@ -215,7 +245,7 @@ class LocalFormationSkill:
                 if partner is not None:
                     atomic_budget -= 1
                     a_move = best_action if best_action is not None else STOP
-                    b_move = self._opposite_move(context, partner, actor, memory)
+                    b_move = self._opposite_move(context, partner, actor, memory, blind_spacing.get(partner))
                     if b_move is not None:
                         plans.append(make_plan(
                             self.name, {actor: a_move, partner: b_move},
@@ -376,7 +406,8 @@ class LocalFormationSkill:
             used.update(members)
         return proposals
 
-    def _opposite_move(self, context: Context, mover: str, away_from: str, memory=None):
+    def _opposite_move(self, context: Context, mover: str, away_from: str, memory=None,
+                       allowed=None):
         unit = context.snapshot.allies[mover]
         if self.joint_assessment and ready_targets(context, mover) \
                 and not escape_urgency(context, mover)['immediate'] \
@@ -389,6 +420,8 @@ class LocalFormationSkill:
                 context, mover, unit.position, away_from, anchor):
             return None
         destinations = context.move_destinations(mover)
+        if allowed is not None:
+            destinations = {a: p for a, p in destinations.items() if a in allowed}
         if memory is not None:
             destinations = {a: p for a, p in destinations.items()
                             if not memory.movement_conflict(context, mover, a)

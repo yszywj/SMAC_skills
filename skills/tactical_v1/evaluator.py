@@ -11,6 +11,7 @@ import math
 from typing import Dict, List, Optional, Tuple
 
 from .context import Context, distance
+from .targeting import DAMAGE_SCALE, avoided_output
 from .contracts import CandidatePlan
 from .effects import EffectsReport, physical_effects
 from .ledger import Ledger
@@ -42,6 +43,7 @@ DEFAULT_WEIGHTS = {
     "blocked_move": 0.6,
     "unsupported_frontline": 0.5,
     "sustained_contact": 0.8,  # bounded reduction in time to effective participation
+    "ranged_fire_formation": 2.0,  # change in local next-volley fire balance
 }
 
 RISK_NORM = 3.0
@@ -203,6 +205,14 @@ class Evaluator:
                 breakdown["progress"] += w["tactic_progress"] * \
                     self._range_band_gain(context, report, plan, objective)
                 continue
+            if kind == "shared_fire":
+                breakdown["progress"] += w["tactic_progress"] * \
+                    self._shared_fire_gain(context, report, plan, objective)
+                continue
+            if kind == "counter_fire_support":
+                breakdown["progress"] += w["tactic_progress"] * \
+                    self._counter_fire_gain(context, actions, report, plan, objective)
+                continue
             if kind == "escape":
                 # The final-position risk term already prices this exact
                 # reduction. Do not reward the same threat drop twice.
@@ -219,7 +229,7 @@ class Evaluator:
                 continue
             if kind == "spacing":
                 continue    # congestion is priced once by the physics term
-            if kind == "battle_line":
+            if kind in ("battle_line", "ranged_fire_formation"):
                 continue    # final-action shared firing facts, never a label bonus
             if kind == "support_link":
                 key = self._link_key(plan)
@@ -374,6 +384,52 @@ class Evaluator:
             gain = _clip((_dist(x, goal) - _dist(z, goal))
                          / self._move_scale(context, actor))
             total += self._geometry_credit(context, actor, gain)
+        return _clip(total)
+
+    def _shared_fire_gain(self, context, report, plan, objective):
+        """Progress until two of the group's shooters can reach the same enemy."""
+        enemy_id = objective.get("target")
+        enemy = context.snapshot.enemies.get(enemy_id)
+        if enemy is None:
+            return 0.
+        before, after = [], []
+        for actor in set(objective.get("shooters", ())).intersection(plan.controlled_actors):
+            unit = context.snapshot.allies[actor]
+            reach = context.effective_attack_reach(actor, enemy_id)
+            if not unit.alive or reach is None or reach < 0.:
+                continue
+            endpoint = report.positions.get(actor, (unit.position, False))[0]
+            stride = self._move_scale(context, actor)
+            start = max(0., distance(unit.position, enemy.position) - reach) / stride
+            end = max(0., distance(endpoint, enemy.position) - reach) / stride
+            before.append(start)
+            after.append(max(start, end) if self._available_fire(context, actor) else end)
+        if len(before) < 2:
+            return 0.
+        return _clip(sorted(before)[1] - sorted(after)[1])
+
+    def _counter_fire_gain(self, context, actions, report, plan, objective):
+        """Credit progress of the actors actually seeking a firing position."""
+        pair = plan.goal_data.get("support_pair", ())
+        enemy = objective.get("target")
+        if not pair or enemy not in context.snapshot.enemies:
+            return 0.
+        actors = list(pair[1:])
+        if not plan.goal_data.get("withdrawing"):
+            actors.append(pair[0])
+        total = 0.
+        target = context.snapshot.enemies[enemy].position
+        for actor in actors:
+            if actor not in actions or context.decode(actor, actions[actor]).kind != "move":
+                continue
+            reach = context.effective_attack_reach(actor, enemy)
+            if reach is None or reach < 0 or self._available_fire(context, actor):
+                continue
+            unit = context.snapshot.allies[actor]
+            endpoint = report.positions.get(actor, (unit.position, False))[0]
+            before = max(0., distance(unit.position, target) - reach)
+            after = max(0., distance(endpoint, target) - reach)
+            total += (before - after) / self._move_scale(context, actor)
         return _clip(total)
 
     def _range_band_gain(self, context, report, plan, objective) -> float:
@@ -1071,6 +1127,58 @@ class Evaluator:
                 return True
         return False
 
+    def _counter_fire_relief(self, context, actions, report, memory):
+        """Bounded threat-relief for counter-fire at an ally's ACTUAL threat.
+
+        For each final window-qualified attack (actor, target): every OTHER
+        alive ally that this target currently covers (relation flag or a
+        current forecast threat) gains a bounded relief fraction
+        min(1, known window damage / target effective health), weighted by
+        the existing target_threat scale. (actor, target) pairs already
+        credited by allocation_progress are excluded so the same volley is
+        never priced twice; each (shooter, target) contributes once per
+        step. Pure scoring read: threat evidence from the observation, no
+        damage-attribution claims.
+        """
+        if not self.common_combat.get('joint_assessment_enabled', True):
+            return 0.
+        from .battle_pressure import enemy_pressure
+        from .targeting import shared_target_plan
+        assignments = {}
+        plan = shared_target_plan(context, memory, self.target_config)
+        for shooter, row in plan.assignments.items():
+            assignments[(shooter, row.target)] = True
+        relief = 0.
+        seen = set()
+        for actor, action in actions.items():
+            unit = context.snapshot.allies.get(actor)
+            if unit is None or not unit.alive:
+                continue
+            semantic = context.decode(actor, action)
+            if semantic.kind != "attack"                     or semantic.target not in context.snapshot.enemies:
+                continue
+            target = semantic.target
+            if (actor, target) in assignments or (actor, target) in seen:
+                continue
+            estimate = context.fire_estimate(actor, target)
+            if estimate.window_shots < 1 or estimate.damage_lo is None:
+                continue            # only executable known fire prices relief
+            seen.add((actor, target))
+            fraction = min(1., estimate.damage_lo / max(
+                context.snapshot.enemies[target].effective_health, 1.))
+            for peer, mate in context.snapshot.allies.items():
+                if peer == actor or not mate.alive:
+                    continue
+                relation = context.snapshot.relations.get(peer, {}).get(target)
+                covered = (relation is not None
+                           and relation.in_enemy_weapon_range is True)                     or target in context.forecast_risk(
+                        peer, mate.position).current_threats
+                if not covered:
+                    continue        # cover must match the actual threat
+                relief += fraction * min(1., enemy_pressure(context, target))
+                break               # one covered teammate per shot suffices
+        return self.weights["target_threat"] * self.urgency_value             * min(1., relief)
+
     def _sustained_contact_value(self, context, actions, report, memory):
         """Bounded progress toward a sustained, shared firing front.
 
@@ -1198,8 +1306,15 @@ class Evaluator:
                 if not opportunity.available or not opportunity.ready:
                     continue
                 enemy = context.snapshot.enemies[enemy_id]
-                value = (.15 if opportunity.damage_est is None else min(
-                    1., 3. * opportunity.damage_est / max(enemy.effective_health, 1.)))
+                if opportunity.damage_est is None:
+                    value = .15
+                elif ordinary:
+                    # Price the first shot opened by a move in the same
+                    # units as a current volley, including its overkill cap.
+                    useful = min(opportunity.damage_est, enemy.effective_health)
+                    value = min(1., 3. * useful / DAMAGE_SCALE)
+                else:
+                    value = min(1., 3. * opportunity.damage_est / max(enemy.effective_health, 1.))
                 if context.capabilities[actor].specialization == "splash_fire" \
                         and self.mechanisms.get("splash", True) \
                         and objective.get("evaluate_splash", True):
@@ -1218,7 +1333,9 @@ class Evaluator:
             if best[0]:
                 if ordinary:
                     ordinary_by_target[best[1]] = ordinary_by_target.get(best[1], 0.) + best[0]
-                    ordinary_caps[best[1]] = max(ordinary_caps.get(best[1], 0.), best_credit)
+                    pool = context.snapshot.enemies[best[1]].effective_health
+                    cap = best_credit * min(1., 3. * pool / DAMAGE_SCALE)
+                    ordinary_caps[best[1]] = max(ordinary_caps.get(best[1], 0.), cap)
                 else:
                     by_target[best[1]] = min(1., by_target.get(best[1], 0.) + best[0])
         for target, value in ordinary_by_target.items():
@@ -1240,14 +1357,24 @@ class Evaluator:
             enemy = snapshot.enemies.get(enemy_id)
             if enemy is None:
                 continue
+            # Fixed reference pool (same scale as candidate allocation and
+            # the mixed gun/burst settlement): base value tracks damage
+            # applied, capped by remaining effective health, without the
+            # old bonus for small health pools.
             useful = min(total, enemy.effective_health)
-            damage_score += w["useful_damage"] * useful / max(enemy.effective_health, 1.0)
+            damage_score += w["useful_damage"] * useful / DAMAGE_SCALE
             if total >= enemy.effective_health:
                 kill_score += w["kill"]      # EXPECTED kill, never a real one
         breakdown["useful_damage"] = damage_score
         breakdown["expected_kills"] = kill_score
         breakdown["unknown_damage_sources"] = float(sum(
             len(v) for v in report.unknown_sources.values()))
+
+        # Only actual ordinary firing groups earn forecast output avoided.
+        # Unknown projectile timing never changes the current damage ledger.
+        future_relief = sum(avoided_output(context, enemy, shooters)
+                            for enemy, shooters in report.window_sources.items())
+        breakdown["early_kill_avoidance"] = w["target_threat"] * min(2., future_relief)
 
         # -- heal: bounded opportunity proxy (need x sustain x urgency) -----
         heal_score = 0.0
@@ -1355,6 +1482,17 @@ class Evaluator:
         from .targeting import allocation_progress
         allocation_value = self.weights["target_threat"] * allocation_progress(
             context, actions, report, memory, self.target_config)
+        # Counter-fire relief against an ally's ACTUAL threat (bounded).
+        # A window-qualified shot whose target is an enemy currently
+        # covering a teammate prices the threat that shot answers — even
+        # when the shared target plan assigned that shooter elsewhere. The
+        # correspondence check is per (shooter, threat): "near an ally" or
+        # "attacking an unrelated nearby unit" earns nothing here. Shots
+        # already credited by allocation_progress for the same (shooter,
+        # target) are skipped, so one volley never receives the threat
+        # credit twice. Same scale as target_threat; predictions only.
+        counter_relief = self._counter_fire_relief(context, actions, report,
+                                                   memory)
         # Both terms observe the same enemy volley. Price the larger concern
         # per actor, not their sum; do not let one safe unit cancel another's
         # exposure. Unknown risk remains in risk_costs and lethal relief remains
@@ -1372,6 +1510,7 @@ class Evaluator:
         breakdown["future_attack"] = future_attack
         breakdown["target_threat"] = target_threat
         breakdown["allocation_progress"] = allocation_value
+        breakdown["counter_fire_relief"] = counter_relief
         breakdown["unsupported_frontline"] = unsupported
         breakdown["sustained_contact"] = sustained
         breakdown["pressure_unknown_pairs"] = float(pressure["unknown_enemy_pairs"])
@@ -1422,7 +1561,23 @@ class Evaluator:
                  + burst_value + burst_approach
                  + tactic + hold - risk_score + breakdown["congestion"]
                  - switch - reentry - planned + sum(coordination.values())
-                 + future_attack + target_threat + allocation_value + unsupported + sustained
+                 + future_attack + target_threat + allocation_value
+                 + counter_relief + breakdown["early_kill_avoidance"]
+                 + unsupported + sustained
                  + recovery_value - contact_debt - burst_motion - team_delay)
+        fronts = getattr(context, "ranged_fire_reference", ())
+        if fronts:
+            from .skills.ranged_fire_formation import formation_value
+            # A pocket can focus on either target. Credit its best common
+            # firing line once, including when the branch switches targets.
+            current_best, baseline_best = {}, {}
+            for anchor, enemy, baseline in fronts:
+                value = formation_value(context, anchor, enemy, actions)
+                current_best[anchor] = max(current_best.get(anchor, value), value)
+                baseline_best[anchor] = max(baseline_best.get(anchor, baseline), baseline)
+            fire_balance = w["ranged_fire_formation"] * sum(
+                value - baseline_best[anchor] for anchor, value in current_best.items())
+            breakdown["ranged_fire_formation"] = fire_balance
+            total += fire_balance
         breakdown["total"] = total
         return total, breakdown

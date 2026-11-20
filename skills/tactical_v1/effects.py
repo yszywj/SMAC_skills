@@ -260,46 +260,35 @@ def _death_sources_for_bomber(context, snapshot, actions, report):
             if enemy_id not in snapshot.enemies \
                     or not context.enemy_capabilities[enemy_id].suicide_attack:
                 continue
-            if amount is None:
-                sources.setdefault(enemy_id, []).append({
-                    'source_actor': actor, 'victim_enemy_id': enemy_id,
-                    'damage': None, 'raw_damage': None,
-                    'opportunity': result.opportunity,
-                    'evaluation_after_loops': max(0., result.evaluation_after_loops),
-                    'timing_kind': 'predicted', 'outcome_actor': actor})
-                continue
-            if amount <= 0.:
+            if amount is not None and amount <= 0.:
                 continue
             sources.setdefault(enemy_id, []).append({
                 'source_actor': actor, 'victim_enemy_id': enemy_id,
-                'damage': amount * result.opportunity,
+                'damage': None if amount is None else amount * result.opportunity,
                 'raw_damage': amount,
                 'opportunity': result.opportunity,
                 'evaluation_after_loops': max(0., result.evaluation_after_loops),
                 'timing_kind': 'predicted', 'outcome_actor': actor})
-    for enemy_id in sources:
-        seen_sources = {row['source_actor'] for row in sources[enemy_id]}
-        for actor in report.window_sources.get(enemy_id, ()):
+    for enemy_id, shooters in report.window_sources.items():
+        if enemy_id not in snapshot.enemies \
+                or not context.enemy_capabilities[enemy_id].suicide_attack:
+            continue
+        rows = sources.setdefault(enemy_id, [])
+        seen_sources = {row['source_actor'] for row in rows}
+        for actor in shooters:
             if actor in seen_sources:
                 continue
             estimate = context.fire_estimate(actor, enemy_id)
             if estimate.window_shots < 1:
                 continue
-            if estimate.damage_est is None:
-                sources[enemy_id].append({
-                    'source_actor': actor, 'victim_enemy_id': enemy_id,
-                    'damage': None, 'raw_damage': None, 'opportunity': 1.,
-                    'evaluation_after_loops': max(0., estimate.effective_after_loops or 0.),
-                    'timing_kind': 'unknown', 'outcome_actor': None})
-            else:
-                # Unknown impact upper bound: cooldown is only a readiness
-                # lower bound; the shot is kept in BOTH timing scenarios.
-                sources[enemy_id].append({
-                    'source_actor': actor, 'victim_enemy_id': enemy_id,
-                    'damage': estimate.damage_est, 'raw_damage': estimate.damage_est,
-                    'opportunity': 1.,
-                    'evaluation_after_loops': max(0., estimate.effective_after_loops or 0.),
-                    'timing_kind': 'unknown', 'outcome_actor': None})
+            seen_sources.add(actor)
+            # Cooldown gives a readiness lower bound for both timing scenarios.
+            rows.append({
+                'source_actor': actor, 'victim_enemy_id': enemy_id,
+                'damage': estimate.damage_est, 'raw_damage': estimate.damage_est,
+                'opportunity': 1.,
+                'evaluation_after_loops': max(0., estimate.effective_after_loops or 0.),
+                'timing_kind': 'unknown', 'outcome_actor': None})
     return sources
 
 
@@ -316,39 +305,31 @@ def _bomber_death_scenarios(context, snapshot, sources, enemy_id):
     assumptions, not confirmed kills and not a basis for strong safety
     claims. No data at all -> [].
     """
-    enemy = snapshot.enemies[enemy_id]
-    remaining = max(0., enemy.effective_health)
-    rows = sources.get(enemy_id) or ()
-    predicted = [r for r in rows if r['timing_kind'] == 'predicted'
-                 and r['damage'] is not None]
-    unknown = [r for r in rows if r['timing_kind'] == 'unknown']
-    if unknown and not any(r['damage'] is not None for r in unknown):
-        return []                      # only unknown-magnitude shots: no data
+    remaining = snapshot.enemies[enemy_id].effective_health
+    if remaining <= 0.:
+        return []
+    known = [row for row in sources.get(enemy_id, ()) if row['damage'] is not None]
+    has_shots = any(row['timing_kind'] == 'unknown' for row in known)
     scenarios = []
+    for shot_time_floor in ((0., context.H) if has_shots else (0.,)):
+        by_moment = {}
+        for row in known:
+            moment = row['evaluation_after_loops']
+            if row['timing_kind'] == 'unknown':
+                moment = max(moment, shot_time_floor)
+            by_moment.setdefault(moment, []).append(row)
 
-    def accumulate(rows_at_times):
         cumulative = 0.
-        for moment in sorted({t for t, _ in rows_at_times}):
-            allowed = [r for t, r in rows_at_times if t <= moment + 1e-9]
-            cumulative = sum(max(0., r['damage']) for r in allowed)
-            if cumulative >= remaining and remaining > 0.:
-                return moment, allowed
-        return None
-
-    if predicted:
-        ordered = [(r['evaluation_after_loops'], r) for r in predicted]
-        formed = accumulate(ordered)
-        if formed is not None:
-            scenarios.append(formed)
-    for label, shift in (('unknown_early', 0.), ('unknown_late', None)):
-        if not unknown:
-            break
-        shifted = [(r['evaluation_after_loops'] + shift, r) for r in unknown] \
-            if shift is not None else \
-            [(max(context.H, r['evaluation_after_loops']), r) for r in unknown]
-        formed = accumulate(shifted)
-        if formed is not None:
-            scenarios.append(formed)
+        contributing = []
+        for moment in sorted(by_moment):
+            hits = by_moment[moment]
+            contributing.extend(hits)
+            cumulative += sum(max(0., row['damage']) for row in hits)
+            if cumulative >= remaining:
+                scenario = (moment, contributing)
+                if scenario not in scenarios:
+                    scenarios.append(scenario)
+                break
     return scenarios
 
 

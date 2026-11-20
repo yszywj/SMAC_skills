@@ -9,11 +9,62 @@ from skills.tactical_v1.effects import physical_effects
 from skills.tactical_v1.memory import TacticalMemory
 from skills.tactical_v1.skills.burst_engage import BurstEngageSkill
 from skills.tactical_v1.telemetry import Telemetry
-from .fixtures import enemy
+from .fixtures import enemy, scene
 from .test_burst_mechanism import context, native_scene
 
 
 class BurstExecutionTests(unittest.TestCase):
+    def test_ready_shooter_and_cooling_spreader_have_independent_duties(self):
+        from skills.tactical_v1.intercept import (actor_intercept_duty, final_valid,
+                                                  validate_intercept_plan)
+        from skills.tactical_v1.skills.focus_fire import FocusFireSkill
+        state = scene([((10., 12.45), 'zergling'), ((10., 14.9), 'hydralisk'),
+                       ((13.4, 10.), 'hydralisk'), ((5.1, 10.), 'hydralisk')],
+                      {'e0': enemy((10., 10.), 'baneling', health=6., max_health=30., radius=.375)},
+                      distance=2., enemy_can_reach=False)
+        state['unit_type_profiles']['9'] = native_scene()['unit_type_profiles']['9']
+        state['allies']['u2'].update(weapon_cooldown_loops=7.7, weapon_ready=False)
+        c, memory = context(state), TacticalMemory()
+        plans = FocusFireSkill({}).propose(c, memory, Telemetry())
+        contracts = [p for p in plans if p.goal_data.get('validation_kind') == 'bomber_intercept']
+        combined = next(p for p in contracts if p.goal_data['shooter_actions'] == {'u1': 6})
+        self.assertEqual(combined.goal_data['spread_actions'], {'u2': 4})
+        self.assertTrue(any(set(p.goal_data['shooter_actions']) == {'u1', 'u3'} for p in contracts))
+        self.assertTrue(any(not p.goal_data['shooter_actions'] for p in contracts))
+        self.assertFalse(actor_intercept_duty(c, 'u1', memory)['required'])
+        self.assertEqual(set(actor_intercept_duty(c, 'u2', memory)['actions']), {4, 6})
+        spread = {'u0': 1, 'u1': 6, 'u2': 4, 'u3': 1}
+        self.assertTrue(validate_intercept_plan(c, spread, combined, memory)[0])
+        shooting = dict(spread, u2=6)
+        self.assertFalse(validate_intercept_plan(c, shooting, combined, memory)[0])
+        self.assertTrue(final_valid(c, shooting, 'u2', memory))
+
+    def test_second_bomber_screens_or_uses_its_own_residual_exchange(self):
+        from skills.tactical_v1.action_duties import assess, seed_actions
+        for health, separate, second in [(30., False, 5), (40., False, 6), (30., True, 7)]:
+            with self.subTest(health=health, separate=separate):
+                state = native_scene([((0., 0.), 'baneling'),
+                    ((3.8, 0.) if separate else (0., .2), 'baneling'),
+                    ((-1.5, 0.), 'hydralisk')], {
+                    'e0': enemy((.6, 0.), 'hydralisk', health=health),
+                    'e1': enemy((4.5, 0.) if separate else (.6, .5), 'hydralisk', health=health)})
+                c, memory = context(state), TacticalMemory()
+                memory.burst_progress.observe(c)
+                actions = {'u0': 6, 'u1': 7 if separate else 6, 'u2': 6}
+                chosen = seed_actions(c, actions, memory)
+                self.assertEqual((chosen['u0'], chosen['u1']), (6, second))
+                self.assertTrue(assess(c, chosen, memory)['actors']['u1']['satisfied'])
+
+    def test_single_surviving_ling_in_hydra_screen_can_receive_second_burst(self):
+        for hydra_x, permit in [(.2, True), (-4., False)]:
+            state = native_scene([((0., 0.), 'baneling'), ((0., .2), 'baneling'),
+                                  ((hydra_x, 0.), 'hydralisk')], {
+                'e0': enemy((.6, 0.), 'zergling', health=40.)})
+            c, memory = context(state), TacticalMemory()
+            memory.burst_progress.observe(c)
+            allowed = memory.burst_progress.joint_allowed(c, {'u0': 6, 'u1': 6, 'u2': 1})
+            self.assertEqual(6 in allowed['u1'], permit)
+
     def test_second_source_does_not_lose_candidates_to_unselected_first_proposal(self):
         state = native_scene([((0., 0.), 'baneling'), ((0., 0.), 'baneling')], {
             'e0': enemy((5., 0.), 'zergling'), 'e1': enemy((0., 6.), 'zergling')},

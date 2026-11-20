@@ -23,6 +23,8 @@ class PreCombatRallySkill:
         plans = []
         for group in deployment_squads(context):
             members = tuple(group['ordinary'])
+            if getattr(context, 'zerg_policy', None):
+                members = tuple(a for a in members if a in context.zerg_policy.lings)
             if len(members) < 2:
                 continue
             instance = next((i for i in memory.instances.values()
