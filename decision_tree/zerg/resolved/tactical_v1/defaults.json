@@ -1,0 +1,187 @@
+{
+  "enabled": {
+    "focus_fire": true,
+    "coordinated_engage": true,
+    "combat_reposition": true,
+    "disengage_reenter": true,
+    "regroup": true,
+    "local_formation": true,
+    "ranged_fire_formation": true,
+    "cohesive_search": true,
+    "splash_fire": true,
+    "heal_support": true,
+    "burst_engage": true,
+    "precombat_rally": true,
+    "combat_rejoin": true
+  },
+  "weights": {
+    "useful_damage": 3.0,
+    "kill": 2.0,
+    "heal": 1.5,
+    "coverage": 1.0,
+    "risk": 0.8,
+    "congestion": 0.2,
+    "switch": 0.3,
+    "reentry_cost": 0.2,
+    "planned_loss": 1.5,
+    "hold_value": 0.3,
+    "tactic_progress": 0.6,
+    "ranged_fire_formation": 2.0,
+    "link": 0.8,
+    "meeting": 0.8,
+    "role": 0.6,
+    "support_break": 0.6,
+    "attack_continuity": 0.4,
+    "rally_wait_cost": 0.05,
+    "future_attack": 0.35,
+    "target_threat": 0.25,
+    "combat_idle": 0.35,
+    "movement_continuity": 0.8,
+    "blocked_move": 0.6,
+    "unsupported_frontline": 0.5,
+    "sustained_contact": 0.8
+  },
+  "forecasting": {
+    "forecast_reach_discount": 0.5,
+    "uncertain_position_floor": 0.35
+  },
+  "common_combat": {
+    "joint_assessment_enabled": true,
+    "mechanism_recovery_enabled": true,
+    "next_fire_budget_enabled": true,
+    "pressure_memory_enabled": true,
+    "shared_front_enabled": true,
+    "local_cover_enabled": true,
+    "arrival_exposure_enabled": true,
+    "reentry_window_enabled": true,
+    "joint_rescue_enabled": true,
+    "melee_survivable_rescue_enabled": true,
+    "bounded_fire_delay_enabled": true,
+    "fire_delay_max_h": 1.0
+  },
+  "search": {
+    "beam_width": 8,
+    "max_plan_evaluations": 512,
+    "rounds": 2,
+    "max_candidates_per_unit": 6,
+    "max_atomic_candidates": 12
+  },
+  "lifecycle": {
+    "no_progress_window_h": 3.0,
+    "retry_cooldown_h": 2.0,
+    "engage_target_max_h": 12.0,
+    "engage_wait_max_h": 2.0,
+    "escape_max_h": 3.0,
+    "stabilize_max_h": 2.0,
+    "reenter_max_h": 6.0,
+    "disengage_total_max_h": 12.0,
+    "regroup_max_h": 8.0,
+    "formation_max_h": 3.0,
+    "search_waypoint_max_h": 12.0,
+    "observation_ttl_loops": 240,
+    "search_revisit_cooldown_loops": 160,
+    "combat_cycle_commit_h": 2.0,
+    "combat_cycle_memory_h": 6.0
+  },
+  "contact_progress": {
+    "stall_h": 2.0,
+    "deadline_h": 6.0
+  },
+  "battle_intent": {
+    "commit_h": 4.0,
+    "stall_h": 4.0,
+    "quiet_h": 6.0,
+    "failed_retreats": 2
+  },
+  "focus_fire": {
+    "target_planning_enabled": true,
+    "kill_window_h": 3.0,
+    "joint_kill_max_members": 5,
+    "urgency_value": 0.5
+  },
+  "coordinated_engage": {
+    "slot_spacing": 1.4,
+    "contact_slot_margin": 0.05
+  },
+  "precombat_rally": {
+    "min_members": 3,
+    "ready_radius": 4.0,
+    "max_member_distance": 20.0,
+    "trigger_enemy_distance": 18.0,
+    "ready_fraction": 0.8,
+    "max_h": 8.0,
+    "min_commit_h": 2.0,
+    "no_progress_h": 3.0,
+    "rearm_quiet_h": 4.0
+  },
+  "combat_reposition": {},
+  "combat_rejoin": {
+    "support_radius": 6.0,
+    "min_members": 2,
+    "max_members": 10,
+    "max_h": 8.0,
+    "min_commit_h": 2.0,
+    "no_progress_h": 3.0,
+    "min_support_ratio": 1.2
+  },
+  "disengage_reenter": {
+    "critical_health_fraction": 0.35,
+    "reenter_health_fraction": 0.6,
+    "escape_risk_threshold": 2
+  },
+  "regroup": {
+    "support_radius": 8.0
+  },
+  "local_formation": {
+    "spread_radius": 3.5,
+    "min_pair_distance": 1.2
+  },
+  "cohesive_search": {
+    "arrival_tolerance": 2.0,
+    "cohesion_radius": 10.0
+  },
+  "splash_fire": {
+    "coverage_reliability": 0.5,
+    "coverage_radius": 3.0,
+    "coverage_weight": 0.5
+  },
+  "heal_support": {
+    "follow_distance": 5.0,
+    "switch_margin": 0.3
+  },
+  "hydra_micro": {
+    "enabled": false
+  },
+  "burst_engage": {
+    "proxy_radius": 2.5,
+    "value_per_enemy": 2.0,
+    "min_exchange_value": 2.0,
+    "self_cost": 1.0,
+    "lonely_enemy_exception": true,
+    "motion_prediction_enabled": true,
+    "selective_commitment_enabled": true
+  },
+  "unit_value": {
+    "enabled": true,
+    "mode": "contextual",
+    "spatial_context": true,
+    "w_matchup": 0.2,
+    "w_support": 0.2,
+    "w_scarcity": 0.2,
+    "scale": 2.0,
+    "focus_value_weight": 0.2,
+    "focus_switch_margin": 0.05,
+    "retreat_value_margin": 0.05,
+    "retreat_threshold_upper_bound": 0.6,
+    "heal_value_weight": 0.1
+  },
+  "intercept": {
+    "enabled": true,
+    "timing_guard_enabled": true,
+    "loss_control_enabled": true,
+    "burst_defer_margin": 0.5
+  },
+  "telemetry": {
+    "top_k_candidates": 3
+  }
+}

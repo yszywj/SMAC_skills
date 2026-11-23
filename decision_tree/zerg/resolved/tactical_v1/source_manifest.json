@@ -1,0 +1,969 @@
+{
+  "base_dir": "/home/amax/ry/SMAC_skill/skills/tactical_v1",
+  "counts": {
+    "base": 71,
+    "overlay": 65,
+    "overridden": 63,
+    "total": 136
+  },
+  "files": [
+    {
+      "bytes": 172,
+      "overridden": true,
+      "path": "__init__.py",
+      "sha256": "022534fac344ccab3dc3d4200c3601a375260df9ff1715704c5971408cce0189",
+      "source": "overlay"
+    },
+    {
+      "bytes": 27040,
+      "overridden": true,
+      "path": "action_duties.py",
+      "sha256": "493919206debb3cf59e5a1429d2363ac363edc06e9a6ff3c2d06f816e405e2a5",
+      "source": "overlay"
+    },
+    {
+      "bytes": 3165,
+      "overridden": true,
+      "path": "actions.py",
+      "sha256": "a1713b2ddb15759e67297d115ed1d093c0629450758d41563c6cfe3cb0d69a78",
+      "source": "overlay"
+    },
+    {
+      "bytes": 13039,
+      "overridden": true,
+      "path": "baseline.py",
+      "sha256": "e6d51180d3239d609acfb067c8d4a3998cf6bb6ad94fe281c88db8b0c865fc2f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 11648,
+      "overridden": true,
+      "path": "battle_intent.py",
+      "sha256": "51b67052cbec8b148e81979a83e8574fe23381e12989003e1a5f063fad4b76f3",
+      "source": "overlay"
+    },
+    {
+      "bytes": 23328,
+      "overridden": true,
+      "path": "battle_line.py",
+      "sha256": "bcc3dde84e71cf0b5a5e02c1cfc812cd2d29ff00176699ef6993f6f68db4c23f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 6121,
+      "overridden": true,
+      "path": "battle_pressure.py",
+      "sha256": "82d55e405aa88661120742f377dd8194bfb7578762c2921c5151411e9757605e",
+      "source": "overlay"
+    },
+    {
+      "bytes": 60229,
+      "overridden": true,
+      "path": "burst.py",
+      "sha256": "75cc65cf12c96bd23486a95a3a71e48fef2115edcc6c928ebcc2f828da2ee63a",
+      "source": "overlay"
+    },
+    {
+      "bytes": 2232,
+      "overridden": true,
+      "path": "burst_allocation.py",
+      "sha256": "a7c33beb415984549bf739a37b0acc36c9dd96289a78453cab6276213e469083",
+      "source": "overlay"
+    },
+    {
+      "bytes": 1797,
+      "overridden": true,
+      "path": "burst_native_profile.json",
+      "sha256": "686f9fb113228f06c67a410511169978e1c5a96bc50de9bf5f75b2b8d6dd73d8",
+      "source": "overlay"
+    },
+    {
+      "bytes": 58110,
+      "overridden": true,
+      "path": "burst_progress.py",
+      "sha256": "b0259200185551f68e4c398ed45e12b719dbc416645ecb096b79aab73f5b1ab1",
+      "source": "overlay"
+    },
+    {
+      "bytes": 4227,
+      "overridden": true,
+      "path": "capabilities.py",
+      "sha256": "59ae0da12635e18b6ed62bc1f9bb3a15d2294254882506455eb977eed57579f6",
+      "source": "overlay"
+    },
+    {
+      "bytes": 30785,
+      "overridden": true,
+      "path": "combat_exchange.py",
+      "sha256": "7cc9e16aa7e60bae5112eba2468ba0a9f12165c79c369f6459ea6b5ef82ba53f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 22690,
+      "overridden": true,
+      "path": "combat_groups.py",
+      "sha256": "6436cfde38314357d82b5a6c0de3dd4e535924dabb96dd27f76d277bdc12a259",
+      "source": "overlay"
+    },
+    {
+      "bytes": 22299,
+      "overridden": true,
+      "path": "combat_progress.py",
+      "sha256": "8a21db54278506c3045f0ab99db1bae08fe65898ead29dbd9e3ea8cbceeb11f2",
+      "source": "overlay"
+    },
+    {
+      "bytes": 12024,
+      "overridden": true,
+      "path": "config.py",
+      "sha256": "360e98d90240ed552228f8d7f410e8a53dcc20c1087f5c89506668bb90b7d825",
+      "source": "overlay"
+    },
+    {
+      "bytes": 37397,
+      "overridden": true,
+      "path": "contact_progress.py",
+      "sha256": "7a46ce947c39131af1883f4ab641b804da10fe317b1f6109da3793ddc9a915fe",
+      "source": "overlay"
+    },
+    {
+      "bytes": 39850,
+      "overridden": true,
+      "path": "context.py",
+      "sha256": "dc5f68c339144d9abbd4b5787a1097d9e38a2ccc35184de1fe8226ec76b8e926",
+      "source": "overlay"
+    },
+    {
+      "bytes": 7722,
+      "overridden": true,
+      "path": "contracts.py",
+      "sha256": "2581e962860579e5bfda3e1903324ca38d0720db3b3a20810a09f66206cd43e8",
+      "source": "overlay"
+    },
+    {
+      "bytes": 54390,
+      "overridden": true,
+      "path": "coordinator.py",
+      "sha256": "9006b03a2d3f00674577095e3842d57ae1d8932db4990ea9fed576fea291f47c",
+      "source": "overlay"
+    },
+    {
+      "bytes": 4697,
+      "overridden": true,
+      "path": "defaults.json",
+      "sha256": "4c9163642523a7c6834063a051150494231aa666f488a8172fbd5e1e1f0fe7f9",
+      "source": "overlay"
+    },
+    {
+      "bytes": 28383,
+      "overridden": true,
+      "path": "deployment.py",
+      "sha256": "44062d0c9d1115b1e54457bde7e87d92267c2f7c667966c8cd8a0f739bf0a0ce",
+      "source": "overlay"
+    },
+    {
+      "bytes": 21835,
+      "overridden": true,
+      "path": "effects.py",
+      "sha256": "60d089ff54eb4ed7c7f07a9ff8f951a17f73436b1c7f0856d1a21625c6ae80b3",
+      "source": "overlay"
+    },
+    {
+      "bytes": 6943,
+      "overridden": true,
+      "path": "encounters.py",
+      "sha256": "2428a2254e7318f27c643979520703af5db107e27a4f80424baa2da4bc5460c9",
+      "source": "overlay"
+    },
+    {
+      "bytes": 7189,
+      "overridden": true,
+      "path": "enemy_motion.py",
+      "sha256": "a00e716acc99d9c3042a3f04da6d5e7da90680edd37768b83ec93d5f33e2dfee",
+      "source": "overlay"
+    },
+    {
+      "bytes": 88561,
+      "overridden": true,
+      "path": "evaluator.py",
+      "sha256": "3a5e9973825198ec1def5fe88e67bc4b4e98a8bd6618902718d1c4bbe0a318ab",
+      "source": "overlay"
+    },
+    {
+      "bytes": 4236,
+      "overridden": true,
+      "path": "fire_opportunities.py",
+      "sha256": "d81cba7407ac4d9315e9e95cca66568f7e056604e0f63525c3314f220fc61042",
+      "source": "overlay"
+    },
+    {
+      "bytes": 7516,
+      "overridden": true,
+      "path": "front_execution.py",
+      "sha256": "b7d1934f865c8fb959eecc15b7dc1e31d24638ad64b8b666c0a883f2c7668547",
+      "source": "overlay"
+    },
+    {
+      "bytes": 19119,
+      "overridden": true,
+      "path": "healing.py",
+      "sha256": "936ca050f8174311ff0b7fae574021ef0db67b8d7ea4045fbda47897eb867548",
+      "source": "overlay"
+    },
+    {
+      "bytes": 31974,
+      "overridden": true,
+      "path": "hydra_support.py",
+      "sha256": "f731e95104c7a7cb7cc51d9c04d306a0b4d8c89abe5e03b638f9ee286b287e90",
+      "source": "overlay"
+    },
+    {
+      "bytes": 6948,
+      "overridden": true,
+      "path": "impact_timing.py",
+      "sha256": "c147a6063b205af29f4f8430b8f963792c739d0bf0b97ddfd601f25178ef2470",
+      "source": "overlay"
+    },
+    {
+      "bytes": 26238,
+      "overridden": true,
+      "path": "intercept.py",
+      "sha256": "6dd1a874eb0bb076d33c5ab666c4d5e98aef4587a2d4a6bd11782760c983f93b",
+      "source": "overlay"
+    },
+    {
+      "bytes": 14234,
+      "overridden": true,
+      "path": "joint_combat.py",
+      "sha256": "d94380ba202eb985fca72c255d56df52f5862ea98dec08c0674a1b11ba34d943",
+      "source": "overlay"
+    },
+    {
+      "bytes": 4390,
+      "overridden": true,
+      "path": "ledger.py",
+      "sha256": "e22f3929197341651642536829b5a149016a16b234c2ed23f2fb0880a0281ff3",
+      "source": "overlay"
+    },
+    {
+      "bytes": 26449,
+      "overridden": false,
+      "path": "local_engagement.py",
+      "sha256": "360997309ad5e0040b5082265031efdea1b48e62a0ae89c0c42769d636fa6058",
+      "source": "overlay"
+    },
+    {
+      "bytes": 13533,
+      "overridden": true,
+      "path": "local_entry.py",
+      "sha256": "91438affb5a15a452dd87fb6b53ba2ae4f428c6632476d1ad2b16b8ceab81e3f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 6856,
+      "overridden": false,
+      "path": "local_pack_options.py",
+      "sha256": "11def04a7ed20023f35c3903e1c9de2a524aab704532b856d71b0cf970b8d97b",
+      "source": "overlay"
+    },
+    {
+      "bytes": 81487,
+      "overridden": true,
+      "path": "memory.py",
+      "sha256": "35165d720d1fae5356780b4c9f6cc4eefdebf611596cacaa068d82b6d0003b83",
+      "source": "overlay"
+    },
+    {
+      "bytes": 9396,
+      "overridden": false,
+      "path": "micro_approach.py",
+      "sha256": "fd78dfd4ad98d364976b5d88e03d39d295ad6498cfa92450a7cfadd8d926f13e",
+      "source": "base"
+    },
+    {
+      "bytes": 9011,
+      "overridden": true,
+      "path": "opening_fire_group.py",
+      "sha256": "ef6fc8756479bc0d86b68f47f0167fbdcdc4ed8a29b705d3d96eaaadbdc02c9c",
+      "source": "overlay"
+    },
+    {
+      "bytes": 2438,
+      "overridden": true,
+      "path": "ranged_targets.py",
+      "sha256": "26ae0daa63676207d54a2e7b133808a39f36337573c1085e99d2e86dc124f858",
+      "source": "overlay"
+    },
+    {
+      "bytes": 6025,
+      "overridden": true,
+      "path": "recovery.py",
+      "sha256": "11fccdaf43a694b218b4447223b9fc36e380cbd8024f313a03666e1f20e8cb01",
+      "source": "overlay"
+    },
+    {
+      "bytes": 2388,
+      "overridden": true,
+      "path": "registry.py",
+      "sha256": "b8bd01733d1b1bf178b72f457435bea783709cf963a09815947358cb1072af6c",
+      "source": "overlay"
+    },
+    {
+      "bytes": 25462,
+      "overridden": true,
+      "path": "skill_manager.py",
+      "sha256": "ee3f81a811eba19b3609b38b86787b3027fc1b6b8a1b667d537e70607b0f7468",
+      "source": "overlay"
+    },
+    {
+      "bytes": 455,
+      "overridden": true,
+      "path": "skills/__init__.py",
+      "sha256": "48fdcd55bd7753b8745660e33d1b5e9d5b0cafa0510b35114548d046b3f2e491",
+      "source": "overlay"
+    },
+    {
+      "bytes": 7770,
+      "overridden": true,
+      "path": "skills/burst_engage.py",
+      "sha256": "bce8a7e3641532403c0a2f9a8f4aa9cf91b0e2539e1b188fe0515cfb20571420",
+      "source": "overlay"
+    },
+    {
+      "bytes": 8831,
+      "overridden": true,
+      "path": "skills/cohesive_search.py",
+      "sha256": "b844cc7ac04d21787a01d48566e9b35a45bccb2a03bf2232311030e8bd39d2dc",
+      "source": "overlay"
+    },
+    {
+      "bytes": 31321,
+      "overridden": true,
+      "path": "skills/combat_rejoin.py",
+      "sha256": "8804af949b5fd46ae7f9022fd9bad4e735e0781e24b6b57d7dbb664ba2151206",
+      "source": "overlay"
+    },
+    {
+      "bytes": 13299,
+      "overridden": true,
+      "path": "skills/combat_reposition.py",
+      "sha256": "41358683c9383b999b09341d88e1ee822a2dd6e6aa4249e3e7716415d09ada24",
+      "source": "overlay"
+    },
+    {
+      "bytes": 5666,
+      "overridden": true,
+      "path": "skills/common.py",
+      "sha256": "ec57864e8583ee9537a83f6663c6bbfedc5651bc4a5d6a356f889b9e08f98a29",
+      "source": "overlay"
+    },
+    {
+      "bytes": 39392,
+      "overridden": true,
+      "path": "skills/coordinated_engage.py",
+      "sha256": "14ee14b87cf745fdf0d3efd87bc271b14fd1799a034f20e72c1d3386d025aaa4",
+      "source": "overlay"
+    },
+    {
+      "bytes": 29448,
+      "overridden": true,
+      "path": "skills/disengage_reenter.py",
+      "sha256": "caf625b68b74bb4f0d14a52938c3518f0d1f6fa9152f6a8dd6a865f338311ea6",
+      "source": "overlay"
+    },
+    {
+      "bytes": 18450,
+      "overridden": true,
+      "path": "skills/focus_fire.py",
+      "sha256": "116f9f60ae102618bc8a692500b271386986bca1972973e2c64d601dbb849382",
+      "source": "overlay"
+    },
+    {
+      "bytes": 18771,
+      "overridden": true,
+      "path": "skills/heal_support.py",
+      "sha256": "3a7aba56141ff4dd35d8c9b1477cac8d44e503a0cff648202525f09b7cd7bdf5",
+      "source": "overlay"
+    },
+    {
+      "bytes": 27961,
+      "overridden": true,
+      "path": "skills/local_formation.py",
+      "sha256": "a86ca582aa115299ac64f4ad83597a79e6b3debc0d4b1f86aafa9d6728c6e8c6",
+      "source": "overlay"
+    },
+    {
+      "bytes": 5340,
+      "overridden": true,
+      "path": "skills/precombat_rally.py",
+      "sha256": "69b64cda2c2395aeabee8c9bff49e2e333429a204ed49e553ede81ae12ad7042",
+      "source": "overlay"
+    },
+    {
+      "bytes": 54484,
+      "overridden": true,
+      "path": "skills/ranged_fire_formation.py",
+      "sha256": "df049f121fdbaeec9459c7c264bb72b7f83f4720120e55f46da3bd898dfb3e14",
+      "source": "overlay"
+    },
+    {
+      "bytes": 9586,
+      "overridden": true,
+      "path": "skills/regroup.py",
+      "sha256": "df3caaac33b3f31de047f52fc5fa5b9fe5c2cc87e525b67d4bbb4f8f3f9aaf3f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 5725,
+      "overridden": true,
+      "path": "skills/splash_fire.py",
+      "sha256": "6b1e54e0726c58624921b75393dee17844a78af5bbc389593443ffb180ef7fcf",
+      "source": "overlay"
+    },
+    {
+      "bytes": 16143,
+      "overridden": true,
+      "path": "targeting.py",
+      "sha256": "0dcf843a207736cb44a29f950eeaef680a79e8230cc29b3bfd223159ed469baf",
+      "source": "overlay"
+    },
+    {
+      "bytes": 14261,
+      "overridden": true,
+      "path": "team_exchange.py",
+      "sha256": "b1e937b894ffd4c9fdb84491875893c1bcdd315668ba4fcf1c306b0d256ca64f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 3448,
+      "overridden": true,
+      "path": "telemetry.py",
+      "sha256": "142cede8c9b0efaaee31696e261d9f5d8262f83e0a239660b73e11f7d450fa32",
+      "source": "overlay"
+    },
+    {
+      "bytes": 0,
+      "overridden": false,
+      "path": "tests/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source": "base"
+    },
+    {
+      "bytes": 131248,
+      "overridden": false,
+      "path": "tests/combat_progress_183.json",
+      "sha256": "9451355b7a9af6cbb41ee28d349d5b7dfd1d653a460c0ff15f49179c50b9ec53",
+      "source": "base"
+    },
+    {
+      "bytes": 9391,
+      "overridden": false,
+      "path": "tests/fixtures.py",
+      "sha256": "777749142107e3e9f4f3b99c709203af818618986ce1e3ce98b4a498d08f1214",
+      "source": "base"
+    },
+    {
+      "bytes": 206165,
+      "overridden": false,
+      "path": "tests/pressure_snapshots.json",
+      "sha256": "c05d94772c5c66cf9f9308f785084e7405502adbb94dec250bfbc1f37c13b2b6",
+      "source": "base"
+    },
+    {
+      "bytes": 8523,
+      "overridden": false,
+      "path": "tests/test_arrival_and_reentry_windows.py",
+      "sha256": "46e9b51efb4cb1a4826ab634f6b28157d39c17e88f8b0bf139d8da61eb4539d8",
+      "source": "base"
+    },
+    {
+      "bytes": 6411,
+      "overridden": false,
+      "path": "tests/test_battle_intent.py",
+      "sha256": "71e0d8b24874f30ea9ad58df4b62747922ce6df5c2013cd5793671cf8e2d3ae5",
+      "source": "base"
+    },
+    {
+      "bytes": 8803,
+      "overridden": false,
+      "path": "tests/test_battle_pressure.py",
+      "sha256": "6d147173d6e17ffa3073c58036e8b91fcaca3d3a1a53b4c118780a4d6ae59b4f",
+      "source": "base"
+    },
+    {
+      "bytes": 11300,
+      "overridden": false,
+      "path": "tests/test_burst_execution.py",
+      "sha256": "4cbdd4a8e7afccdb5c41a5d3cfbd266a0164bd6ac431554421fce9e725e9f606",
+      "source": "base"
+    },
+    {
+      "bytes": 13086,
+      "overridden": false,
+      "path": "tests/test_burst_joint_scoring.py",
+      "sha256": "dc4040162fb93a510c72b3ba24734a64fee6f93b34d103809d8d399d53b12489",
+      "source": "base"
+    },
+    {
+      "bytes": 10709,
+      "overridden": false,
+      "path": "tests/test_burst_mechanism.py",
+      "sha256": "add451659d98ca989f160ff5db9b8cc414c381b5a9eb6aba826ca93403cf0ac4",
+      "source": "base"
+    },
+    {
+      "bytes": 3374,
+      "overridden": false,
+      "path": "tests/test_burst_task_progress.py",
+      "sha256": "4aab2aca9c674c44cfbfa234f627c3c1d57b0498e4b6900a3a115a82c132dc53",
+      "source": "base"
+    },
+    {
+      "bytes": 12322,
+      "overridden": false,
+      "path": "tests/test_combat_cycle.py",
+      "sha256": "d2e4fc0f9ad91aa298bba870293a2ad6b6aed0b1dde5cb2d440f2d8a59458dbb",
+      "source": "base"
+    },
+    {
+      "bytes": 9925,
+      "overridden": false,
+      "path": "tests/test_combat_progress.py",
+      "sha256": "4078956f15ec2b568ce8077718bb5b43e81b00209615b10868b2c9ceff6a949e",
+      "source": "base"
+    },
+    {
+      "bytes": 15342,
+      "overridden": false,
+      "path": "tests/test_combat_rejoin.py",
+      "sha256": "175011397147edf766c4276fe8a78a996be3b1c74926adbf67eaa35fdec80a6f",
+      "source": "base"
+    },
+    {
+      "bytes": 10090,
+      "overridden": false,
+      "path": "tests/test_combat_semantics.py",
+      "sha256": "7803df2256d4eec7a97938820a949808e4fc2b4ffe6a1c4920c33fd10b2d6fb5",
+      "source": "base"
+    },
+    {
+      "bytes": 3644,
+      "overridden": false,
+      "path": "tests/test_common_exchange_revision.py",
+      "sha256": "bd1378021757fbfd463b65729dbe9ae3c32d7ad7c5a2c329c4cbbea641bd1458",
+      "source": "base"
+    },
+    {
+      "bytes": 5768,
+      "overridden": false,
+      "path": "tests/test_counter_fire_support.py",
+      "sha256": "4bc822b6f81116153bb223fea448515920b372ac3d6a8166555a4e26b011a632",
+      "source": "base"
+    },
+    {
+      "bytes": 6592,
+      "overridden": false,
+      "path": "tests/test_effective_rejoin.py",
+      "sha256": "05f2b2adc3a90e12e6667b8e153fbb43a9a1f774c70b2abc69aba8e871e1429f",
+      "source": "base"
+    },
+    {
+      "bytes": 2458,
+      "overridden": false,
+      "path": "tests/test_effective_support_scoring.py",
+      "sha256": "00b3bb0d65e190e0af8f32315e50c6e2608782a18249b208870df1133cccced9",
+      "source": "base"
+    },
+    {
+      "bytes": 7916,
+      "overridden": false,
+      "path": "tests/test_engage_task_lifecycle.py",
+      "sha256": "cb6bbd28313c80fdbd846f6b6417dbe516f391f02269dc95ec0146c519052892",
+      "source": "base"
+    },
+    {
+      "bytes": 11471,
+      "overridden": false,
+      "path": "tests/test_escape_fire_budget.py",
+      "sha256": "c43e1fe0e1b290d159c49b2a54a1b049e63c9d750bbd276ac183f8331dddb4f9",
+      "source": "base"
+    },
+    {
+      "bytes": 4957,
+      "overridden": false,
+      "path": "tests/test_exchange_windows.py",
+      "sha256": "dde8263afcb5d14a4fbe88dbe5c9438486db24646ae42cefcd9f45b71af0bc85",
+      "source": "base"
+    },
+    {
+      "bytes": 10618,
+      "overridden": false,
+      "path": "tests/test_final_action_continuity.py",
+      "sha256": "72297e18b79539f5544b16c575c530ef001f835d5aef0bcd18c40d23f6303eab",
+      "source": "base"
+    },
+    {
+      "bytes": 6474,
+      "overridden": false,
+      "path": "tests/test_firecycle_budget.py",
+      "sha256": "d1f853e9fe51daedeef3a7065dca1f2e15dbc653f9a9b85a812005b4a4669d4a",
+      "source": "base"
+    },
+    {
+      "bytes": 37588,
+      "overridden": false,
+      "path": "tests/test_fix_regressions.py",
+      "sha256": "94e4905e2ce380ad38916422712632465e9bf9be4995c52b81eb6f1f5d67c395",
+      "source": "base"
+    },
+    {
+      "bytes": 7193,
+      "overridden": false,
+      "path": "tests/test_formation_body_layers.py",
+      "sha256": "e62b50b42b63a1f80a9b13527e3f2ac430e41ec75ac506a70e707792ab486e8e",
+      "source": "base"
+    },
+    {
+      "bytes": 2400,
+      "overridden": false,
+      "path": "tests/test_formation_task_lifecycle.py",
+      "sha256": "68cdaf3a41232ef3712b13f9645a60a8056fefa13bfa123479cf6a5ab1363b89",
+      "source": "base"
+    },
+    {
+      "bytes": 7858,
+      "overridden": false,
+      "path": "tests/test_future_fire_budget.py",
+      "sha256": "9266bab9872181668d2bb31a804970b6fae013ea9e6dcecfdcf804325e4d18a4",
+      "source": "base"
+    },
+    {
+      "bytes": 10816,
+      "overridden": false,
+      "path": "tests/test_heal_task_lifecycle.py",
+      "sha256": "42264ad38ac1e984c0794721baf97dbd9c59ebad8281a0091781a205fcf0475f",
+      "source": "base"
+    },
+    {
+      "bytes": 14751,
+      "overridden": false,
+      "path": "tests/test_healing_rescue.py",
+      "sha256": "8c4a89884c3d182cdea5b4934678963ec12d2b648d2da98afd5a887681e25939",
+      "source": "base"
+    },
+    {
+      "bytes": 11628,
+      "overridden": false,
+      "path": "tests/test_healing_services.py",
+      "sha256": "da42ec66332021c96652b62a48fb512f887568da18aabcb07e47aaa100265756",
+      "source": "base"
+    },
+    {
+      "bytes": 1803,
+      "overridden": false,
+      "path": "tests/test_high_exposure_ordering.py",
+      "sha256": "b5dddad4cf57f1cac9cb8fba6063647659782722fd5f4292405e716de182cae6",
+      "source": "base"
+    },
+    {
+      "bytes": 11807,
+      "overridden": false,
+      "path": "tests/test_hydra_approach_support.py",
+      "sha256": "6cce4b57323813d91f3c929e07f73174566bd3a9913be72fff66742f4522e113",
+      "source": "base"
+    },
+    {
+      "bytes": 14786,
+      "overridden": false,
+      "path": "tests/test_hydra_support.py",
+      "sha256": "ff3f8b0a719a2edaf7c65d907fc7654726c4f4f9916cfdea892e32faa9d32748",
+      "source": "base"
+    },
+    {
+      "bytes": 12009,
+      "overridden": false,
+      "path": "tests/test_joint_coordination.py",
+      "sha256": "9174192b9be7f0bf2203e696475b0e02972babf658b2f70d68716fcc164757c2",
+      "source": "base"
+    },
+    {
+      "bytes": 7114,
+      "overridden": false,
+      "path": "tests/test_joint_generic_contracts.py",
+      "sha256": "dde2a1105a12a51141ca3966eba120817ca3041c71344c76453afabd9c9695db",
+      "source": "base"
+    },
+    {
+      "bytes": 5284,
+      "overridden": false,
+      "path": "tests/test_joint_mechanisms.py",
+      "sha256": "794ef100df71375b1589c8118eb9a9a07451914f8fef27e755837b1b15c06b64",
+      "source": "base"
+    },
+    {
+      "bytes": 7109,
+      "overridden": false,
+      "path": "tests/test_joint_review_regressions.py",
+      "sha256": "75661f6af918f576c86f5e3577c84b2502e139ed9d4e5ba15d16aebab0b2bca2",
+      "source": "base"
+    },
+    {
+      "bytes": 5609,
+      "overridden": false,
+      "path": "tests/test_lifecycle_controls.py",
+      "sha256": "29d65bc2c4d31602f944b697388c321e26d57c24544fed2c6518dff17fdbe39c",
+      "source": "base"
+    },
+    {
+      "bytes": 10092,
+      "overridden": false,
+      "path": "tests/test_local_entry.py",
+      "sha256": "0715fc75103b738540f82bf46aa04d355b8005df4139f8eadaea328a1184de6e",
+      "source": "base"
+    },
+    {
+      "bytes": 16490,
+      "overridden": false,
+      "path": "tests/test_local_rejoin_front.py",
+      "sha256": "79fbe3a34aea117d47a6150f2ab5e0f8a6a4a0b0323c865ffed6994c168512c3",
+      "source": "base"
+    },
+    {
+      "bytes": 2853,
+      "overridden": false,
+      "path": "tests/test_manager_10v10.py",
+      "sha256": "7bae8f4cb629ffb5c9ad6269d5d5898894eb7e4b3c3ee85b0ddda29da0c1fa17",
+      "source": "base"
+    },
+    {
+      "bytes": 8554,
+      "overridden": false,
+      "path": "tests/test_melee_contact_routes.py",
+      "sha256": "dc7fc5c1ae0719de1b871dbd4eaf3449895b2af7635e04c72d3b1886435d7aef",
+      "source": "base"
+    },
+    {
+      "bytes": 11287,
+      "overridden": false,
+      "path": "tests/test_movement_coordination.py",
+      "sha256": "a0d0ff441cbd3517ddd078d6dc264b605ef76a48049b01b50583ec5e10747186",
+      "source": "base"
+    },
+    {
+      "bytes": 9328,
+      "overridden": false,
+      "path": "tests/test_output_cycle_contract.py",
+      "sha256": "e3a1c6c5388e789e14e3929c4f8319cf810e18be9528f5ffa43c9eff9f02560c",
+      "source": "base"
+    },
+    {
+      "bytes": 7169,
+      "overridden": false,
+      "path": "tests/test_output_duties.py",
+      "sha256": "d92eb763298d53b2b88387cd86d500d012f84845e151fac1638603087f79d6e8",
+      "source": "base"
+    },
+    {
+      "bytes": 13199,
+      "overridden": false,
+      "path": "tests/test_precombat_rally.py",
+      "sha256": "f3c2d79c4e3df7709776aac6a538720c10211483dbce3d98bd2e0300ce1a0b67",
+      "source": "base"
+    },
+    {
+      "bytes": 7752,
+      "overridden": false,
+      "path": "tests/test_pressure_memory.py",
+      "sha256": "72d24b45eb23ba9e9d577e1d47a00cb671aecbe5cf8bcb09eb1bd841a6ac6a7e",
+      "source": "base"
+    },
+    {
+      "bytes": 2759,
+      "overridden": false,
+      "path": "tests/test_pressure_recorded_regressions.py",
+      "sha256": "674e94111d011700fed7b499bebcf0f3dadd3a1c1db190c904b96ebdeb54f005",
+      "source": "base"
+    },
+    {
+      "bytes": 10673,
+      "overridden": false,
+      "path": "tests/test_ranged_fire_formation.py",
+      "sha256": "acffbfdcfa8363f9a8cadd239baf6e2be63f188211071aa64109aab720b08350",
+      "source": "base"
+    },
+    {
+      "bytes": 2265,
+      "overridden": false,
+      "path": "tests/test_ranged_targets.py",
+      "sha256": "5b1c1d4670a07e298646c09917ae14311f2c05748de24a7190fb8c94beee2f6f",
+      "source": "base"
+    },
+    {
+      "bytes": 10897,
+      "overridden": false,
+      "path": "tests/test_reentry_and_joint_blockage.py",
+      "sha256": "06af942c2fc2bf4ac95834554a64154fa4f7e872a9280639f27c30b2f6f89548",
+      "source": "base"
+    },
+    {
+      "bytes": 5672,
+      "overridden": false,
+      "path": "tests/test_rejoin_continuation.py",
+      "sha256": "3154a5d82f82a65bee4fe7e897c7e39fb24d2f5d8274f8fae6de0986b8e0fea2",
+      "source": "base"
+    },
+    {
+      "bytes": 2827,
+      "overridden": false,
+      "path": "tests/test_relative_approach_progress.py",
+      "sha256": "3f77c89c9ff7d85b8002dfa07704d6a0f72035c47df7a46da47d60227b711139",
+      "source": "base"
+    },
+    {
+      "bytes": 9232,
+      "overridden": false,
+      "path": "tests/test_retain_members_memory.py",
+      "sha256": "f83ff13c583ed11653d7f6d3213e6ae4d6fa48a11ea512dc3f2abf253a4d9422",
+      "source": "base"
+    },
+    {
+      "bytes": 11138,
+      "overridden": false,
+      "path": "tests/test_risk_forecast.py",
+      "sha256": "a250d18e85029c5dfd97e689a2af1da37b6142c8a04cc951c9b7aeecafdf7bad",
+      "source": "base"
+    },
+    {
+      "bytes": 1354,
+      "overridden": false,
+      "path": "tests/test_run_statistics.py",
+      "sha256": "bbbd1f423b872f6ad3854a14cf2f08028b41b06839cfd72b295b85f97bd0fda5",
+      "source": "base"
+    },
+    {
+      "bytes": 5235,
+      "overridden": false,
+      "path": "tests/test_search_fairness.py",
+      "sha256": "5430a11a9f88170f1ad0849bc5f6a964a6099b56be19c29d045393059bcdd3c9",
+      "source": "base"
+    },
+    {
+      "bytes": 9706,
+      "overridden": false,
+      "path": "tests/test_shared_engage_front.py",
+      "sha256": "850993ee8857833a7342ae9bda276f93b0281486e8c5560287d980ca43377baa",
+      "source": "base"
+    },
+    {
+      "bytes": 12323,
+      "overridden": false,
+      "path": "tests/test_short_target_plan.py",
+      "sha256": "7bf380afef934a8cd05827357ed240d252f14fcafd68c1fb48b59a98ecbc8ee2",
+      "source": "base"
+    },
+    {
+      "bytes": 9559,
+      "overridden": false,
+      "path": "tests/test_sustained_contact_scoring.py",
+      "sha256": "103fbd7e3682f74d3ffeedffcdac62e4fbdcc4586e6d14fd538bea5a205edd1b",
+      "source": "base"
+    },
+    {
+      "bytes": 7526,
+      "overridden": false,
+      "path": "tests/test_sustained_skills.py",
+      "sha256": "e0172651a80d31e8a388932725104856d9c06bcf1b03096442002b7cadce56b6",
+      "source": "base"
+    },
+    {
+      "bytes": 2943,
+      "overridden": false,
+      "path": "tests/test_target_continuity.py",
+      "sha256": "cc2b40b942bf02dcfc04f5507a4265c89ec7208b8b96448f33bbe88c92794eb9",
+      "source": "base"
+    },
+    {
+      "bytes": 9948,
+      "overridden": false,
+      "path": "tests/test_target_selection_and_first_formation.py",
+      "sha256": "262bc30c1cf5f4fb2ca74846a10f968da12c6a77aa8ff5d75feea766e33dc894",
+      "source": "base"
+    },
+    {
+      "bytes": 8204,
+      "overridden": false,
+      "path": "tests/test_task_memory.py",
+      "sha256": "3e2131b9abb280d4f87cbf4adf1061fa51c2c4491b3506fc3388c203fedb830e",
+      "source": "base"
+    },
+    {
+      "bytes": 7693,
+      "overridden": false,
+      "path": "tests/test_zerg_hydra_policy.py",
+      "sha256": "c5aa1e374180b0c40981f57d0081c26b1fb0be267e436faa87fbaaa5e3d25aaa",
+      "source": "base"
+    },
+    {
+      "bytes": 3302,
+      "overridden": false,
+      "path": "tests/test_zerg_roster_policy.py",
+      "sha256": "ee495a3c28430713101d62eb1c39a541eb2b49c88fa4805a566b3393d3cfca55",
+      "source": "base"
+    },
+    {
+      "bytes": 2359,
+      "overridden": false,
+      "path": "tests/test_zergling_screen.py",
+      "sha256": "983d0122bad9f9a8e360c44fe394132420dd3a9827d084abd7c5061508229db3",
+      "source": "base"
+    },
+    {
+      "bytes": 73,
+      "overridden": true,
+      "path": "tools/__init__.py",
+      "sha256": "75bc199c10f39a6e8a7247dcd5bb1f0109115bf482d47e39d949e1deba78cfcf",
+      "source": "overlay"
+    },
+    {
+      "bytes": 16415,
+      "overridden": true,
+      "path": "tools/smoke_combat_review.py",
+      "sha256": "7964c75cc0e18e8ae248eb725be41c0d275807df2a8b69e593da32080b70739f",
+      "source": "overlay"
+    },
+    {
+      "bytes": 5435,
+      "overridden": true,
+      "path": "unit_value_view.py",
+      "sha256": "157454a1c2013af097590ea2eeb84ee809ad298be97144a488130a141b083f81",
+      "source": "overlay"
+    },
+    {
+      "bytes": 15643,
+      "overridden": true,
+      "path": "validator.py",
+      "sha256": "e992f980d635d790966493b8b0abadb0389190799d0300634ade82fbebf74e51",
+      "source": "overlay"
+    },
+    {
+      "bytes": 10708,
+      "overridden": false,
+      "path": "zerg_hydra_policy.py",
+      "sha256": "6bcfd36d053ea3dd6805fc189f1b71e46d4aa934555360ce257a10679d78b516",
+      "source": "base"
+    },
+    {
+      "bytes": 4193,
+      "overridden": false,
+      "path": "zerg_roster_policy.py",
+      "sha256": "039932745d699e435236d73913680173b8373e76d941a3aacea1fedec670676c",
+      "source": "base"
+    }
+  ],
+  "fingerprint": "2f135a09b7374512731583c2b511425066b4fa78a64493b842676a1115d302a7",
+  "fingerprint_schema": "zerg_source_fingerprint_v1",
+  "output_dir": "/home/amax/ry/SMAC_skill/decision_tree/zerg/resolved/tactical_v1",
+  "overlay_dir": "/home/amax/ry/SMAC_skill/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/tactical_v1",
+  "schema_version": "zerg_source_manifest_v1",
+  "syntax_errors": []
+}

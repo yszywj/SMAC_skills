@@ -1,0 +1,39 @@
+{
+  "kind": "zerg_tree_runtime_config",
+  "mode": "off",
+  "workspace": ".",
+  "base_dir": "skills/tactical_v1",
+  "overlay_dir": "runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/tactical_v1",
+  "records_path": "decision_tree/zerg/artifacts/records/shadow.jsonl",
+  "scorers": {
+    "zergling_scorer": {
+      "enabled": false,
+      "model_path": "decision_tree/zerg/models/zergling_scorer.json",
+      "min_gain": 0.0
+    },
+    "hydralisk_scorer": {
+      "enabled": false,
+      "model_path": "decision_tree/zerg/models/hydralisk_scorer.json",
+      "min_gain": 0.0
+    },
+    "baneling_scorer": {
+      "enabled": false,
+      "model_path": "decision_tree/zerg/models/baneling_scorer.json",
+      "min_gain": 0.0
+    },
+    "joint_scorer": {
+      "enabled": false,
+      "model_path": "decision_tree/zerg/models/joint_scorer.json",
+      "min_gain": 0.0
+    }
+  },
+  "selector": {
+    "enabled": true,
+    "min_gain": 0.0,
+    "tie_tolerance": 1e-09
+  },
+  "recording": {
+    "shadow": true,
+    "tree_score": true
+  }
+}
