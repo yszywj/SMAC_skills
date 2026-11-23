@@ -162,3 +162,35 @@ def validate_anchor_evidence(manifest: Dict[str, Any], pair: Dict[str, Any]
             str(manifest.get("source_fingerprint")):
         problems.append("source_fingerprint differs from anchor manifest")
     return problems
+
+
+def validate_anchor_manifest(manifest: Dict[str, Any],
+                             expected_experiment_id: Optional[str] = None
+                             ) -> List[str]:
+    """V1.3 gain-audit: structural + integrity validation of a frozen
+    anchor manifest. Returns the problem list (empty = valid)."""
+    problems: List[str] = []
+    if manifest.get("kind") != ANCHOR_MANIFEST_KIND:
+        problems.append(f"kind is {manifest.get('kind')!r}, expected "
+                        f"{ANCHOR_MANIFEST_KIND!r}")
+    declared = manifest.get("manifest_sha256")
+    integrity_basis = {k: v for k, v in manifest.items()
+                       if k != "manifest_sha256"}
+    if not isinstance(declared, str) or not declared:
+        problems.append("missing manifest_sha256")
+    elif canonical_digest(integrity_basis) != declared:
+        problems.append("manifest_sha256 integrity check failed")
+    if not manifest.get("source_fingerprint"):
+        problems.append("missing source_fingerprint")
+    if not manifest.get("execution_context_hash"):
+        problems.append("missing execution_context_hash")
+    if expected_experiment_id is not None \
+            and str(manifest.get("experiment_id")) != \
+            str(expected_experiment_id):
+        problems.append(f"experiment_id mismatch: manifest="
+                        f"{manifest.get('experiment_id')!r} expected="
+                        f"{expected_experiment_id!r}")
+    if not isinstance(manifest.get("anchors"), dict) \
+            or not manifest.get("anchors"):
+        problems.append("empty anchors")
+    return problems

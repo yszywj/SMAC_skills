@@ -303,3 +303,24 @@ Manager 状态可更新——任一失败回退 BASE。默认 `mode=off` 不变�
    goal_kind 编码；progress 取声明通道均值；risk 用 snapshot relations 的
    敌人射程内比例；`candidate_support_gain` 无估计器保持 MISSING（NaN），
    绝不填 0；训练与推理共用同一函数与 schema 拼接。
+
+---
+
+# Gain 数据审计修复（本轮）
+
+1. **强制 Anchor Manifest**：`build_gain_dataset(require_audit=True)` 必须提供
+   冻结 anchor manifest（kind/experiment_id/manifest_sha256 完整性/
+   source_fingerprint/execution_context_hash 全校验）与执行回执；
+   `require_audit=False` 仅调试且输出标记 unaudited。
+2. **执行回执**：`zerg_execution_receipt_v1` 记录两分支的 started/completed/
+   episode_finished/error/return 与独立 receipt_id/receipt_source；
+   completion_status 不再自证实验完成；跨 anchor、回执 return 与 pair
+   return 冲突即拒绝。
+3. **训练入口强制审计**：`train()/train_internal()` 的
+   gain/ranking/correction 任务必须携带 `audit_envelope`（audited + manifest
+   hash + records_hash 逐字节绑定 + 上下文/源码一致），否则拒绝；
+   审计结论写入模型 `gain_audit` 元数据。Shadow 缺失收益永远不会被解释为 0。
+4. **资源冲突特征**：`candidate_resource_conflict` 无估计器 = MISSING
+   （branch 与 summary 两条路径一致），训练侧由 active-feature 筛选剔除该列。
+5. resolved 目录维持本地生成产物（.gitignore 已含），`resolve_source.py`
+   可随时重建，Factory 导入不受影响。

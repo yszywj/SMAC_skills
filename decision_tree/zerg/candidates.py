@@ -580,7 +580,9 @@ def branch_scoring_features(branches: List["CompletePlanCandidate"],
             "candidate_progress": (math.fsum(progress_values)
                                    / len(progress_values))
             if progress_values else MISSING,
-            "candidate_resource_conflict": 0.0,
+            # Task 4: no branch-level conflict estimator exists — MISSING,
+            # never a fabricated 0
+            "candidate_resource_conflict": MISSING,
             "candidate_execution_duty": float(len(sorted({
                 row.get("kind") for row
                 in branch.execution_duties.values()

@@ -453,6 +453,12 @@ def validate_scorer_model(model: Dict[str, Any],
     if model.get("training_configuration") is not None \
             and not isinstance(model["training_configuration"], dict):
         raise ValueError("training_configuration must be an object")
+    if model.get("gain_audit") is not None \
+            and not isinstance(model["gain_audit"], dict):
+        raise ValueError("gain_audit must be an object when present")
+    audit_hash = (model.get("gain_audit") or {}).get("anchor_manifest_sha256")
+    if audit_hash is not None and not isinstance(audit_hash, str):
+        raise ValueError("gain_audit.anchor_manifest_sha256 must be a string")
     active = model.get("active_feature_names")
     if active is not None:
         if (not isinstance(active, list) or not active
@@ -562,6 +568,9 @@ def validate_ranking_model(model: Dict[str, Any],
                           int(model.get("capacity", {}).get("max_depth", 2)),
                           int(model.get("capacity", {}).get(
                               "number_of_trees", 1)))
+    if model.get("gain_audit") is not None \
+            and not isinstance(model["gain_audit"], dict):
+        raise ValueError("gain_audit must be an object when present")
     return model
 
 
@@ -586,3 +595,49 @@ def validate_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def load_json(path: str) -> Any:
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+
+
+# -- execution receipts (V1.3 gain-audit fix) --------------------------------
+
+RECEIPT_SCHEMA = "zerg_execution_receipt_v1"
+RECEIPT_BRANCHES = ("BASE", "candidate")
+
+
+def validate_execution_receipt(receipt: Dict[str, Any]) -> Dict[str, Any]:
+    """One branch-execution receipt: independent evidence that a BASE or a
+    candidate branch of ONE anchor actually ran to completion. Pair JSONL
+    completion_status alone is never sufficient evidence."""
+    if receipt.get("schema") != RECEIPT_SCHEMA:
+        raise ValueError(f"execution receipt requires {RECEIPT_SCHEMA}")
+    for field_name in ("experiment_id", "anchor_id", "baseline_id",
+                       "candidate_id", "branch_id", "source_fingerprint",
+                       "execution_context_hash"):
+        _identifier(receipt.get(field_name), field_name)
+    if receipt.get("branch_id") not in RECEIPT_BRANCHES:
+        raise ValueError("branch_id must be 'BASE' or 'candidate'")
+    for field_name in ("initial_state_hash", "prefix_hash"):
+        if not isinstance(receipt.get(field_name), str) \
+                or not receipt[field_name]:
+            raise ValueError(f"{field_name} evidence required")
+    if receipt.get("intervention_type") not in INTERVENTION_TYPES:
+        raise ValueError("unknown intervention_type")
+    if type(receipt.get("intervention_horizon")) is not int \
+            or receipt["intervention_horizon"] < 1:
+        raise ValueError("intervention_horizon must be a positive integer")
+    for flag in ("execution_started", "execution_completed",
+                 "episode_finished"):
+        if not isinstance(receipt.get(flag), bool):
+            raise ValueError(f"{flag} must be boolean")
+    error = receipt.get("execution_error")
+    if error is not None and not isinstance(error, str):
+        raise ValueError("execution_error must be a string or None")
+    outcome = receipt.get("outcome")
+    if outcome is not None and outcome not in OUTCOMES:
+        raise ValueError("unknown outcome")
+    if receipt.get("return") is not None:
+        _finite(receipt["return"], "return")
+    if receipt.get("receipt_id") is not None:
+        _identifier(receipt["receipt_id"], "receipt_id")
+    if receipt.get("receipt_source") is not None:
+        _identifier(receipt["receipt_source"], "receipt_source")
+    return receipt

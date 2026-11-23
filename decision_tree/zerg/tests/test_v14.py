@@ -25,6 +25,7 @@ from decision_tree.zerg import runtime as zr
 from decision_tree.zerg import schema as zs
 from decision_tree.zerg import scorer as zscore
 from decision_tree.zerg import training as zt
+from decision_tree.zerg.tests._helpers import synthetic_audit
 from decision_tree.zerg.candidates import branch_scoring_features, \
     build_branch_candidates
 from decision_tree.zerg.experiment_manifest import make_anchor_manifest
@@ -68,30 +69,28 @@ class LoaderHarness(unittest.TestCase):
     def _train(self, target, ctx_hash, source_fp, tmp, name="model.json"):
         records = _records(12)
         backend = zt.ZergTrainingBackend()
+        bundle, envelope = synthetic_audit(records, execution_context_hash=ctx_hash,
+                                           source_fingerprint=source_fp)
         kwargs = {}
+        if target in ("gain", "ranking", "correction"):
+            records = bundle.joint_records
+            kwargs["audit_envelope"] = envelope
         if target == "correction":
             gain, _ = backend.train(
                 "gain", records, scorer="joint_scorer",
                 execution_context_hash=ctx_hash,
                 source_fingerprint=source_fp,
                 capacity={"minimum_leaf_support": 2,
-                          "minimum_leaf_groups": 2})
-            kwargs["old_model"] = gain
-        if target == "ranking":
-            model, _ = backend.train(
-                "ranking", records, scorer="joint_scorer",
-                execution_context_hash=ctx_hash,
-                source_fingerprint=source_fp,
-                capacity={"minimum_leaf_support": 2,
-                          "minimum_leaf_groups": 2})
-        else:
-            model, _ = backend.train(
-                target, records, scorer="joint_scorer",
-                execution_context_hash=ctx_hash,
-                source_fingerprint=source_fp,
-                capacity={"minimum_leaf_support": 2,
                           "minimum_leaf_groups": 2},
                 **kwargs)
+            kwargs["old_model"] = gain
+        model, _ = backend.train(
+            target, records, scorer="joint_scorer",
+            execution_context_hash=ctx_hash,
+            source_fingerprint=source_fp,
+            capacity={"minimum_leaf_support": 2,
+                      "minimum_leaf_groups": 2},
+            **kwargs)
         path = Path(tmp) / name
         path.write_text(json.dumps(zs._sanitize(model), indent=2))
         return path

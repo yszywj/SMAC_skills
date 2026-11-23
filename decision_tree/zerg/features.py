@@ -178,9 +178,10 @@ CANDIDATE_FEATURES: Tuple[FeatureSpec, ...] = (
                 "reserved; support-network gain estimate"),
     FeatureSpec("candidate_progress", "candidate", (), True,
                 "declared task progress signal of the plan"),
-    FeatureSpec("candidate_resource_conflict", "candidate", (), False,
+    FeatureSpec("candidate_resource_conflict", "candidate", (), True,
                 "1.0 when the plan's claims collide with a peer plan at the "
-                "same decision point"),
+                "same decision point; MISSING when no peer candidates of "
+                "the same decision point exist (no estimator, never 0)"),
     FeatureSpec("candidate_execution_duty", "candidate", (), True,
                 "index into DUTY_VOCABULARY of the dominant duty"),
 )
@@ -701,8 +702,11 @@ def extract_candidate_features(plan, snapshot, context=None,
     loss = sum(float(getattr(e, "amount", 0.0) or 0.0)
                for e in effects if getattr(e, "kind", "") == "loss"
                and getattr(e, "amount", None) is not None)
-    conflicts = 0.0
+    # Task 4: without peer candidates of the SAME decision point there is
+    # no conflict information at all — MISSING, never a fabricated 0.
+    conflicts = MISSING
     if peer_plans:
+        conflicts = 0.0
         own = set(actors) | set(getattr(getattr(plan, "claims", None),
                                         "controls", ()) or ())
         for peer in peer_plans:

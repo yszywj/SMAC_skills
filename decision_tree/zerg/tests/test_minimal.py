@@ -38,6 +38,7 @@ from decision_tree.zerg.features import (DEFAULT_SCHEMA, MISSING,
                                          StateFeatureExtractor)
 from decision_tree.zerg.source import ZergSkillSourceResolver
 from decision_tree.zerg.training import ZergTrainingBackend
+from decision_tree.zerg.tests._helpers import synthetic_audit
 
 
 def _sha(path: Path) -> str:
@@ -312,9 +313,12 @@ class TestTrainingRoundTrip(unittest.TestCase):
             zs.validate_scorer_model(imitation)
             self.assertEqual(imitation["scorer"], "hydralisk_scorer")
             self.assertEqual(imitation["capacity"]["number_of_trees"], 1)
+            audited_bundle, audited_envelope = synthetic_audit(
+                records, execution_context_hash=context_hash)
             gain_model, gain_report = backend.train(
-                "gain", records, scorer="joint_scorer",
+                "gain", audited_bundle.joint_records, scorer="joint_scorer",
                 execution_context_hash=context_hash,
+                audit_envelope=audited_envelope,
                 capacity={"minimum_leaf_support": 2,
                           "minimum_leaf_groups": 2})
             zs.validate_scorer_model(gain_model)

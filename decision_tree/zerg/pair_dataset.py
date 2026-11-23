@@ -20,7 +20,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .dataset import record_key, dumps_key
-from .schema import digest as canonical_digest, validate_pair_record
+from .schema import digest as canonical_digest, validate_pair_record, \
+    validate_execution_receipt
+from .schema import _sanitize
+from .experiment_manifest import validate_anchor_manifest
 
 SCOPES = ("joint", "skill_internal")
 GAIN_TOLERANCE = 1e-9
@@ -146,7 +149,11 @@ def join_counterfactual_pairs(decision_records: Sequence[Dict[str, Any]],
 def audit_counterfactual_pairs(joined: Sequence[Dict[str, Any]],
                                decision_records: Optional[Sequence[
                                    Dict[str, Any]]] = None,
-                               anchor_manifest: Optional[Dict[str, Any]] = None
+                               anchor_manifest: Optional[Dict[str, Any]] = None,
+                               execution_receipts: Optional[Sequence[
+                                   Dict[str, Any]]] = None,
+                               raw_pairs: Optional[Sequence[
+                                   Dict[str, Any]]] = None
                                ) -> Dict[str, Any]:
     """Task 3.2 (V1.3 hardened): strict pair-legality audit.
 
@@ -242,6 +249,15 @@ def audit_counterfactual_pairs(joined: Sequence[Dict[str, Any]],
                         break
                 if not found:
                     problems.append("candidate_not_in_decision_record")
+        # Task 2: pair JSONL completion_status alone never proves execution
+        # — both branches need completed receipts bound to the same anchor.
+        # Applied after the identity checks so those reasons report first.
+        if not problems and execution_receipts is not None and raw_pairs:
+            pair_view = next((p for p in raw_pairs
+                              if str(p.get("pair_id")) == pair_id), None)
+            if pair_view is not None:
+                problems.extend(audit_execution_receipts(
+                    [pair_view], execution_receipts).get(pair_id, []))
         if problems:
             problems_by_pair[pair_id] = problems
         else:
@@ -279,7 +295,9 @@ def record_key_by_identity(row: Dict[str, Any]) -> Tuple[str, str, int, int]:
 def build_gain_dataset(decision_records: Sequence[Dict[str, Any]],
                        pair_records: Sequence[Dict[str, Any]],
                        *, require_audit: bool = True,
-                       anchor_manifest: Optional[Dict[str, Any]] = None
+                       anchor_manifest: Optional[Dict[str, Any]] = None,
+                       execution_receipts: Optional[Sequence[
+                           Dict[str, Any]]] = None
                        ) -> "GainDatasetBundle":
     """Task 3.3/3.4: audited gain training inputs.
 
@@ -288,9 +306,30 @@ def build_gain_dataset(decision_records: Sequence[Dict[str, Any]],
     written onto the paired candidate and ``baseline_return`` on the record.
     Unaudited data never reaches the training records.
     """
+    # Task 1: formal (audited) gain datasets REQUIRE the frozen anchor
+    # manifest AND execution receipts. require_audit=False is a debugging
+    # escape hatch only — its output is flagged unaudited and refused by
+    # the training entry points.
+    if require_audit:
+        if anchor_manifest is None:
+            raise ValueError("formal gain dataset requires an anchor "
+                             "manifest (require_audit=True)")
+        if execution_receipts is None:
+            raise ValueError("formal gain dataset requires execution "
+                             "receipts (require_audit=True)")
+        expected_experiment = pair_records[0].get("experiment_id") \
+            if pair_records else None
+        manifest_problems = validate_anchor_manifest(
+            anchor_manifest, expected_experiment_id=expected_experiment)
+        if manifest_problems:
+            raise ValueError("invalid anchor manifest: "
+                             + "; ".join(manifest_problems))
     joined = join_counterfactual_pairs(decision_records, pair_records)
     audit = audit_counterfactual_pairs(joined, decision_records,
-                                       anchor_manifest=anchor_manifest)
+                                       anchor_manifest=anchor_manifest,
+                                       execution_receipts=execution_receipts,
+                                       raw_pairs=pair_records)
+    audit["audited"] = bool(require_audit)
     rejected_ids = set(audit["problems_by_pair"])
     trainable_ids = ({str(row.get("pair_id")) for row in joined}
                      - rejected_ids)
@@ -346,7 +385,9 @@ def build_gain_dataset(decision_records: Sequence[Dict[str, Any]],
         audit_report=audit,
         dataset_hash=dataset_hash,
         sources=sources,
-        joined=joined)
+        joined=joined,
+        audited=bool(require_audit),
+        anchor_manifest=anchor_manifest)
 
 
 @dataclass
@@ -357,6 +398,30 @@ class GainDatasetBundle:
     dataset_hash: str = ""
     sources: List[Dict[str, Any]] = field(default_factory=list)
     joined: List[Dict[str, Any]] = field(default_factory=list)
+    audited: bool = False
+    anchor_manifest: Optional[Dict[str, Any]] = None
+
+    def export_envelope(self, scope: str = "joint") -> Dict[str, Any]:
+        """Task 3: the audit envelope consumed by the training entry points.
+        ``records_hash`` binds the envelope to EXACTLY the record list that
+        must be handed to ``train``/``train_internal``."""
+        records = self.joint_records if scope == "joint" \
+            else self.internal_records
+        manifest = self.anchor_manifest or {}
+        return {
+            "kind": "zerg_gain_audit_envelope_v1",
+            "audited": bool(self.audited),
+            "scope": scope,
+            "anchor_manifest_sha256": manifest.get("manifest_sha256"),
+            "experiment_id": manifest.get("experiment_id"),
+            "source_fingerprint": manifest.get("source_fingerprint"),
+            "execution_context_hash": manifest.get("execution_context_hash"),
+            "pairs_total": self.audit_report.get("pairs_total"),
+            "pairs_trainable": self.audit_report.get("pairs_trainable"),
+            "pairs_rejected": self.audit_report.get("pairs_rejected"),
+            "records_hash": canonical_digest(_sanitize(records)),
+            "dataset_hash": self.dataset_hash,
+        }
 
 
 def validate_pairs(path: str) -> List[Dict[str, Any]]:
@@ -374,3 +439,117 @@ def validate_pairs(path: str) -> List[Dict[str, Any]]:
 def validate_decision_records(path: str) -> List[Dict[str, Any]]:
     from .dataset import read_records
     return read_records(path)
+
+
+# -- execution receipts (V1.3 gain-audit fix, Task 2) ------------------------
+
+def make_execution_receipt(*, experiment_id: str, anchor_id: str,
+                           baseline_id: str, candidate_id: str,
+                           branch_id: str, initial_state_hash: str,
+                           prefix_hash: str, source_fingerprint: str,
+                           execution_context_hash: str,
+                           intervention_type: str, intervention_horizon: int,
+                           execution_started: bool,
+                           execution_completed: bool,
+                           episode_finished: bool,
+                           execution_error: Optional[str] = None,
+                           outcome: Optional[str] = None,
+                           return_value: Optional[float] = None,
+                           receipt_id: Optional[str] = None,
+                           receipt_source: Optional[str] = None
+                           ) -> Dict[str, Any]:
+    """One branch-execution receipt. ``branch_id`` is 'BASE' or 'candidate';
+    ``receipt_source`` names the independent system that produced the
+    receipt (runner log, driver database, ...). Never fabricated."""
+    receipt = {
+        "schema": "zerg_execution_receipt_v1",
+        "experiment_id": experiment_id,
+        "anchor_id": anchor_id,
+        "baseline_id": baseline_id,
+        "candidate_id": candidate_id,
+        "branch_id": branch_id,
+        "initial_state_hash": initial_state_hash,
+        "prefix_hash": prefix_hash,
+        "source_fingerprint": source_fingerprint,
+        "execution_context_hash": execution_context_hash,
+        "intervention_type": intervention_type,
+        "intervention_horizon": int(intervention_horizon),
+        "execution_started": bool(execution_started),
+        "execution_completed": bool(execution_completed),
+        "episode_finished": bool(episode_finished),
+        "execution_error": execution_error,
+        "outcome": outcome,
+        "return": return_value,
+        "receipt_id": receipt_id,
+        "receipt_source": receipt_source,
+    }
+    return validate_execution_receipt(receipt)
+
+
+def build_receipt_index(receipts: Sequence[Dict[str, Any]]
+                        ) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
+    """(experiment_id, anchor_id, branch_id) -> receipt. Conflicting
+    duplicates are refused; identical duplicates collapse."""
+    index: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    for receipt in receipts:
+        receipt = validate_execution_receipt(receipt)
+        key = (receipt["experiment_id"], receipt["anchor_id"],
+               receipt["branch_id"])
+        existing = index.get(key)
+        if existing is not None and existing != receipt:
+            raise ValueError(f"conflicting execution receipts for {key}")
+        index[key] = receipt
+    return index
+
+
+def audit_execution_receipts(pairs: Sequence[Dict[str, Any]],
+                             receipts: Sequence[Dict[str, Any]]
+                             ) -> Dict[str, List[str]]:
+    """Task 2: BOTH branches of every pair need completed execution
+    receipts bound to the SAME anchor with the SAME start/prefix/context/
+    source evidence. Failed or interrupted branches disqualify the pair.
+    Returns problems per pair_id (empty list = receipt-complete)."""
+    index = build_receipt_index(receipts)
+    problems: Dict[str, List[str]] = {}
+    for pair in pairs:
+        pair_id = str(pair.get("pair_id"))
+        issues: List[str] = []
+        experiment_id = pair.get("experiment_id")
+        anchor_id = pair.get("anchor_id")
+        base_receipt = index.get((experiment_id, anchor_id, "BASE"))
+        candidate_receipt = index.get((experiment_id, anchor_id, "candidate"))
+        if base_receipt is None:
+            issues.append("baseline_execution_receipt_missing")
+        if candidate_receipt is None:
+            issues.append("candidate_execution_receipt_missing")
+        for role, receipt in (("BASE", base_receipt),
+                              ("candidate", candidate_receipt)):
+            if receipt is None:
+                continue
+            if not (receipt["execution_started"]
+                    and receipt["execution_completed"]
+                    and receipt["episode_finished"]):
+                issues.append(f"{role}_branch_not_completed")
+            if receipt["execution_error"]:
+                issues.append(f"{role}_branch_error:"
+                              f"{receipt['execution_error']}")
+            if str(receipt["anchor_id"]) != str(anchor_id):
+                issues.append(f"{role}_branch_from_different_anchor")
+            for field in ("initial_state_hash", "prefix_hash",
+                          "source_fingerprint", "execution_context_hash"):
+                if str(receipt[field]) != str(pair.get(field)):
+                    issues.append(f"{role}_branch_{field}_mismatch")
+            receipt_return = receipt.get("return")
+            pair_field = ("baseline_return" if role == "BASE"
+                             else "candidate_return")
+            pair_return = pair.get(pair_field)
+            if receipt_return is not None and pair_return is not None \
+                    and abs(float(receipt_return) - float(pair_return)) > 1e-9:
+                issues.append(f"{role}_return_conflicts_with_pair")
+        if base_receipt is not None and \
+                str(base_receipt["baseline_id"]) != \
+                str(pair.get("baseline_id")):
+            issues.append("baseline_receipt_arm_mismatch")
+        if issues:
+            problems[pair_id] = issues
+    return problems

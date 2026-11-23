@@ -25,6 +25,7 @@ from decision_tree.zerg import runtime as zr
 from decision_tree.zerg import schema as zs
 from decision_tree.zerg import scorer as zscore
 from decision_tree.zerg import training as zt
+from decision_tree.zerg.tests._helpers import synthetic_audit
 from decision_tree.zerg.features import DEFAULT_SCHEMA
 from decision_tree.zerg.schema import FeatureLayerMissing, \
     build_model_features, scorer_feature_names
@@ -443,18 +444,21 @@ class Test07RankingAndCorrectionLabels(unittest.TestCase):
             "imitation", records, scorer="hydralisk_scorer",
             execution_context_hash="1" * 64,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
+        bundle, envelope = synthetic_audit(records)
         gain_model, _ = backend.train(
-            "gain", records, scorer="joint_scorer",
+            "gain", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
-        return backend, imitation, gain_model
+        return backend, imitation, gain_model, records, bundle, envelope
 
     def test_ranking_pairwise_model(self):
         records = _records(16)
-        backend, _, _ = self._trained_models(records)
+        backend, _, _, _, bundle, envelope = self._trained_models(records)
         ranking, report = backend.train(
-            "ranking", records, scorer="joint_scorer",
+            "ranking", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         self.assertEqual(ranking["kind"], zs.RANKING_MODEL_KIND)
         prov = report["pair_provenance"]["training"]
@@ -472,10 +476,12 @@ class Test07RankingAndCorrectionLabels(unittest.TestCase):
 
     def test_correction_uses_old_model_winner(self):
         records = _records(16)
-        backend, imitation, gain_model = self._trained_models(records)
+        backend, imitation, gain_model, _, bundle, envelope = \
+            self._trained_models(records)
         correction, _ = backend.train(
-            "correction", records, scorer="joint_scorer",
+            "correction", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64, old_model=gain_model,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         self.assertEqual(correction["target"], "correction")
         self.assertEqual(correction["old_model_hash"],
@@ -513,9 +519,11 @@ class Test08SmallOfflineFlow(unittest.TestCase):
         self.assertIn("teacher_top1_agreement", report["validation"])
         validation_metrics = report["validation"]
         self.assertIsNotNone(validation_metrics["teacher_top3_agreement"])
+        bundle, envelope = synthetic_audit(records)
         gain_model, gain_report = backend.train(
-            "gain", records, scorer="joint_scorer",
+            "gain", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         for metric in ("mse", "positive_recognition", "negative_recognition"):
             self.assertIn(metric, gain_report["validation"])

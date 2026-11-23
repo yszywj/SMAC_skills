@@ -25,6 +25,7 @@ from decision_tree.zerg import runtime as zr
 from decision_tree.zerg import schema as zs
 from decision_tree.zerg import scorer as zscore
 from decision_tree.zerg import training as zt
+from decision_tree.zerg.tests._helpers import synthetic_audit
 from decision_tree.zerg.features import DEFAULT_SCHEMA
 from decision_tree.zerg.schema import build_internal_model_features, \
     build_model_features, internal_scorer_feature_names, \
@@ -397,9 +398,11 @@ class Test07RankingBidirectional(unittest.TestCase):
     def test_antisymmetry_and_report(self):
         records = _records(16)
         backend = zt.ZergTrainingBackend()
+        bundle, envelope = synthetic_audit(records)
         ranking, report = backend.train(
-            "ranking", records, scorer="joint_scorer",
+            "ranking", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         validation = report["validation"]
         self.assertIn("forward_direction_accuracy", validation)
@@ -437,9 +440,11 @@ class Test08CorrectionOldModelWinner(unittest.TestCase):
         backend = zt.ZergTrainingBackend()
         _, _, gain_model = backend._trained_models if False else \
             (None, None, None)
+        bundle, envelope = synthetic_audit(records)
         gain_model, _ = backend.train(
-            "gain", records, scorer="joint_scorer",
+            "gain", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         rows = zd.candidate_rows(records)
         old = zscore.ScorerModel(gain_model)
@@ -448,8 +453,9 @@ class Test08CorrectionOldModelWinner(unittest.TestCase):
         for row in veto_rows:
             self.assertAlmostEqual(row["veto_target"], -row["gain"])
         correction, _ = backend.train(
-            "correction", records, scorer="joint_scorer",
+            "correction", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64, old_model=gain_model,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         self.assertEqual(correction["old_model_hash"], zs.digest(gain_model))
 

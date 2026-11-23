@@ -46,6 +46,45 @@ from .schema import MODEL_KIND, RANKING_MODEL_KIND, digest as canonical_digest, 
     internal_scorer_feature_names, ranking_feature_names, \
     scorer_feature_names, validate_ranking_model, validate_scorer_model
 
+GAIN_AUDITED_TASKS = ("gain", "ranking", "correction")
+
+
+def verify_gain_envelope(envelope: Optional[Dict[str, Any]],
+                         records_hash: str, *,
+                         task: str,
+                         execution_context_hash: Optional[str] = None,
+                         source_fingerprint: Optional[str] = None) -> None:
+    """Task 3: formal gain/ranking/correction training accepts ONLY data
+    that passed build_gain_dataset's audit (manifest + execution receipts).
+    Plain shadow trajectories with missing returns are NEVER re-interpreted
+    as zero-gain data here."""
+    if envelope is None or envelope.get("kind") != \
+            "zerg_gain_audit_envelope_v1":
+        raise ValueError(
+            f"task {task!r} requires an audit envelope: build the dataset "
+            "via pair_dataset.build_gain_dataset(...).export_envelope() and "
+            "pass it as audit_envelope")
+    if not envelope.get("audited"):
+        raise ValueError("unaudited data refused: require_audit=False "
+                         "output may not enter formal training")
+    if not envelope.get("anchor_manifest_sha256"):
+        raise ValueError("audit envelope lacks anchor manifest hash")
+    if envelope.get("records_hash") != records_hash:
+        raise ValueError("audit envelope does not match the provided "
+                         "records (records_hash mismatch) — hand exactly "
+                         "the bundle's record list to train()")
+    if execution_context_hash and envelope.get("execution_context_hash") \
+            and str(envelope["execution_context_hash"]) \
+            != str(execution_context_hash):
+        raise ValueError("audit envelope execution context differs from "
+                         "the training context")
+    if source_fingerprint and envelope.get("source_fingerprint") \
+            and str(envelope["source_fingerprint"]) \
+            != str(source_fingerprint):
+        raise ValueError("audit envelope source fingerprint differs from "
+                         "the declared source")
+
+
 DEFAULT_CAPACITY = {
     "estimator_type": "single_threshold_tree",
     "number_of_trees": 1,
@@ -359,7 +398,8 @@ class ZergTrainingBackend:
               group_by_family: bool = False,
               candidate_skill_filter: Optional[str] = None,
               dataset_hash: Optional[str] = None,
-              feature_layout: str = "standard"
+              feature_layout: str = "standard",
+              audit_envelope: Optional[Dict[str, Any]] = None
               ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if task not in ("imitation", "gain", "correction", "ranking"):
             raise ValueError("unknown training task")
@@ -368,9 +408,14 @@ class ZergTrainingBackend:
         if feature_layout == "internal":
             raise ValueError("internal-layout models must be trained via "
                              "train_internal()")
+        from .schema import _sanitize
+        records_hash = canonical_digest(_sanitize(list(records)))
         if dataset_hash is None:
-            from .schema import _sanitize
-            dataset_hash = canonical_digest(_sanitize(list(records)))
+            dataset_hash = records_hash
+        if task in GAIN_AUDITED_TASKS:
+            verify_gain_envelope(audit_envelope, records_hash, task=task,
+                                 execution_context_hash=execution_context_hash,
+                                 source_fingerprint=source_fingerprint or None)
         train_records, validation_records = split_records(
             records, validation_fraction=validation_fraction,
             split_seed=split_seed)
@@ -416,7 +461,8 @@ class ZergTrainingBackend:
         elif task == "ranking":
             return self._train_ranking(all_rows, train_rows, validation_rows,
                                        scorer=scorer, common=common,
-                                       capacity=capacity)
+                                       capacity=capacity,
+                                       audit_envelope=audit_envelope)
         else:
             if old_model is None:
                 raise ValueError("correction training requires the frozen "
@@ -451,6 +497,15 @@ class ZergTrainingBackend:
         }
         if target == "correction":
             record["old_model_hash"] = canonical_digest(old_model)
+        if target in GAIN_AUDITED_TASKS and audit_envelope is not None:
+            record["gain_audit"] = {
+                "anchor_manifest_sha256":
+                    audit_envelope.get("anchor_manifest_sha256"),
+                "records_hash": audit_envelope.get("records_hash"),
+                "pairs_trainable": audit_envelope.get("pairs_trainable"),
+                "pairs_rejected": audit_envelope.get("pairs_rejected"),
+                "dataset_hash": audit_envelope.get("dataset_hash"),
+            }
         if group_by_family:
             record["active_feature_names"] = sorted({name
                                                      for bundle in
@@ -492,7 +547,8 @@ class ZergTrainingBackend:
                        candidate_skill: Optional[str] = None,
                        unit_type: Optional[str] = None,
                        dataset_hash: Optional[str] = None,
-                       min_train_groups: int = 4
+                       min_train_groups: int = 4,
+                       audit_envelope: Optional[Dict[str, Any]] = None
                        ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Train a skill-INTERNAL scorer over A-class rows
         (``expand_skill_proposals``) with the unit-level aggregate feature
@@ -522,9 +578,14 @@ class ZergTrainingBackend:
             # comparisons only WITHIN one internal decision group
             row["decision_key"] = row["decision_group_id"]
             prepared.append(row)
+        from .schema import _sanitize
+        records_hash = canonical_digest(_sanitize(list(records)))
         if dataset_hash is None:
-            from .schema import _sanitize
-            dataset_hash = canonical_digest(_sanitize(list(records)))
+            dataset_hash = records_hash
+        if task in GAIN_AUDITED_TASKS:
+            verify_gain_envelope(audit_envelope, records_hash, task=task,
+                                 execution_context_hash=execution_context_hash,
+                                 source_fingerprint=source_fingerprint or None)
         from decision_tree.learning.train import group_split
         train_rows, validation_rows = group_split(
             prepared, validation_fraction=validation_fraction,
@@ -566,7 +627,8 @@ class ZergTrainingBackend:
                                        scorer=scorer, common=common,
                                        capacity=capacity,
                                        feature_names_override=feature_names,
-                                       feature_layout="internal")
+                                       feature_layout="internal",
+                                       audit_envelope=audit_envelope)
         else:
             if old_model is None:
                 raise ValueError("correction training requires the frozen "
@@ -610,6 +672,15 @@ class ZergTrainingBackend:
                                                       feature_names)
         record["inactive_features"] = report.pop("inactive_features", [])
         record["validation_report"] = report.get("validation", {})
+        if target in GAIN_AUDITED_TASKS and audit_envelope is not None:
+            record["gain_audit"] = {
+                "anchor_manifest_sha256":
+                    audit_envelope.get("anchor_manifest_sha256"),
+                "records_hash": audit_envelope.get("records_hash"),
+                "pairs_trainable": audit_envelope.get("pairs_trainable"),
+                "pairs_rejected": audit_envelope.get("pairs_rejected"),
+                "dataset_hash": audit_envelope.get("dataset_hash"),
+            }
         record = validate_scorer_model(record, self.schema)
         record["model_id"] = f"mdl_{canonical_digest(record)[:16]}"
         if target == "correction" and old_model is not None:
@@ -624,7 +695,8 @@ class ZergTrainingBackend:
                        scorer: str, common: Dict[str, Any],
                        capacity: Optional[Dict[str, Any]],
                        feature_names_override: Optional[Sequence[str]] = None,
-                       feature_layout: str = "standard"
+                       feature_layout: str = "standard",
+                       audit_envelope: Optional[Dict[str, Any]] = None
                        ) -> Tuple[Dict, Dict]:
         train_pairs, train_provenance = ranking_pairs(train_rows)
         validation_pairs, validation_provenance = ranking_pairs(
@@ -688,6 +760,15 @@ class ZergTrainingBackend:
             ],
         }
         record["validation_report"] = report["validation"]
+        if audit_envelope is not None:
+            record["gain_audit"] = {
+                "anchor_manifest_sha256":
+                    audit_envelope.get("anchor_manifest_sha256"),
+                "records_hash": audit_envelope.get("records_hash"),
+                "pairs_trainable": audit_envelope.get("pairs_trainable"),
+                "pairs_rejected": audit_envelope.get("pairs_rejected"),
+                "dataset_hash": audit_envelope.get("dataset_hash"),
+            }
         record = validate_ranking_model(record, self.schema)
         record["model_id"] = f"mdl_{canonical_digest(record)[:16]}"
         record = validate_ranking_model(record, self.schema)

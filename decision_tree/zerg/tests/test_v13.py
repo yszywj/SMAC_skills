@@ -26,8 +26,10 @@ from decision_tree.zerg import runtime as zr
 from decision_tree.zerg import schema as zs
 from decision_tree.zerg import scorer as zscore
 from decision_tree.zerg import training as zt
+from decision_tree.zerg.tests._helpers import synthetic_audit
 from decision_tree.zerg.candidates import branch_scoring_features, \
     build_branch_candidates
+from decision_tree.zerg.experiment_manifest import make_anchor_manifest
 from decision_tree.zerg.features import DEFAULT_SCHEMA
 from decision_tree.zerg.schema import build_internal_model_features, \
     build_model_features
@@ -260,7 +262,47 @@ class TestCCounterfactualPipeline(unittest.TestCase):
             self.assertIn("p_bad", audit["problems_by_pair"])
             self.assertIn("missing_return_kept_none",
                           audit["problems_by_pair"]["p_bad"])
-            bundle = pd.build_gain_dataset(loaded_records, loaded_pairs)
+            # formal build now requires the anchor manifest + receipts
+            with self.assertRaises(ValueError):
+                pd.build_gain_dataset(loaded_records, loaded_pairs)
+            manifest = make_anchor_manifest(
+                experiment_id="expA",
+                source_fingerprint=loaded_records[0]["source_hash"],
+                execution_context_hash=loaded_records[0][
+                    "execution_context_hash"],
+                anchors={f"{loaded_records[i]['episode_id']}:"
+                         f"{loaded_records[i]['snapshot_id']}":
+                         {"initial_state_hash": "a" * 64,
+                          "prefix_hash": "b" * 64,
+                          "baseline_id": "BASE"}
+                         for i in range(6)})
+            receipts = []
+            for i, pair in enumerate(pairs[:6]):
+                for branch, field in (("BASE", "baseline_return"),
+                                      ("candidate", "candidate_return")):
+                    receipts.append(pd.make_execution_receipt(
+                        experiment_id="expA",
+                        anchor_id=pair["anchor_id"],
+                        baseline_id="BASE",
+                        candidate_id=pair["candidate_id"],
+                        branch_id=branch,
+                        initial_state_hash="a" * 64,
+                        prefix_hash="b" * 64,
+                        source_fingerprint=loaded_records[0]["source_hash"],
+                        execution_context_hash=loaded_records[0][
+                            "execution_context_hash"],
+                        intervention_type="single_step",
+                        intervention_horizon=1,
+                        execution_started=True,
+                        execution_completed=True,
+                        episode_finished=True,
+                        outcome="win",
+                        return_value=pair[field],
+                        receipt_id=f"r{i}:{branch}",
+                        receipt_source="test_driver"))
+            bundle = pd.build_gain_dataset(
+                loaded_records, loaded_pairs,
+                anchor_manifest=manifest, execution_receipts=receipts)
             self.assertEqual(len(bundle.joint_records), 6)
             self.assertTrue(bundle.audit_report["pairs_trainable"] == 6)
             # 6: train a small gain model
@@ -269,6 +311,7 @@ class TestCCounterfactualPipeline(unittest.TestCase):
                 "gain", bundle.joint_records, scorer="joint_scorer",
                 execution_context_hash="1" * 64,
                 dataset_hash=bundle.dataset_hash,
+                audit_envelope=bundle.export_envelope("joint"),
                 capacity={"minimum_leaf_support": 2,
                           "minimum_leaf_groups": 2})
             self.assertEqual(model["dataset_hash"], bundle.dataset_hash)
@@ -292,9 +335,18 @@ class TestDDeploymentKinds(unittest.TestCase):
     def _base_model(self, target="imitation"):
         records = _records(12)
         backend = zt.ZergTrainingBackend()
+        if target == "imitation":
+            model, _ = backend.train(
+                target, records, scorer="hydralisk_scorer",
+                execution_context_hash="1" * 64,
+                capacity={"minimum_leaf_support": 2,
+                          "minimum_leaf_groups": 2})
+            return model
+        bundle, envelope = synthetic_audit(records)
         model, _ = backend.train(
-            target, records, scorer="hydralisk_scorer",
+            target, bundle.joint_records, scorer="hydralisk_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         return model
 
@@ -303,14 +355,17 @@ class TestDDeploymentKinds(unittest.TestCase):
         backend = zt.ZergTrainingBackend()
         imitation = self._base_model("imitation")
         gain = self._base_model("gain")
+        bundle, envelope = synthetic_audit(records)
         ranking, _ = backend.train(
-            "ranking", records, scorer="joint_scorer",
+            "ranking", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         gain_old = gain
         correction, _ = backend.train(
-            "correction", records, scorer="joint_scorer",
+            "correction", bundle.joint_records, scorer="joint_scorer",
             execution_context_hash="1" * 64, old_model=gain_old,
+            audit_envelope=envelope,
             capacity={"minimum_leaf_support": 2, "minimum_leaf_groups": 2})
         # dispatch
         self.assertIsInstance(zscore.load_zerg_model(imitation),
