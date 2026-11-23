@@ -278,3 +278,28 @@ Tree Score Gate（V1.3）十项检查：模型存在/目标可排序(gain|rankin
 correction 不可用于换选)/kind 受支持/源码指纹一致/特征 schema 一致/全部
 分支携带完整计划对象/分支属于当前 Snapshot/BASE 在列/Validator 可用/
 Manager 状态可更新——任一失败回退 BASE。默认 `mode=off` 不变。
+
+---
+
+# V1.3 部署与审计修复（本轮）
+
+1. **统一模型加载**：`runtime._load_models` 改走 `scorer.load_zerg_model`
+   （按 kind 分流）；ranking-kind ↔ target='ranking' 双向强校验；
+   correction 模型禁止占用排序槽位（veto 专用）；source fingerprint 与
+   execution context 逐项校验，任何不匹配拒绝加载。
+2. **Ranking 在线路由**：`score_routed` 对 PairwiseRankModel 分流——joint
+   槽走锦标赛（`pairwise_uniform_scores`，tie 用规则名次）；A 类单位槽
+   明确回退（reason=`internal_ranking_online_unsupported_rule_fallback`），
+   绝不产生错误评分。
+3. **反事实审计硬化**：pair record 新增 `source_fingerprint`；join 保留
+   `pair_source_fingerprint` + `record_source_fingerprint` 并要求**严格
+   相等**；decision record 缺 source hash 或 execution context hash 时拒绝
+   严格收益训练；新增 `experiment_manifest.make_anchor_manifest` +
+   `validate_anchor_evidence`（冻结的 per-anchor 起点/前缀/上下文/源码/
+   baseline_id 证据，pair JSONL 无法自证有效）；baseline_id 必须等于
+   manifest 声明的 BASE。
+4. **B 类分支特征修复**：`branch_scoring_features(branches, snapshot)` 用
+   `snapshot.previous_action_ids` 计算真实动作变化；目标类型取 plans 众数
+   goal_kind 编码；progress 取声明通道均值；risk 用 snapshot relations 的
+   敌人射程内比例；`candidate_support_gain` 无估计器保持 MISSING（NaN），
+   绝不填 0；训练与推理共用同一函数与 schema 拼接。

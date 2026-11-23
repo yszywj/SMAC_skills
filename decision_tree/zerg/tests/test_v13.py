@@ -152,7 +152,7 @@ class TestBCompleteBranchPipeline(unittest.TestCase):
             for plan in branch.plans:
                 for actor, action in plan.current_actions.items():
                     self.assertEqual(branch.actions.get(actor), action)
-        branch_scoring_features(branches, summary)
+        branch_scoring_features(branches, snapshot)
         # 3: score (no model -> rule fallback keeps BASE)
         tiny = zscore.ScorerModel({
             "schema_version": 1, "kind": zs.MODEL_KIND,
@@ -233,6 +233,7 @@ class TestCCounterfactualPipeline(unittest.TestCase):
                                 f"{record['snapshot_id']}:{record['game_loop']}",
                 "initial_state_hash": "a" * 64, "prefix_hash": "b" * 64,
                 "execution_context_hash": record["execution_context_hash"],
+                "source_fingerprint": record["source_hash"],
                 "intervention_type": "single_step", "intervention_horizon": 1,
                 "candidate_return": candidate["candidate_return"],
                 "baseline_return": record["baseline_return"],

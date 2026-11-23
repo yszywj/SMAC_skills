@@ -95,3 +95,70 @@ def summarize(path: str) -> Dict[str, Any]:
     return {"manifest": manifest, "progress_rows": len(rows),
             "per_arm": per_arm,
             "frozen_sha256": manifest.get("manifest_sha256")}
+
+
+ANCHOR_MANIFEST_KIND = "zerg_anchor_manifest_v1"
+
+
+def make_anchor_manifest(*, experiment_id: str, source_fingerprint: str,
+                         execution_context_hash: str,
+                         anchors: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """V1.3 Task 2.9: the independent per-anchor evidence registry.
+
+    ``anchors`` maps anchor_id -> {initial_state_hash, prefix_hash,
+    baseline_id}. The manifest FREEzes the collection-side truth for start
+    state, decision prefix, execution context and source, so pair JSONLs
+    can never validate themselves by their own declarations. Write-once via
+    :func:`freeze`.
+    """
+    if not anchors:
+        raise ValueError("anchor manifest requires at least one anchor")
+    normalized = {}
+    for anchor_id, evidence in anchors.items():
+        for field in ("initial_state_hash", "prefix_hash", "baseline_id"):
+            if not evidence.get(field):
+                raise ValueError(f"anchor {anchor_id!r} missing {field}")
+        normalized[str(anchor_id)] = {
+            "initial_state_hash": str(evidence["initial_state_hash"]),
+            "prefix_hash": str(evidence["prefix_hash"]),
+            "baseline_id": str(evidence["baseline_id"]),
+        }
+    manifest = {
+        "kind": ANCHOR_MANIFEST_KIND,
+        "experiment_id": experiment_id,
+        "source_fingerprint": source_fingerprint,
+        "execution_context_hash": execution_context_hash,
+        "anchors": normalized,
+        "status": "declared",
+    }
+    manifest["manifest_sha256"] = canonical_digest(manifest)
+    return manifest
+
+
+def validate_anchor_evidence(manifest: Dict[str, Any], pair: Dict[str, Any]
+                             ) -> List[str]:
+    """Cross-check ONE pair against the frozen anchor manifest. Returns the
+    mismatch list (empty = consistent)."""
+    problems: List[str] = []
+    anchor_id = str(pair.get("anchor_id"))
+    anchors = manifest.get("anchors", {})
+    if anchor_id not in anchors:
+        return [f"anchor {anchor_id!r} not in anchor manifest"]
+    evidence = anchors[anchor_id]
+    if str(pair.get("initial_state_hash") or "") != \
+            evidence["initial_state_hash"]:
+        problems.append("initial_state_hash differs from anchor manifest")
+    if str(pair.get("prefix_hash") or "") != evidence["prefix_hash"]:
+        problems.append("prefix_hash differs from anchor manifest")
+    if str(pair.get("baseline_id") or "") != evidence["baseline_id"]:
+        problems.append(f"baseline_id {pair.get('baseline_id')!r} is not the "
+                        f"declared BASE ({evidence['baseline_id']!r})")
+    if pair.get("execution_context_hash") is not None and \
+            str(pair["execution_context_hash"]) != \
+            str(manifest.get("execution_context_hash")):
+        problems.append("execution_context_hash differs from anchor manifest")
+    if pair.get("source_fingerprint") is not None and \
+            str(pair["source_fingerprint"]) != \
+            str(manifest.get("source_fingerprint")):
+        problems.append("source_fingerprint differs from anchor manifest")
+    return problems

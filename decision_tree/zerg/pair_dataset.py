@@ -112,6 +112,9 @@ def join_counterfactual_pairs(decision_records: Sequence[Dict[str, Any]],
             "initial_state_hash": pair.get("initial_state_hash"),
             "prefix_hash": pair.get("prefix_hash"),
             "execution_context_hash": pair.get("execution_context_hash"),
+            "pair_source_fingerprint": pair.get("source_fingerprint"),
+            "record_source_fingerprint":
+                record.get("source_hash") if record else None,
             "intervention_type": pair.get("intervention_type"),
             "intervention_horizon": pair.get("intervention_horizon"),
             "completion_status": pair.get("completion_status"),
@@ -140,24 +143,28 @@ def join_counterfactual_pairs(decision_records: Sequence[Dict[str, Any]],
     return joined
 
 
-def _pair_source_hash(row: Dict[str, Any]) -> str:
-    # The pair's declared source; experiments record the decision record's
-    # source hash at creation time. Presence of a differing value is a
-    # version mismatch.
-    return str(row.get("record_source_hash") or "")
-
-
 def audit_counterfactual_pairs(joined: Sequence[Dict[str, Any]],
                                decision_records: Optional[Sequence[
-                                   Dict[str, Any]]] = None
+                                   Dict[str, Any]]] = None,
+                               anchor_manifest: Optional[Dict[str, Any]] = None
                                ) -> Dict[str, Any]:
-    """Task 3.2: strict pair-legality audit.
+    """Task 3.2 (V1.3 hardened): strict pair-legality audit.
 
-    A pair is trainable only when ALL hold: decision point found, prefix and
-    initial state evidenced, execution context AND source hash equal to the
-    decision record's, intervention recorded, completion complete, both
-    returns present, gain arithmetic exact, scope consistent with the
-    candidate's home section. Everything else is listed with reasons."""
+    A pair is trainable only when ALL hold:
+
+    - decision point found; the decision record carries BOTH a source hash
+      and an execution-context hash (missing either rejects strict gain
+      supervision);
+    - pair ``source_fingerprint`` present and STRICTLY equal to the
+      decision record's source hash, and the execution contexts strictly
+      equal — a pair JSONL never validates itself;
+    - when ``anchor_manifest`` is supplied, the pair's start-state /
+      prefix / context / source / baseline_id must match the frozen
+      manifest evidence (independent of the pair's own declarations);
+    - intervention recorded, completion complete, both returns present,
+      gain arithmetic exact, candidate present in the correct scope
+      section of the decision record.
+    """
     record_by_key: Dict[str, Dict[str, Any]] = {}
     for record in decision_records or ():
         record_by_key[dumps_key(record_key(record))] = record
@@ -169,15 +176,37 @@ def audit_counterfactual_pairs(joined: Sequence[Dict[str, Any]],
         if not row.get("decision_point_found"):
             problems.append("decision_point_not_found")
         else:
-            if row.get("record_execution_context_hash") not in (
-                    None, row.get("execution_context_hash")):
+            # V1.3: strict equality on BOTH identity axes; missing
+            # evidence on the decision record side also rejects.
+            record_source = row.get("record_source_fingerprint")
+            pair_source = row.get("pair_source_fingerprint")
+            if not record_source:
+                problems.append("decision_record_missing_source_fingerprint")
+            if not row.get("record_execution_context_hash"):
+                problems.append(
+                    "decision_record_missing_execution_context_hash")
+            if not pair_source:
+                problems.append("pair_missing_source_fingerprint")
+            elif record_source and pair_source != record_source:
+                problems.append("source_fingerprint_mismatch")
+            record_ctx = row.get("record_execution_context_hash")
+            pair_ctx = row.get("execution_context_hash")
+            if pair_ctx and record_ctx and str(pair_ctx) != str(record_ctx):
                 problems.append("execution_context_mismatch")
-            if row.get("record_source_hash") not in (None, "") and \
-                    row.get("record_source_hash") != \
-                    _pair_source_hash(row):
-                problems.append("source_hash_mismatch")
         if not row.get("initial_state_hash") or not row.get("prefix_hash"):
             problems.append("missing_pair_start_evidence")
+        if anchor_manifest is not None:
+            from .experiment_manifest import validate_anchor_evidence
+            pair_view = {
+                "anchor_id": row.get("anchor_id"),
+                "initial_state_hash": row.get("initial_state_hash"),
+                "prefix_hash": row.get("prefix_hash"),
+                "baseline_id": row.get("baseline_id"),
+                "execution_context_hash": row.get("execution_context_hash"),
+                "source_fingerprint": row.get("pair_source_fingerprint"),
+            }
+            problems.extend(validate_anchor_evidence(anchor_manifest,
+                                                     pair_view))
         if not row.get("intervention_type") or \
                 row.get("intervention_type") == "unknown":
             problems.append("intervention_not_recorded")
@@ -249,7 +278,8 @@ def record_key_by_identity(row: Dict[str, Any]) -> Tuple[str, str, int, int]:
 
 def build_gain_dataset(decision_records: Sequence[Dict[str, Any]],
                        pair_records: Sequence[Dict[str, Any]],
-                       *, require_audit: bool = True
+                       *, require_audit: bool = True,
+                       anchor_manifest: Optional[Dict[str, Any]] = None
                        ) -> "GainDatasetBundle":
     """Task 3.3/3.4: audited gain training inputs.
 
@@ -259,7 +289,8 @@ def build_gain_dataset(decision_records: Sequence[Dict[str, Any]],
     Unaudited data never reaches the training records.
     """
     joined = join_counterfactual_pairs(decision_records, pair_records)
-    audit = audit_counterfactual_pairs(joined, decision_records)
+    audit = audit_counterfactual_pairs(joined, decision_records,
+                                       anchor_manifest=anchor_manifest)
     rejected_ids = set(audit["problems_by_pair"])
     trainable_ids = ({str(row.get("pair_id")) for row in joined}
                      - rejected_ids)

@@ -321,6 +321,10 @@ def validate_pair_record(record: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"{field} must be a hash string when present")
     if record.get("scene_config_id") is not None:
         _identifier(record["scene_config_id"], "scene_config_id")
+    # V1.3 fix: the pair carries the source fingerprint it was collected
+    # under; the audit cross-checks it against the decision record's hash.
+    if record.get("source_fingerprint") is not None:
+        _identifier(record["source_fingerprint"], "source_fingerprint")
     if record.get("intervention_type") not in INTERVENTION_TYPES:
         raise ValueError("intervention_type must be one of "
                          + ", ".join(INTERVENTION_TYPES))

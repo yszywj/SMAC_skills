@@ -358,15 +358,33 @@ class ZergTreeRuntime:
                 self._models[name] = None
                 continue
             record = load_json(str(resolved))
+            # Task 1 (V1.3 fix): the unified loader dispatches on kind —
+            # ranking records become PairwiseRankModel, everything else
+            # ScorerModel; mismatched kinds are refused here.
+            from .scorer import load_zerg_model
+            model = load_zerg_model(record)
             if record.get("scorer") != name:
                 raise ValueError(f"model file {path} declares scorer "
                                  f"{record.get('scorer')!r}, expected {name!r}")
             if record.get("target") not in SORTABLE_MODEL_TARGETS:
-                raise ValueError(f"model file {path} has unsupported target "
-                                 f"{record.get('target')!r}")
-            self._models[name] = ScorerModel(record)
+                # correction models deploy to the veto interface only —
+                # they must never occupy a preference-ranking slot.
+                raise ValueError(
+                    f"model file {path} has target "
+                    f"{record.get('target')!r}; correction models are veto "
+                    "instruments and cannot occupy the ranking slot")
+            kind, target = record.get("kind"), record.get("target")
+            if kind == "zerg_pairwise_ranking_model_v1" \
+                    and target != "ranking":
+                raise ValueError(f"ranking-kind model file {path} must "
+                                 f"declare target='ranking', got {target!r}")
+            if kind == "zerg_scorer_model" and target == "ranking":
+                raise ValueError(f"scorer-kind model file {path} cannot "
+                                 "declare target='ranking' (use the "
+                                 "pairwise ranking model kind)")
+            self._models[name] = model
             from .fingerprints import validate_deployment
-            validate_deployment(self._models[name].record, self._context)
+            validate_deployment(model.record, self._context)
             # Task 3.2/5.1: source fingerprint must match the live tree in
             # EVERY mode — shadow data is never marked as a valid version
             # against the wrong source.
@@ -710,7 +728,7 @@ class ZergTreeRuntime:
         if snapshot is not None:
             try:
                 branches = build_branch_candidates(manager, snapshot, summary)
-                branch_scoring_features(branches, summary)
+                branch_scoring_features(branches, snapshot)
             except Exception:
                 branches = []
         base_complete = branches[0] if branches else None

@@ -21,6 +21,7 @@ the pre-check here.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -485,48 +486,105 @@ def build_branch_candidates(manager, snapshot, summary: Dict[str, Any],
 
 
 def branch_scoring_features(branches: List["CompletePlanCandidate"],
-                            summary: Dict[str, Any]) -> None:
-    """Attach B-class candidate features to each branch in place.
+                            snapshot) -> None:
+    """Task 3 (V1.3 fix): B-class candidate features from REAL evidence.
 
-    Features describe the branch itself: controlled-actor coverage, action
-    change count vs the previous step, declared effect totals from its real
-    plans, execution duty mix and the rule score. No realised outcome ever
-    enters this dict.
+    - ``candidate_action_change_count`` compares each branch's actions with
+      the SNAPSHOT's ``previous_action_ids`` (the last executed actions) —
+      no more an empty ``previous={}``;
+    - ``candidate_target_type`` encodes the modal plan ``goal_kind``;
+    - ``candidate_predicted_damage`` / ``candidate_predicted_loss`` sum the
+      plans' DECLARED effect amounts (declared predictions, never outcomes);
+    - ``candidate_progress`` averages the plans' declared progress channels;
+    - ``candidate_risk`` is the fraction of the branch's actors currently
+      inside enemy weapon range (snapshot relations);
+    - ``candidate_support_gain`` has no reliable estimator and stays MISSING
+      (NaN) — unknown values are never filled with 0.
+
+    The SAME function runs at branch construction (inference) and at any
+    training-side branch feature extraction, so train/inference vectors
+    agree. Feature names are the candidate-layer schema entries;
+    ``schema.build_model_features`` prefixes them identically on both sides.
     """
-    previous = {}
+    from .features import (GOAL_KIND_VOCABULARY, MISSING,
+                           PHASE_VOCABULARY, SKILL_VOCABULARY, encode_index)
+    previous_actions = getattr(snapshot, "previous_action_ids", {}) or {}
+    relations = getattr(snapshot, "relations", {}) or {}
+    allies = getattr(snapshot, "allies", {}) or {}
     for branch in branches:
         actors = sorted({actor for plan in branch.plans
                          for actor in getattr(plan, "controlled_actors", ())})
         changes = sum(1 for actor, action in branch.actions.items()
-                      if previous.get(actor) != action)
-        damage = loss = 0.0
-        goals = set()
+                      if previous_actions.get(actor) != action)
+        damage = 0.0
+        loss = 0.0
+        goal_kinds: List[str] = []
+        skills: List[str] = []
+        phases: List[str] = []
+        progress_values: List[float] = []
         for plan in branch.plans:
+            goal_kind = getattr(plan, "goal_kind", "")
+            if goal_kind:
+                goal_kinds.append(str(goal_kind))
+            skills.append(str(getattr(plan, "primary_skill", "")))
+            commitment = getattr(plan, "commitment", None)
+            if commitment is not None and getattr(commitment, "phase", ""):
+                phases.append(str(commitment.phase))
+            declared_progress = (getattr(plan, "features", {}) or {}).get(
+                "progress")
+            if isinstance(declared_progress, (int, float)) \
+                    and math.isfinite(float(declared_progress)):
+                progress_values.append(float(declared_progress))
             for effect in getattr(plan, "expected_effects", ()) or ():
                 amount = getattr(effect, "amount", None)
-                if amount is None:
+                if amount is None or not isinstance(amount, (int, float)) \
+                        or not math.isfinite(float(amount)):
                     continue
                 if getattr(effect, "kind", "") == "damage":
                     damage += float(amount)
                 elif getattr(effect, "kind", "") == "loss":
                     loss += float(amount)
-            goals.add(str(getattr(plan, "goal_kind", "")))
-        duty_kinds = sorted({row.get("kind") for row
-                             in branch.execution_duties.values()
-                             if isinstance(row, dict) and row.get("kind")})
+        # risk: branch actors currently inside enemy weapon range
+        exposed = counted = 0
+        for actor in actors:
+            unit = allies.get(actor)
+            if unit is None or not getattr(unit, "alive", False):
+                continue
+            counted += 1
+            rows = relations.get(actor, {}) or {}
+            if any(getattr(row, "in_enemy_weapon_range", False)
+                   for row in rows.values()):
+                exposed += 1
+        def _modal(values: List[str]) -> Optional[str]:
+            if not values:
+                return None
+            counts: Dict[str, int] = {}
+            for value in values:
+                counts[value] = counts.get(value, 0) + 1
+            return max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        modal_goal = _modal(goal_kinds)
+        modal_skill = _modal(skills)
+        phase = phases[0] if phases else None
         branch.candidate_features = {
-            "candidate_skill": 0.0,          # joint branch: fixed slot
-            "candidate_phase": 0.0,
+            "candidate_skill": float(encode_index(modal_skill,
+                                                  SKILL_VOCABULARY)),
+            "candidate_phase": float(encode_index(phase, PHASE_VOCABULARY)),
             "candidate_actor_count": float(len(actors)),
             "candidate_action_change_count": float(changes),
-            "candidate_target_type": 0.0,
+            "candidate_target_type": float(encode_index(
+                modal_goal, GOAL_KIND_VOCABULARY)),
             "candidate_predicted_damage": damage,
             "candidate_predicted_loss": loss,
-            "candidate_risk": 0.0,
-            "candidate_support_gain": 0.0,
-            "candidate_progress": 0.0,
+            "candidate_risk": (exposed / counted) if counted else MISSING,
+            "candidate_support_gain": MISSING,   # no estimator: MISSING
+            "candidate_progress": (math.fsum(progress_values)
+                                   / len(progress_values))
+            if progress_values else MISSING,
             "candidate_resource_conflict": 0.0,
-            "candidate_execution_duty": float(len(duty_kinds)),
+            "candidate_execution_duty": float(len(sorted({
+                row.get("kind") for row
+                in branch.execution_duties.values()
+                if isinstance(row, dict) and row.get("kind")}))),
         }
         branch.source_plan_ids = [str(getattr(p, "proposal_id", ""))
                                   for p in branch.plans]

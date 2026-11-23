@@ -459,13 +459,23 @@ class PairwiseRankModel:
 
 def score_routed(state_features: Dict[str, Any],
                  candidates: Sequence[ZergCandidate],
-                 models: Dict[str, Optional[ScorerModel]],
+                 models: Dict[str, Any],
                  schema: ZergFeatureSchema = DEFAULT_SCHEMA
                  ) -> Tuple[List[CandidateScores], Dict[str, int]]:
-    """Task 3.5: route candidates per scorer slot, score each slot with ITS
-    model (standard or internal layout), and report how many candidates
-    each scorer received. Training and online scoring share
-    ``route_candidates``, so the routing rule is identical on both sides."""
+    """Route candidates per scorer slot and score each slot with ITS model.
+
+    Model-type routing (V1.3 fix):
+
+    - ``PairwiseRankModel`` in the JOINT slot is scored with the round-robin
+      tournament (``pairwise_uniform_scores``), ties broken by rule order;
+    - ``PairwiseRankModel`` in a unit-type (internal) slot is NOT supported
+      for online inference — every candidate there falls back to the rule
+      score with an explicit reason, never a wrong number;
+    - ``ScorerModel`` (standard or internal layout) scores through
+      ``score_candidates``;
+    - correction models never enter this function (refused at load time).
+
+    Training and online scoring share ``route_candidates``."""
     routed = route_candidates(candidates, state_features)
     scores: List[CandidateScores] = []
     counts = {name: len(items) for name, items in routed.items()}
@@ -473,6 +483,36 @@ def score_routed(state_features: Dict[str, Any],
         if not items:
             continue
         model = models.get(slot_name)
+        if isinstance(model, PairwiseRankModel):
+            if slot_name == "joint_scorer":
+                flat = {}
+                rule_positions = {}
+                for index, candidate in enumerate(items):
+                    try:
+                        flat[candidate.candidate_id] = build_model_features(
+                            state_features, candidate.features, schema)
+                    except FeatureLayerMissing:
+                        flat[candidate.candidate_id] = {}
+                    rule_positions[candidate.candidate_id] = index
+                scores.extend(pairwise_uniform_scores(
+                    model, flat, rule_positions=rule_positions))
+                continue
+            # internal (unit-type) ranking is not supported online: explicit
+            # rule fallback, never a bogus score
+            for index, candidate in enumerate(items):
+                rule = candidate.rule_score
+                row = CandidateScores(
+                    candidate_id=candidate.candidate_id,
+                    score=float(rule) if isinstance(rule, (int, float))
+                    and math.isfinite(float(rule)) else 0.0,
+                    supported=False, confidence=0.0,
+                    reason="internal_ranking_online_unsupported_rule_fallback",
+                    rule_score=rule)
+                row.rank = index
+                row.model_kind = model.record.get("kind")
+                row.fallback_reason = row.reason
+                scores.append(row)
+            continue
         scores.extend(score_candidates(state_features, items, model=model,
                                        schema=schema))
     return scores, counts
