@@ -105,6 +105,60 @@ def _near_hydra(context, actor):
     return min(candidates)[2] if candidates else None
 
 
+def approach_then_attack_intents(snapshot, plans, actions_by_actor):
+    """Approach-then-attack authorizations AFTER final-action arbitration.
+
+    Only one branch can authorize: zerg_hydra_plans' 'approach_hydralisk'
+    (focus_fire provider), where a living hydralisk's final action is the
+    branch's own approach move toward an enemy hydralisk A that the policy
+    explicitly selected while A was visible. Anything else — stop, a fire
+    order, a formation/retreat/rescue override (final != the branch's move),
+    the nearest-enemy fallback (different phase), or a move that does not
+    actually close distance to A — stays unauthorized. Targets are stable
+    SC2 tags, never e{i} slots; no direction inference and no nearest-enemy
+    substitution happens here.
+    """
+    intents = []
+    for plan in plans or []:
+        if (plan.snapshot_id != snapshot.snapshot_id or plan.primary_skill != 'focus_fire'
+                or plan.goal_kind != 'enemy' or plan.commitment.phase != 'approach_hydralisk'
+                or len(plan.controlled_actors) != 1):
+            continue
+        target_id = (plan.goal_data or {}).get('target_id')
+        target = snapshot.enemies.get(target_id)
+        if (target_id != plan.goal or target is None or target.health <= 0
+                or target.type_name != 'hydralisk'):
+            continue    # goal enemy was not visible at decision time
+        raw = (snapshot.raw_state.get('visible_enemies', {}) or {}).get(target_id, {})
+        target_tag = raw.get('tag')
+        if not raw.get('alive', True):
+            continue
+        actor, = plan.controlled_actors
+        unit = snapshot.allies.get(actor)
+        if unit is None or not unit.alive or unit.type_name != 'hydralisk':
+            continue
+        # build_snapshot falls back to 'uN' when the raw tag is missing;
+        # slot names and fabricated tags must never identify a native unit.
+        tags = (str(unit.tag), str(target_tag))
+        if any(not (s.isascii() and s.isdecimal() and len(s) <= 20
+                    and 0 < int(s) < 2**64 and str(int(s)) == s) for s in tags):
+            continue
+        final = actions_by_actor.get(actor)
+        if (type(final) is not int or not 2 <= final <= 5
+                or final != plan.current_actions.get(actor) or final not in snapshot.legal[actor]):
+            continue
+        destination = snapshot.movement_candidates.get(actor, {}).get(final, {}).get('destination')
+        if destination is None or not (distance(destination, target.position)
+                                       < distance(unit.position, target.position)):
+            continue
+        intents.append({
+            'actor': actor, 'actor_tag': tags[0], 'target': target_id, 'target_tag': tags[1],
+            'issued_loop': snapshot.game_loop, 'macro_action_id': final, 'kind': 'approach_then_attack',
+            'skill': plan.primary_skill, 'phase': plan.commitment.phase,
+        })
+    return intents
+
+
 def zerg_hydra_plans(context, ling_actions, ling_targets, fingerprint):
     """Allocate one shot or positioning order per living hydra after ling selection."""
     enemies = context.snapshot.enemies

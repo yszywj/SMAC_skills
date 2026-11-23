@@ -1,4 +1,8 @@
 """Zerg focus-fire behavior through the native tactical step and commit path."""
+from dataclasses import replace
+from unittest.mock import patch
+
+from ..zerg_hydra_policy import approach_then_attack_intents
 from .fixtures import TacticalTestCase, enemy, scene
 
 
@@ -70,6 +74,69 @@ class ZergHydraPolicyTest(TacticalTestCase):
         actions, trace = self.run_scene(state)
         self.assertEqual(actions, [5, 4])
         self.assertEqual(trace['units']['u0']['goal'], 'u1')
+
+    def approach_scene(self):
+        state = scene([((0., 0.), 'hydralisk')], {
+            'e0': enemy((6., 0.), 'hydralisk', tag='18446744073709551614')},
+            map_name='10gen_zerg')
+        state['allies']['u0']['tag'] = '18446744073709551613'
+        return state
+
+    def test_micro_authority_is_committed_only_for_the_final_approach(self):
+        manager, state = self.manager(), self.approach_scene()
+        actions, _ = self.step(manager, state)
+        self.assertEqual(actions, [4])
+        self.assertFalse(manager.last_micro_intents)
+        manager.commit_final_actions(actions)
+        self.assertEqual(manager.last_micro_intents, [dict(
+            actor='u0', actor_tag=state['allies']['u0']['tag'], target='e0',
+            target_tag=state['visible_enemies']['e0']['tag'], issued_loop=80, macro_action_id=4,
+            kind='approach_then_attack', skill='focus_fire', phase='approach_hydralisk')])
+        for override in (5, 1):
+            state['game_loop'] += 8
+            self.step(manager, state)
+            self.assertFalse(manager.last_micro_intents)  # no grant from prior frame
+            manager.commit_final_actions([override])
+            self.assertFalse(manager.last_micro_intents)
+            manager.commit_final_actions([4])  # cannot resurrect consumed plan
+            self.assertFalse(manager.last_micro_intents)
+
+    def test_micro_same_direction_rescue_is_not_an_approach(self):
+        manager = self.manager()
+        decide = manager.coordinator.decide
+        def rescue(*args):
+            actions, trace, plans = decide(*args)
+            trace['execution_duties']['actors']['u0'].update(kind='rescue', selected_action=4)
+            return actions, trace, plans
+        with patch.object(manager.coordinator, 'decide', side_effect=rescue):
+            actions, _ = self.step(manager, self.approach_scene())
+        self.assertEqual(actions, [4])
+        manager.commit_final_actions(actions)
+        self.assertFalse(manager.last_micro_intents)
+
+    def test_micro_search_retreat_stale_and_nonapproaching_plans_rejected(self):
+        manager = self.manager()
+        self.step(manager, self.approach_scene())
+        snapshot, (p,), *_ = manager._pending_commit
+        for plan in (replace(p, primary_skill='cohesive_search'),
+                     replace(p, commitment=replace(p.commitment, phase='follow_zergling')),
+                     replace(p, primary_skill='disengage_reenter'),
+                     replace(p, goal_data={}), replace(p, snapshot_id=p.snapshot_id-1),
+                     replace(p, current_actions={'u0': 5})):
+            self.assertEqual(approach_then_attack_intents(snapshot, [plan], plan.current_actions), [])
+
+    def test_micro_absent_or_non_native_tags_do_not_authorize(self):
+        for side, key, tag in (('allies', 'u0', None), ('allies', 'u0', 'u0'),
+                               ('visible_enemies', 'e0', 0), ('visible_enemies', 'e0', 2**64)):
+            manager, state = self.manager(), self.approach_scene()
+            if tag is None:
+                del state[side][key]['tag']
+            else:
+                state[side][key]['tag'] = tag
+            actions, _ = self.step(manager, state)
+            manager.commit_final_actions(actions)
+            self.assertEqual(actions, [4])
+            self.assertFalse(manager.last_micro_intents)
 
     def test_volley_reservations_distribute_finishing_shots(self):
         state = scene([((0., 0.), 'hydralisk'), ((0., 1.), 'hydralisk')], {

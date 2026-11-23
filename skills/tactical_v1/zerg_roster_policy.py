@@ -29,7 +29,8 @@ class ZergRosterPolicy:
         self.fingerprint = fingerprint
         self.lings = tuple(a for a, cap in context.capabilities.items() if cap.key == 'zergling')
         self.focus = bool(getattr(skills.get('focus_fire'), 'enabled', False))
-        self.fallback = {a: zerg_fallback_action(context, a)
+        self.named_moves = {}
+        self.fallback = {a: zerg_fallback_action(context, a, self.named_moves)
                          for a, cap in context.capabilities.items()
                          if cap.key != 'zergling' and (cap.key != 'hydralisk' or not self.focus)}
         self.hydra_plans = {}
@@ -64,7 +65,7 @@ def ling_candidate(context, plan):
     return plan
 
 
-def zerg_fallback_action(context, actor):
+def zerg_fallback_action(context, actor, named_moves=None):
     """Basic nearest-enemy policy for units with no enabled tactical skill."""
     unit = context.snapshot.allies[actor]
     if not unit.alive:
@@ -80,6 +81,10 @@ def zerg_fallback_action(context, actor):
     if move is not None:
         destination = context.move_destinations(actor)[move]
         if distance(destination, goal) < distance(unit.position, goal):
+            if named_moves is not None and enemies and unit.type_name == 'baneling':
+                # Preserve the actual origin of this order. Do not reconstruct
+                # an enemy later from the common cardinal action or proximity.
+                named_moves[actor] = (move, enemies[0].enemy_id)
             return move
     legal = context.legal_actions(actor)
     return STOP if STOP in legal else min(legal)

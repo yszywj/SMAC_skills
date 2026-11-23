@@ -12,9 +12,10 @@ import statistics
 import sys
 import time
 
-from .config import GAME_ROOT, MAP_FILE, ROOT, SMAC_ROOT, digest, load_config, public_brief, map_file
+from .config import GAME_ROOT, ROOT, SMAC_ROOT, digest, load_config, public_brief, map_file, race_for_map
 
 SPATIAL_SKILLS = ("regroup", "cohesive_search")
+EXECUTION_MODES = ("legacy8", "micro8-off", "micro8-hydra", "micro8-all")
 
 
 def selected_spatial(skill):
@@ -25,6 +26,22 @@ def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def score_snapshot(env):
+    obs = env._obs.observation
+    if not obs.HasField('score') or not obs.score.HasField('score_details'):
+        raise RuntimeError('SC2 observation missing requested score_details')
+    details = obs.score.score_details
+    values = {}
+    for field in ('total_damage_dealt', 'total_damage_taken', 'total_healed'):
+        if not details.HasField(field):
+            raise RuntimeError(f'SC2 score_details missing {field}')
+        vital = getattr(details, field)
+        values[field] = {k: getattr(vital, k) if vital.HasField(k) else None
+                         for k in ('life', 'shields', 'energy')}
+    return {'game_loop': obs.game_loop, 'player_id': obs.player_common.player_id,
+            'score_details': values}
 
 
 def positive(value):
@@ -59,7 +76,7 @@ def check(args):
         "python": sys.version, "python_executable": sys.executable,
         "pysc2": pysc2.__file__, "smacv2": smacv2.__file__,
         "sc2_path": str(args.sc2_path), "sc2_exists": args.sc2_path.is_dir(),
-        "map_exists": MAP_FILE.is_file(), "jev_key_available": key_available,
+        "map_exists": map_file({'map_name': '10gen_protoss'}).is_file(), "jev_key_available": key_available,
         "codex_executable": codex, "skills": "off",
         "sampling_reproducible": all(
             generate_manifest(load_config(n), 2, 7) == generate_manifest(load_config(n), 2, 7)
@@ -113,12 +130,25 @@ def initial_state_digest(env):
 async def evaluate(args, manifest, method, output):
     if method in ("jev", "astra-jev") and manifest["env_args"]["map_name"] != "10gen_protoss":
         raise ValueError("Cross-race support is validated for local policies only; model planning remains Protoss-specific")
+    execution_mode = getattr(args, "execution_mode", "legacy8")
+    if execution_mode not in EXECUTION_MODES:
+        raise ValueError(f"Unknown execution mode: {execution_mode!r}")
+    if execution_mode == "micro8-all" and (method != "adaptive-skill"
+            or getattr(args, "skill_version", None) != "tactical_v1"):
+        raise ValueError("micro8-all requires adaptive-skill with tactical_v1")
+    if execution_mode != "legacy8" and manifest["env_args"].get("step_mul") != 8:
+        raise ValueError(
+            f"--execution-mode {execution_mode} supports step_mul=8 manifests only; "
+            f"this manifest declares step_mul={manifest['env_args'].get('step_mul')!r}")
+    micro_execution = execution_mode != "legacy8"
+    all_attackers = execution_mode == "micro8-all"
     from absl import flags
     if not flags.FLAGS.is_parsed():
         flags.FLAGS(["smacv2-jev"])
     from .client import JevClient, JevError, load_api_key
     from .environment import ReplayableEnv, audit_unit_balance
     from .feedback import action_feedback
+    from .micro_trigger import MicroAttackWindow
     from .planner import MapPlanner, attach_plan
     from .policy import build_request, batch_requests, decode_actions, nearest_actions
     from .skill_runtime import (load_manager, source_files as skill_source_files,
@@ -174,7 +204,12 @@ async def evaluate(args, manifest, method, output):
     sources = list((ROOT / "bridge").glob("*.py"))
     sources += [SMAC_ROOT / "smacv2/env/starcraft2" / name
                 for name in ("starcraft2.py", "wrapper.py", "distributions.py")]
-    sources.append(map_file(manifest["env_args"]))
+    selected_map = map_file(manifest['env_args'])
+    sources.append(selected_map)
+    damage_enabled = bool(os.environ.get('SMAC_DAMAGE_MAP_DIR'))
+    if damage_enabled:
+        from scripts.make_damage_map import RACE_TYPES, begin_resource_damage, read_resource_damage
+        sources.append(ROOT / 'scripts' / 'make_damage_map.py')
     selected_skill_sources = skill_source_files(skill_version) if is_skill else []
     medivac_mode = skill_config.get("medivac_policy", "legacy") if is_skill else "legacy"
     medivac_runtime = skill_config["manager_kwargs"].get("medivac_tree") if is_skill else None
@@ -191,6 +226,9 @@ async def evaluate(args, manifest, method, output):
                     for p in selected_skill_sources}
     metadata = {
         "method": method, "skills": "adaptive_focus_fire" if is_skill else "off",
+        "execution_mode": execution_mode,
+        "macro_loops": 8 if micro_execution else int(manifest["env_args"].get("step_mul", 8)),
+        "engine_step_loops": 1 if micro_execution else int(manifest["env_args"].get("step_mul", 8)),
         "native_teacher_control": native_control,
         "medivac_policy": medivac_mode,
         "medical_patient_coordination": skill_config.get("medical_patient_coordination") if is_skill else None,
@@ -209,6 +247,8 @@ async def evaluate(args, manifest, method, output):
             **value_metadata,
         } if is_skill else None,
         "manifest_sha256": manifest["sha256"],
+        "map_file": str(selected_map.resolve()),
+        "damage_by_type_enabled": damage_enabled,
         "env_args": manifest["env_args"], "scenario_count": len(manifest["episodes"]),
         "model": args.model if method in ("jev", "astra-jev") else None,
         "planner_model": args.planner_model if method == "astra-jev" else None,
@@ -287,9 +327,9 @@ async def evaluate(args, manifest, method, output):
             emit("pair_configuration", **pair_metadata)
         if is_skill and native_control != "all":
             skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
+            skill_manager.micro_all_attackers = all_attackers
             if skill_tree_policy is not None:
                 from decision_tree.integration import SkillTreeController
-                from .config import race_for_map
                 skill_tree_controller = SkillTreeController(
                     skill_manager, skill_tree_policy, race=race_for_map(manifest['env_args']['map_name']),
                     posture=args.adaptive_posture)
@@ -306,6 +346,7 @@ async def evaluate(args, manifest, method, output):
         for episode, scenario in enumerate(manifest["episodes"], 1):
             if skill_manager is not None:
                 skill_manager.reset()
+                skill_manager.micro_all_attackers = all_attackers
             if skill_tree_controller is not None:
                 skill_tree_controller.reset()
             if local_controller is not None:
@@ -323,8 +364,13 @@ async def evaluate(args, manifest, method, output):
             if action_extensions and env.keep_heal_order_action_id != action_extensions['terran_keep_heal_order']['action_id']:
                 raise RuntimeError('KeepHealOrder action ID differs from recorded extension contract')
             env.reset_record(scenario)
+            initial_score = score_snapshot(env)
             env.env.scenario_brief = public_brief(config)
             data = env._controller.data()
+            if damage_enabled:
+                initial_rosters = {str(p): {str(u.tag): data.units[u.unit_type] for u in units.values()}
+                                   for p, units in ((1, env.agents), (2, env.enemies))}
+                begin_resource_damage(env._controller)
             if config.get("unit_balance") == "native":
                 audit = audit_unit_balance(env, data)
                 write_json(output / "balance" / f"episode-{episode:04d}.json", audit)
@@ -338,12 +384,14 @@ async def evaluate(args, manifest, method, output):
                 expected = local_policy['model'].get('game_version')
                 if not expected or env._controller.ping().game_version != expected:
                     raise ValueError('Local model requires matching recorded SC2 game version')
+            game_version = env._controller.ping().game_version
             emit("episode_started", episode=episode, scenario_sha256=scenario["sha256"],
                  initial_state_sha256=initial_digest,
                  game_loop=env._obs.observation.game_loop,
-                 game_version=env._controller.ping().game_version)
+                 game_version=game_version)
             health, shields, previous_actions, feedback = {}, {}, {}, None
             total_reward, steps = 0.0, 0
+            micro_records, micro_windows = [], 0
             while True:
                 payload = build_request(env, data, args.model, episode,
                                         health, previous_actions, shields, feedback)
@@ -507,10 +555,38 @@ async def evaluate(args, manifest, method, output):
                 health = {u.tag: u.health for u in env.agents.values()}
                 shields = {u.tag: u.shield for u in env.agents.values()}
                 previous_actions = {f"u{i}": str(action) for i, action in enumerate(actions)}
-                reward, terminated, info = env.step(actions)
+                if micro_execution:
+                    # One macro step == one 8-loop window. The window interior
+                    # only re-checks the policy's registered authorizations;
+                    # the next command still comes from the next decision.
+                    intents = []
+                    if skill_manager is not None and hasattr(skill_manager, "last_micro_intents"):
+                        intents = skill_manager.last_micro_intents
+                    window = MicroAttackWindow(
+                        env, intents, macro_step=steps, issued_loop=int(loop),
+                        macro_loops=8, execute=(execution_mode != "micro8-off"),
+                        emit=emit, episode=episode, all_attackers=all_attackers, static_data=data)
+                    reward, terminated, info = env.step_micro_window(actions, window, macro_loops=8)
+                    window.close(env._obs.observation.game_loop)
+                    micro_windows += 1
+                    micro_records.extend(window.records)
+                else:
+                    reward, terminated, info = env.step(actions)
                 steps += 1
                 total_reward += float(reward)
                 feedback = action_feedback(env, loop)
+                if micro_execution:
+                    # Keep macro receipts intact; a later micro order is part of the
+                    # next observation's command history, not a second tactical step.
+                    submitted = [r for r in window.records if r['status'] == 'submitted']
+                    feedback['micro_submissions'] = submitted
+                    for r in submitted:
+                        if r.get('sc2_response') == [1]:
+                            actor = r['actor']
+                            cmd = r['submitted_action_id']
+                            previous_actions[actor] = str(cmd)
+                            if hasattr(skill_manager, 'record_micro_action'):
+                                skill_manager.record_micro_action(actor, cmd)
                 delta = env._obs.observation.game_loop - loop
                 if delta != env._step_mul:
                     raise RuntimeError(f"Unexpected simulation step: {delta}")
@@ -524,6 +600,32 @@ async def evaluate(args, manifest, method, output):
             replay_dir = output / "replays"
             replay_dir.mkdir(exist_ok=True)
             replay = replay_dir / f"episode-{episode:04d}.SC2Replay"
+            final_score = score_snapshot(env)
+            if damage_enabled:
+                # Freeze/read uses SC2 steps; never include those in policy steps or score.
+                ticks = read_resource_damage(env._controller)
+                if len(ticks) != 8 or any(type(n) is not int or n < 0 for n in ticks):
+                    raise ValueError(f'Invalid resource damage ticks: {ticks!r}')
+                names = (*RACE_TYPES[race_for_map(config['map_name'])], 'other')
+                players = {}
+                for i in range(2):
+                    counts = dict(zip(names, ticks[4*i:4*i+4]))
+                    players[str(i+1)] = {
+                        'initial_roster_by_api_tag': initial_rosters[str(i+1)],
+                        'ticks_by_source_type': counts,
+                        'damage_dealt_by_source_type': {k: v / 4096 for k, v in counts.items()},
+                    }
+                write_json(output / 'damage_by_type' / f'episode-{episode:04d}.json', {
+                    'metric': 'damage dealt to opposing player by damage event source type',
+                    'ticks_per_damage': 4096, 'players': players,
+                    'episode': episode, 'method': method, 'scenario_sha256': scenario['sha256'],
+                    'manifest_sha256': manifest['sha256'], 'game_version': game_version,
+                    'map_file': metadata['map_file'],
+                    'map_sha256': metadata['source_hashes'][os.path.relpath(selected_map, ROOT.parent)],
+                    'begin_request_loop': initial_score['game_loop'],
+                    'terminal_loop': final_score['game_loop'],
+                    'freeze_loop_range': [final_score['game_loop'], final_score['game_loop'] + 2],
+                })
             replay.write_bytes(env._controller.save_replay())
             record = {
                 "episode": episode, "scenario_sha256": scenario["sha256"],
@@ -534,6 +636,28 @@ async def evaluate(args, manifest, method, output):
                 "wall_seconds": time.monotonic() - episode_started,
                 "replay": str(replay), "info": info,
             }
+            if micro_execution:
+                # Additive accounting only: macro steps, rewards and damage
+                # above are untouched by the micro window interior.
+                states = {}
+                for row in micro_records:
+                    states[row["status"]] = states.get(row["status"], 0) + 1
+                record["micro_trigger"] = {
+                    "mode": execution_mode, "macro_loops": 8, "engine_step_loops": 1,
+                    "windows": micro_windows, "authorizations": len(micro_records),
+                    "states": states}
+                write_json(output / 'micro_triggers' / f'episode-{episode:04d}.json', {
+                    'episode': episode, 'mode': execution_mode,
+                    'macro_loops': 8, 'engine_step_loops': 1,
+                    'authorizations': micro_records})
+            write_json(output / 'score_details' / f'episode-{episode:04d}.json', {
+                'scope': 'controlled player cumulative engine counters, not per unit type',
+                'episode': episode, 'method': method, 'map': config['map_name'],
+                'sc2_seed': scenario['sc2_seed'], 'scenario_sha256': scenario['sha256'],
+                'manifest_sha256': manifest['sha256'], 'game_version': game_version,
+                'steps': steps, 'outcome': record['outcome'],
+                'initial': initial_score, 'final': final_score,
+            })
             records.append(record)
             emit("episode_completed", **record)
             write_json(output / "episodes.json", records)
@@ -558,8 +682,21 @@ async def evaluate(args, manifest, method, output):
             await client.close()
         if planner is not None:
             await planner.close()
+        micro_totals = None
+        if micro_execution:
+            states, windows, authorizations = {}, 0, 0
+            for r in records:
+                block = r.get("micro_trigger") or {}
+                windows += block.get("windows", 0)
+                authorizations += block.get("authorizations", 0)
+                for state, count in (block.get("states") or {}).items():
+                    states[state] = states.get(state, 0) + count
+            micro_totals = {"mode": execution_mode, "macro_loops": 8,
+                            "engine_step_loops": 1, "windows": windows,
+                            "authorizations": authorizations, "states": states}
         summary = {
             "method": method, "status": "failed" if failure else "complete", "error": failure,
+            "execution_mode": execution_mode, "micro_trigger_totals": micro_totals,
             "native_teacher_control": native_control,
             "native_teacher_metadata": native_runtime.describe() if native_runtime is not None else None,
             "pair_mode": getattr(args, "pair_mode", "off"),
@@ -608,9 +745,19 @@ def parser():
     make.add_argument("--output", type=Path, required=True)
     run = sub.add_parser("run", help="Run one method on a manifest")
     run.add_argument("--method", choices=("random", "nearest", "jev", "astra-jev", "adaptive-skill"), default="nearest")
+    run.add_argument("--execution-mode", choices=EXECUTION_MODES,
+                     default="legacy8",
+                     help="legacy8 (default): one env.step per tactical decision, unchanged behavior. "
+                          "micro8-*: one tactical decision per 8 game loops. off only records hydra "
+                          "triggers; hydra or all may send one authorized Attack per eligible actor. "
+                          "all also checks native reach for non-hydralisk attackers. Requires adaptive-skill, "
+                          "tactical_v1 and a step_mul=8 manifest.")
     suite = sub.add_parser("suite", help="Paired methods on one immutable scenario manifest")
     suite.add_argument("--methods", nargs="+", choices=("random", "nearest", "jev", "astra-jev", "adaptive-skill"),
                        default=["nearest", "jev", "astra-jev"])
+    suite.add_argument("--execution-mode", choices=EXECUTION_MODES,
+                       default="legacy8",
+                       help="Same contract as run --execution-mode; applies to every method.")
     for command in (check_p, run, suite):
         command.add_argument("--sc2-path", type=Path, default=Path(default_sc2()))
         command.add_argument("--config-file", type=Path, default=GAME_ROOT / "config.md")
@@ -688,6 +835,11 @@ def main():
     args = parser().parse_args()
     if args.command in ("run", "suite"):
         methods = [args.method] if args.command == "run" else args.methods
+        if getattr(args, "execution_mode", "legacy8") != "legacy8":
+            if any(m != "adaptive-skill" for m in methods):
+                raise SystemExit("--execution-mode micro8-* requires --method adaptive-skill only")
+            if args.skill_version != "tactical_v1":
+                raise SystemExit("--execution-mode micro8-* requires --skill-version tactical_v1")
         if args.local_policy is not None and any(m != 'adaptive-skill' for m in methods):
             raise SystemExit('--local-policy requires adaptive-skill only')
         if args.skill_tree is not None and any(m != 'adaptive-skill' for m in methods):

@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -41,7 +42,11 @@ def race_for_map(map_name):
 
 def map_file(args):
     race_for_map(args["map_name"])
-    return MAP_FILE.parent / (args["map_name"] + ".SC2Map")
+    directory = os.environ.get('SMAC_DAMAGE_MAP_DIR')
+    if directory:
+        return Path(directory).expanduser().resolve() / (args['map_name'] + '.SC2Map')
+    # All three logical 10gen scenarios register the same physical empty arena.
+    return MAP_FILE.parent / '32x32_flat.SC2Map'
 
 
 def source_path():

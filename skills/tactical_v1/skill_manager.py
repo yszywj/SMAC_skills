@@ -23,6 +23,7 @@ from .context import build_snapshot, Context
 from .coordinator import Coordinator
 from .evaluator import Evaluator
 from .memory import TacticalMemory
+from .micro_approach import extra_approaches, merge_approaches, record_approach
 from .registry import build_skills, GENERIC, SPECIALIZED
 from .telemetry import Telemetry
 
@@ -59,6 +60,8 @@ def config_fingerprint(config: Dict[str, Any]) -> str:
 
 
 class SkillManager:
+    micro_all_attackers = False  # Opt-in runner mode; reset preserves it.
+
     def __init__(self, max_steps: int = 4, posture: str = "balanced",
                  tactical_config: Optional[str] = None, **compat):
         # Explicit compatibility surface: unknown kwargs are recorded, never
@@ -106,6 +109,7 @@ class SkillManager:
         self._snapshot_counter = 0
         self._cache = None           # (digest, actions, summary, plans, snapshot)
         self._pending_commit = None
+        self.last_micro_intents = []
         self.stats = {"steps": 0, "episodes": 0, "search_budget_events": 0,
                       "repairs": 0, "baseline_units": 0}
         self.current_skill = "tactical_v1"
@@ -128,6 +132,7 @@ class SkillManager:
         self._snapshot_counter = 0
         self._cache = None
         self._pending_commit = None
+        self.last_micro_intents = []
 
     def select(self, skill: Optional[str] = None, priority_target=None,
                posture: Optional[str] = None) -> None:
@@ -137,6 +142,7 @@ class SkillManager:
             self.posture = posture
 
     def step(self, payload: Dict, n_agents: int):
+        self.last_micro_intents = []  # No authority until this decision is committed.
         digest = _digest(payload, n_agents, self.config["_fingerprint"])
         cached = self._cache
         if cached is not None and cached[0] == digest:
@@ -181,16 +187,38 @@ class SkillManager:
             for actor, row in summary.get("units", {}).items())
         self._cache = (digest, list(actions), copy.deepcopy(summary), plans,
                        snapshot)
-        self._pending_commit = (snapshot, plans, list(actions), risk_now, context)
+        # A rescue can share the exact cardinal move of an approach. Do not
+        # interrupt that route, even if the attack plan's action also matches.
+        duties = summary['execution_duties']['actors']
+        micro_actions = {f'u{i}': a for i, a in enumerate(actions)
+                         if duties.get(f'u{i}', {}).get('kind') not in ('rescue', 'intercept')}
+        self._pending_commit = (snapshot, plans, micro_actions, risk_now, context)
+        if self.micro_all_attackers is True:
+            context.micro_approaches = extra_approaches(context, summary, plans, actions)
         return list(actions), copy.deepcopy(summary)
+
+    def record_micro_action(self, actor: str, action: int) -> None:
+        """Record an acknowledged interior command without advancing plans or timers."""
+        record_approach(self.memory, self.last_micro_intents, actor, action)
 
     def commit_final_actions(self, final_actions: List[int]) -> None:
         """Commit memory for exactly the plans whose actions survived."""
         pending = self._pending_commit
         self._pending_commit = None
+        self.last_micro_intents = []
         if pending is None:
             return
-        snapshot, plans, actions, risk_now, context = pending
+        snapshot, plans, micro_actions, risk_now, context = pending
         actions_by_actor = {f"u{i}": a for i, a in enumerate(final_actions)}
+        # Execution-layer micro-trigger authorizations are derived here, from
+        # the SAME post-arbitration final actions the memory commit verifies.
+        # Both micro modes read the identical list; sending is decided later.
+        from .zerg_hydra_policy import approach_then_attack_intents
+        surviving = {actor: final for actor, final in actions_by_actor.items()
+                     if micro_actions.get(actor) == final}
+        intents = approach_then_attack_intents(snapshot, plans, surviving)
+        if self.micro_all_attackers is True and final_actions == self._cache[1]:
+            intents = merge_approaches(intents, getattr(context, 'micro_approaches', ()))
         self.memory.commit(snapshot, actions_by_actor, plans, risk_now,
                            context=context)
+        self.last_micro_intents = intents

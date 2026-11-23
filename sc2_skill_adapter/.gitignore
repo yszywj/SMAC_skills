@@ -2,3 +2,6 @@
 __pycache__/
 runs/
 *.pyc
+!/damage_maps/10gen_protoss.SC2Map
+!/damage_maps/10gen_terran.SC2Map
+!/damage_maps/10gen_zerg.SC2Map

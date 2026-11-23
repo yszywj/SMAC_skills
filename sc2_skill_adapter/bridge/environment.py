@@ -2,17 +2,19 @@
 import copy
 from collections import Counter
 import hashlib
+import os
+from unittest.mock import patch
 
 import numpy as np
 
-from .config import MAP_FILE, RACE_UNITS, race_for_map, source_path, validate_config
+from .config import map_file, RACE_UNITS, race_for_map, source_path, validate_config
 from .scenarios import reset_config
 from .keep_order import raw_keep_heal_target
 
 source_path()
 from smacv2.env.starcraft2.starcraft2 import StarCraft2Env
 from smacv2.env.starcraft2.wrapper import StarCraftCapabilityEnvWrapper
-from smacv2.env.starcraft2.maps.smac_maps import SMACMap
+from smacv2.env.starcraft2.maps import smac_maps
 from pysc2.lib.units import Protoss
 
 
@@ -54,6 +56,17 @@ class RecordingController:
 
 
 class RecordedEnv(StarCraft2Env):
+    @property
+    def game(self):
+        return self._join_request
+
+    @game.setter
+    def game(self, request):
+        # SMACv2 assigns self.game immediately before controller.join_game.
+        if request is not None:
+            request.options.score = True
+        self._join_request = request
+
     def __init__(self, **kwargs):
         self.unit_balance = kwargs.pop("unit_balance", "original")
         self.terran_keep_heal_order = kwargs.pop("terran_keep_heal_order", False)
@@ -95,10 +108,17 @@ class RecordedEnv(StarCraft2Env):
                 self.enemy_unit_map[name] = native_id
 
     def _launch(self):
-        # Load the sibling map directly, without copying into the SC2 install.
-        SMACMap.directory = str(MAP_FILE.parent.resolve())
-        super()._launch()
+        path = map_file({'map_name': self.map_name}).resolve(strict=True)
+        # Each logical 10gen class normally points at the same 32x32_flat filename.
+        with patch.multiple(getattr(smac_maps, self.map_name), directory=str(path.parent), filename=path.stem):
+            super()._launch()
         self._controller = RecordingController(self._controller, self)
+
+    def init_units(self, ally_team, enemy_team, episode_config):
+        if os.environ.get('SMAC_DAMAGE_MAP_DIR') and any(
+                u.owner in (1, 2) for u in self._obs.observation.raw_data.units):
+            raise RuntimeError('Damage map has preplaced combatants; expected instrumented 32x32_flat')
+        return super().init_units(ally_team, enemy_team, episode_config)
 
     def get_agent_action(self, a_id, action):
         if (getattr(self, 'terran_keep_heal_order', False)
@@ -128,6 +148,84 @@ class RecordedEnv(StarCraft2Env):
         if self.force_restarts != before_restarts or not self.last_action_results:
             raise RuntimeError("SC2 transport/restart failure; episode is invalid, not a loss.")
         return result
+
+    def submit_micro_commands(self, request):
+        """Submit authorized micro commands WITHOUT stepping.
+
+        Sent outside the collection window, so they never enter
+        last_submissions/last_action_results and can never be mistaken for
+        the macro batch by action_feedback.
+        """
+        return self._controller.actions(request)
+
+    def step_micro_window(self, actions, hook, macro_loops):
+        """Split only the engine clock. Native step owns actions and settlement."""
+        if self.stochastic_health or self.heuristic_ai:
+            raise RuntimeError("micro execution requires standard health and policy actions")
+        if macro_loops != self._step_mul or macro_loops < 1:
+            raise RuntimeError(
+                f"micro window of {macro_loops} loops requires step_mul "
+                f"{macro_loops}, configured {self._step_mul}")
+
+        controller = self._controller
+        step, observe = controller.step, controller.observe
+        start = self._obs.observation.game_loop
+        interval_errors = []
+
+        def frame(offset):
+            obs = observe()
+            if obs.observation.game_loop != start + offset:
+                raise RuntimeError(f"Expected SC2 loop {start + offset}, got {obs.observation.game_loop}")
+            return obs
+
+        def split_step(count):
+            if count != macro_loops:
+                raise RuntimeError(f"Unexpected native step size: {count}")
+            # update_units mutates missing units in place and overwrites previous_*.
+            # Use private rosters throughout the interior; never call it on macro state.
+            allies, enemies = copy.deepcopy(self.agents), copy.deepcopy(self.enemies)
+            rng = np.random.get_state()  # get_obs_agent draws even at prob_obs_enemy=1
+            try:
+                with patch.multiple(self, collecting=False, agents=allies, enemies=enemies,
+                                    enemy_tags=self.enemy_tags.copy(), obs_enemies=self.obs_enemies.copy(),
+                                    _obs=self._obs):
+                    for offset in range(1, count):
+                        step(1)
+                        self._obs = obs = frame(offset)
+                        if obs.player_result:
+                            raise RuntimeError("SC2 game ended before the SMAC macro boundary")
+                        interval_errors.extend(obs.action_errors)
+                        by_tag = {u.tag: u for u in obs.observation.raw_data.units}
+                        for roster in (allies, enemies):
+                            for slot, old in roster.items():
+                                if old.tag in by_tag:
+                                    roster[slot] = by_tag[old.tag]
+                                else:
+                                    # Do not mutate a protobuf owned by an earlier raw frame.
+                                    dead = copy.deepcopy(old)
+                                    dead.health = 0
+                                    roster[slot] = dead
+                        hook.on_interior_loop(offset)
+            finally:
+                np.random.set_state(rng)
+            step(1)  # closing observation is consumed by native step, not by the hook
+
+        def closing_observation():
+            obs = frame(macro_loops)
+            if interval_errors:
+                # feedback.py expects errors for the whole interval, not only the last loop.
+                obs = copy.deepcopy(obs)
+                errors = interval_errors + list(obs.action_errors)
+                del obs.action_errors[:]
+                obs.action_errors.extend(errors)
+            return obs
+
+        # Patch this controller instance only. If native step restarts SC2, never
+        # put the old controller back onto the newly launched environment.
+        with patch.multiple(controller, step=split_step, observe=closing_observation):
+            reward, terminated, info = self.step(actions)
+        info["micro_advanced_loops"] = macro_loops
+        return reward, terminated, info
 
 
 def audit_unit_balance(env, static_data):
