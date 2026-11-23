@@ -103,3 +103,14 @@ reports/
 !/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/skills/
 /sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/skills/*
 !/sc2_skill_adapter/analysis/skill_v7_20261024/source_snapshot/skills/current/skills/*.py
+
+# Publish only the marginal_near tactical policy from this run.
+!/runs/
+/runs/*
+!/runs/contact_all_attack_20261122_230107_662982/
+/runs/contact_all_attack_20261122_230107_662982/*
+!/runs/contact_all_attack_20261122_230107_662982/marginal_near/
+/runs/contact_all_attack_20261122_230107_662982/marginal_near/*
+!/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/
+/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/*
+!/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/tactical_v1/

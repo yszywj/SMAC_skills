@@ -1,0 +1,28 @@
+{
+  "verified": true,
+  "game_version": "5.0.17.98310",
+  "evidence": "native-baneling-isolated-20261115-attempts04-05",
+  "catalog_contract": {
+    "known": true,
+    "movement_speed_native": 2.5,
+    "armor": 0.0,
+    "attributes": [3],
+    "weapons": []
+  },
+  "native_unit_catalog_sha256": "6cb488ceb0838f8d1348b391a7bdc6dd60ad65e32a39be25e28d3c74a3def0d9",
+  "blast_radius": 2.199951171875,
+  "blast_radius_upper": 2.224853515625,
+  "trigger_reach": 0.1435546875,
+  "trigger_reach_upper": 0.2998046875,
+  "base_damage": 16.0,
+  "light_bonus": 19.0,
+  "ground_only": true,
+  "on_enemy_kill": true,
+  "scope": "native zero-upgrade ground unshielded targets; catalog-guarded installation calibration, not strict payload version verification",
+  "geometry_evidence": "Stationary Hydra radius0.625 hit at center2.824951171875, missed2.849853515625. Lower bound used for benefit; upper bound for risk. Active Hydra at center1.1435546875 (source radius0.375,target0.625) exploded while HP30 with attack order; lower trigger reach is achievable contact, not a claim of exact native weapon range.",
+  "damage_evidence": "Hydra(Light,armor0) lost35; Roach(nonLight,armor1) lost15; Zergling(Light,armor0) confirmeddead35; airborne Overlord lost0. Death via real enemy attack and active attack both tested. Debug Life1000 clamped to native max; damage uses observed HP, not requested HP.",
+  "sources": [
+    {"path": "runs/tactical_all_races_10v10_9x20_mechanisms_20261115/calibration/attempt_04/native_burst_probe.json", "sha256": "108e8bec8176337b6c4c084ae783bf5d84a389b26c2db15c919903702a31c509"},
+    {"path": "runs/tactical_all_races_10v10_9x20_mechanisms_20261115/calibration/attempt_05/native_burst_probe.json", "sha256": "6e0c8da58c95634b7dd2c3c71ff91853de1d26140e688640f4890325b5cc4555"}
+  ]
+}
