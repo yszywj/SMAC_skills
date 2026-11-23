@@ -388,3 +388,111 @@ def apply_complete_plan(selected, manager, context=None, memory=None,
         "commit_status": "pending_manager_commit",
     })
     return result
+
+
+def select_complete_plan(branches, state_features, model=None,
+                         fallback=None, min_gain: float = 0.0,
+                         tie_tolerance: float = 1e-9,
+                         schema=None):
+    """Task 2.3: skill selection over COMPLETE branch candidates.
+
+    ``branches`` are ``CompletePlanCandidate`` records built from the
+    Coordinator's own validated cache (BASE first). Scoring:
+
+    - gain/imitation/correction models: per-branch scalar estimate via the
+      shared single join (``schema.build_model_features``);
+    - ranking models (``PairwiseRankModel``): round-robin tournament over
+      the branch set.
+
+    Selection guarantees: BASE is always present and always survives;
+    unsupported candidates are never chosen; ties break to the earlier
+    rule rank (BASE is rank 0); only a STRICTLY better supported candidate
+    may replace BASE; any model error falls back to BASE.
+    """
+    schema = schema or DEFAULT_SCHEMA
+    from .candidates import CompletePlanCandidate
+    from .schema import build_model_features, FeatureLayerMissing
+    from .scorer import PairwiseRankModel
+
+    branches = [b for b in branches
+                if isinstance(b, CompletePlanCandidate) and b.legal]
+    if not branches:
+        return {"selected": None, "reason": "no_branches", "changed": False,
+                "scores": []}
+    base = branches[0]
+    result = {"selected": base, "changed": False, "reason": "rule_choice",
+              "scores": []}
+
+    def rule_rank(index):
+        return index
+
+    if model is None:
+        result["reason"] = "no_model_rule_fallback"
+        return result
+    try:
+        if isinstance(model, PairwiseRankModel):
+            flat = {b.candidate_id: build_model_features(
+                state_features, b.candidate_features, schema)
+                for b in branches}
+            try:
+                tournament = model.score_candidates(flat)
+            except Exception:
+                result["reason"] = "ranking_prediction_failed_rule_fallback"
+                return result
+            scored = []
+            for index, branch in enumerate(branches):
+                row = tournament.get(branch.candidate_id, {})
+                scored.append({"branch": branch, "index": index,
+                               "score": float(row.get("score", 0.0)),
+                               "supported": bool(row.get("supported", False))})
+            eligible = [row for row in scored
+                        if row["supported"]
+                        and row["score"] > min_gain + tie_tolerance]
+            result["scores"] = [
+                {"candidate_id": row["branch"].candidate_id,
+                 "score": row["score"], "supported": row["supported"]}
+                for row in scored]
+        else:
+            scored = []
+            for index, branch in enumerate(branches):
+                try:
+                    flat = build_model_features(state_features,
+                                                branch.candidate_features,
+                                                schema)
+                except FeatureLayerMissing:
+                    scored.append({"branch": branch, "index": index,
+                                   "score": 0.0, "supported": False})
+                    continue
+                try:
+                    leaves = model.estimate(
+                        flat, candidate_skill=branch.candidate_skill)
+                except Exception:
+                    leaves = []
+                value = float(leaves[0]["value"]) if leaves else 0.0
+                supported = bool(leaves and leaves[0].get("supported"))
+                scored.append({"branch": branch, "index": index,
+                               "score": value, "supported": supported})
+            result["scores"] = [
+                {"candidate_id": row["branch"].candidate_id,
+                 "score": row["score"], "supported": row["supported"]}
+                for row in scored]
+            eligible = [row for row in scored
+                        if row["supported"]
+                        and row["score"] > min_gain + tie_tolerance]
+    except Exception:
+        result["reason"] = "model_error_rule_fallback"
+        return result
+
+    if not eligible:
+        result["reason"] = "no_supported_candidate_rule_fallback"
+        return result
+    eligible.sort(key=lambda row: (-row["score"], row["index"]))
+    winner = eligible[0]
+    if winner["branch"].candidate_id == base.candidate_id \
+            or winner["index"] == 0:
+        result["reason"] = "model_confirms_base"
+        return result
+    result["selected"] = winner["branch"]
+    result["changed"] = True
+    result["reason"] = "model_preferred_complete_branch"
+    return result

@@ -228,3 +228,53 @@ decision_tree.zerg.tests.test_v11` → 23 tests OK。
 - `committed` 事件区分：`commit_call_completed` + `memory_commit ∈
   {new_commit, idempotent, partial_or_arbitrated, none}`；committed 仅表示
   原 Skill 记忆提交条件通过，不是 SC2 引擎确认。
+
+---
+
+# V1.3 端到端链路（最终框架版）
+
+五条链路全部离线验收通过（`tests/test_v13.py`）：
+
+**A. A 类内部链路**：collector 被动记录 → `observe_step` 用
+`(run_id, episode_id, snapshot_id, game_loop)` 校验身份后取当前候选 →
+`score_routed` 按槽位评分（A/B 类分别记录）→ 每候选 shadow 日志
+（decision_group_id/predicted_rank/teacher/final_action_match/execution_status）
+→ `expand_skill_proposals` → `train_internal` → `load_zerg_model` → 在线评分。
+propose 调用数不变，动作逐位一致。
+
+**B. B 类完整分支链路**：关键事实——Coordinator 的 `evaluate_once` 只缓存
+通过 Validator 的分支，且 `coordinator._cache` 在 decide 后仍持有**当前步
+真实 CandidatePlan 对象**。`candidates.build_branch_candidates` 只读导出：
+BASE 取 `_pending_commit`（authoritative），备选取缓存（排除 BASE、按动作
+去重）——零战术改动、零伪造、零重复执行。`selector.select_complete_plan`
+评分（gain/imitation 用回归估计；ranking 用锦标赛），仅**严格优于 BASE**
+才换选（并列归规则名次）；`apply_complete_plan` 整组替换 + Validator +
+有界 repair + 失败整体回退；`_update_manager_plan_state` 归一化 dict→u 列表
+并刷新 `_pending_commit`/`_cache`/summary；Memory 提交仍由原 Manager
+surviving-plan 逻辑独占。fixture 实测 2 个真实分支（非 blocked）。
+
+**C. 反事实链路**（新 `pair_dataset.py`）：
+`join_counterfactual_pairs`（decision_key/anchor 关联 + gain 推导）→
+`audit_counterfactual_pairs`（起点/前缀/上下文/源码/干预记录/完整性/算术
+十项审计 + 可训练比例）→ `build_gain_dataset`（A 类与 B 类收益**分开**
+回填 `candidate_return`/`baseline_return`，输出独立 record 列表 +
+dataset_hash + 来源清单）→ `backend.train("gain")/train_internal("gain")`。
+未审计数据进不了训练；缺失收益保留 None。
+
+**D. 模型部署**：`scorer.load_zerg_model` 按 kind 分流
+（zerg_scorer_model→ScorerModel；zerg_pairwise_ranking_model_v1→
+PairwiseRankModel，互不混用）；统一评分字段
+score/supported/confidence/rank/model_kind/fallback_reason；
+correction 只有 veto 语义（`correction_veto_scores`，预测>0 表示冻结旧模型
+赢家为负收益，绝不作为偏好排序）；模型记录新增
+`model_id`/`parent_model_id`；导出支持 `--out-dir <base>/<model_id>/`；
+上下文不匹配加载即拒。
+
+**E. 可复现性**：scene_config 在 episode 开局快照含出生位置并整局冻结
+（来源标注 `canonical_hash+birth_positions` / manifest）；`write_run_manifest()`
+输出 run 级可复现清单（身份/场景/指纹/上下文/config digest）。
+
+Tree Score Gate（V1.3）十项检查：模型存在/目标可排序(gain|ranking|imitation，
+correction 不可用于换选)/kind 受支持/源码指纹一致/特征 schema 一致/全部
+分支携带完整计划对象/分支属于当前 Snapshot/BASE 在列/Validator 可用/
+Manager 状态可更新——任一失败回退 BASE。默认 `mode=off` 不变。

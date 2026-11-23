@@ -393,3 +393,140 @@ def collect_step_candidates(summary: Dict[str, Any], snapshot, context=None,
     result[FAMILY_JOINT_PLAN] = joint_candidates_from_summary(
         summary, snapshot, context=context, payload=payload, schema=schema)
     return result
+
+
+# -- V1.3 Phase 2: complete-branch candidates from the Coordinator cache ----
+
+def build_branch_candidates(manager, snapshot, summary: Dict[str, Any],
+                            max_branches: int = 8
+                            ) -> List["CompletePlanCandidate"]:
+    """Task 2.1/2.2: export the Coordinator's OWN complete legal branches as
+    :class:`CompletePlanCandidate` records.
+
+    Source of truth: ``manager.coordinator._cache`` — ``evaluate_once``
+    caches ONLY branches that passed ``validate_actions``/``validate_plans``
+    at scoring time, and every entry carries THIS step's real
+    ``CandidatePlan`` objects (plans / actions / claims / dependencies /
+    commitment / atomic flags all travel on the objects). Nothing is
+    re-generated, no skill re-runs, no fabricated plans from JSON actions:
+    branches with no cached objects simply do not exist here. The selected
+    branch (actions == summary actions) is the BASE.
+    """
+    pending = getattr(manager, "_pending_commit", None)
+    if not pending:
+        return []
+    snapshot_id = int(getattr(snapshot, "snapshot_id", 0) or 0)
+    final_actions = dict(summary.get("actions", {}) or {})
+    chosen = (summary.get("chosen_plans") or [{}])[0] \
+        if summary.get("chosen_plans") else {}
+    branches: List[CompletePlanCandidate] = []
+
+    def _entry_to_branch(candidate_id, plans, actions, score, execution):
+        claims: Dict[str, Any] = {"controls": [], "fire": [], "healing": [],
+                                  "space": []}
+        dependencies: List[Dict[str, Any]] = []
+        for plan in plans:
+            plan_claims = getattr(plan, "claims", None)
+            if plan_claims is not None:
+                claims["controls"].extend(
+                    getattr(plan_claims, "controls", ()) or ())
+                claims["fire"].extend(getattr(plan_claims, "fire", ()) or ())
+                claims["healing"].extend(
+                    getattr(plan_claims, "healing", ()) or ())
+                claims["space"].extend(getattr(plan_claims, "space", ()) or ())
+            dependencies.extend(
+                {"kind": getattr(d, "kind", ""),
+                 "refs": list(getattr(d, "refs", ()) or ())}
+                for d in getattr(plan, "dependencies", ()) or ())
+        duties = dict((execution or {}).get("actors") or {})
+        return CompletePlanCandidate(
+            candidate_id=candidate_id,
+            snapshot_id=snapshot_id,
+            plans=list(plans),
+            actions=dict(actions),
+            resource_claims=claims,
+            dependencies=dependencies,
+            execution_duties=duties,
+            rule_score=float(score) if isinstance(score, (int, float))
+            else None,
+            candidate_features={},
+            legal=True,
+            source_plan_ids=[str(getattr(p, "proposal_id", ""))
+                             for p in plans],
+            candidate_skill="joint",
+            plan_objects_available=bool(plans))
+
+    # BASE: the branch the Coordinator actually returned (pending commit) —
+    # always authoritative and complete.
+    score = chosen.get("score")
+    branches.append(_entry_to_branch(
+        "joint_base", list(pending[1] or ()), final_actions, score,
+        (summary.get("execution_duties") or {})))
+
+    # Alternatives: the Coordinator's own validated evaluate-once cache,
+    # excluding the returned branch (deduplicated by actions).
+    coordinator = getattr(manager, "coordinator", None)
+    cache = getattr(coordinator, "_cache", None)
+    seen_action_keys = {tuple(sorted(final_actions.items()))}
+    for entry in (cache.values() if cache else ()):
+        actions = dict(getattr(entry, "actions", {}) or {})
+        key = tuple(sorted(actions.items()))
+        if not actions or key in seen_action_keys:
+            continue
+        seen_action_keys.add(key)
+        branches.append(_entry_to_branch(
+            f"joint_alt_{len(branches)}", list(getattr(entry, "plans", ()) or ()),
+            actions, getattr(entry, "score", None),
+            getattr(entry, "execution", {})))
+    return branches[:max_branches]
+# BASE first; keep the declared rule order (coordinator rank) after it.
+    branches.sort(key=lambda b: 0 if b.candidate_id == "joint_base" else 1)
+    return branches[:max_branches]
+
+
+def branch_scoring_features(branches: List["CompletePlanCandidate"],
+                            summary: Dict[str, Any]) -> None:
+    """Attach B-class candidate features to each branch in place.
+
+    Features describe the branch itself: controlled-actor coverage, action
+    change count vs the previous step, declared effect totals from its real
+    plans, execution duty mix and the rule score. No realised outcome ever
+    enters this dict.
+    """
+    previous = {}
+    for branch in branches:
+        actors = sorted({actor for plan in branch.plans
+                         for actor in getattr(plan, "controlled_actors", ())})
+        changes = sum(1 for actor, action in branch.actions.items()
+                      if previous.get(actor) != action)
+        damage = loss = 0.0
+        goals = set()
+        for plan in branch.plans:
+            for effect in getattr(plan, "expected_effects", ()) or ():
+                amount = getattr(effect, "amount", None)
+                if amount is None:
+                    continue
+                if getattr(effect, "kind", "") == "damage":
+                    damage += float(amount)
+                elif getattr(effect, "kind", "") == "loss":
+                    loss += float(amount)
+            goals.add(str(getattr(plan, "goal_kind", "")))
+        duty_kinds = sorted({row.get("kind") for row
+                             in branch.execution_duties.values()
+                             if isinstance(row, dict) and row.get("kind")})
+        branch.candidate_features = {
+            "candidate_skill": 0.0,          # joint branch: fixed slot
+            "candidate_phase": 0.0,
+            "candidate_actor_count": float(len(actors)),
+            "candidate_action_change_count": float(changes),
+            "candidate_target_type": 0.0,
+            "candidate_predicted_damage": damage,
+            "candidate_predicted_loss": loss,
+            "candidate_risk": 0.0,
+            "candidate_support_gain": 0.0,
+            "candidate_progress": 0.0,
+            "candidate_resource_conflict": 0.0,
+            "candidate_execution_duty": float(len(duty_kinds)),
+        }
+        branch.source_plan_ids = [str(getattr(p, "proposal_id", ""))
+                                  for p in branch.plans]

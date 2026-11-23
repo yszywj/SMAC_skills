@@ -38,7 +38,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .candidates import CompletePlanCandidate, joint_candidates_from_summary
+from .candidates import CompletePlanCandidate, branch_scoring_features, \
+    build_branch_candidates, joint_candidates_from_summary
 from .dataset import DecisionRecordWriter, build_decision_record, \
     dumps_key, finalise_outcome, record_key
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema, StateFeatureExtractor
@@ -46,8 +47,10 @@ from .fingerprints import assert_model_source, execution_context, \
     execution_context_hash, runtime_policy_contract, source_hash
 from .proposal_collector import PRIORITY_SKILLS, SkillProposalCollector
 from .schema import digest as canonical_digest, load_json
+from .dataset import proposal_group_id, _matches_final_actions
 from .scorer import ScorerModel, score_candidates, score_routed
-from .selector import apply_complete_plan, apply_selected_plan, select_skill_plan
+from .selector import apply_complete_plan, select_complete_plan, \
+    select_skill_plan
 
 MODES = ("off", "shadow", "tree_score")
 RUNTIME_CONFIG_KIND = "zerg_tree_runtime_config"
@@ -58,7 +61,7 @@ DEFAULT_SCORER_SLOTS = ("zergling_scorer", "hydralisk_scorer",
                         "baneling_scorer", "joint_scorer")
 EVENT_KINDS = ("proposed", "selected", "submitted", "committed",
                "rejected", "episode_finished")
-SORTABLE_MODEL_TARGETS = ("gain", "ranking", "imitation", "correction")
+SORTABLE_MODEL_TARGETS = ("gain", "ranking", "imitation")
 
 
 _RUN_SEQ = {"n": 0}
@@ -128,19 +131,30 @@ def actions_hash(actions: Any) -> str:
     return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
-def scene_config_identity(snapshot, map_field: str) -> Tuple[str, str]:
+def scene_config_identity(snapshot, map_field: str,
+                          include_positions: bool = False
+                          ) -> Tuple[str, str]:
     """Task 1.2: canonical scene-config hash over everything that actually
     shapes the game: map, step_mul, roster (actor -> type id + birth
     position), declared enemy count and search location. Map name or unit
     count alone is never the identity."""
     allies = getattr(snapshot, "allies", {}) or {}
-    # Composition identity only: unit types of the declared roster. Current
-    # positions / health / remaining steps are PER-STEP STATE and must never
-    # leak into the scene-config identity (birth positions belong to an
-    # experiment-manifest supplied config).
-    roster = sorted((actor, int(getattr(unit, "unit_type_id", 0) or 0))
-                    for actor, unit in allies.items()
-                    if getattr(unit, "alive", True))
+    # Composition identity: unit types of the declared roster. Health and
+    # remaining steps are PER-STEP STATE and never enter. Birth positions
+    # are included ONLY for the episode's opening snapshot (snapshot_id==1)
+    # and are then frozen per episode — current mid-battle positions are
+    # never used (Task 5.3).
+    if include_positions:
+        roster = sorted(
+            (actor, int(getattr(unit, "unit_type_id", 0) or 0),
+             [round(float(v), 3) for v in (getattr(unit, "position", ())
+                                           or ())])
+            for actor, unit in allies.items()
+            if getattr(unit, "alive", True))
+    else:
+        roster = sorted((actor, int(getattr(unit, "unit_type_id", 0) or 0))
+                        for actor, unit in allies.items()
+                        if getattr(unit, "alive", True))
     identity = {
         "map": str(map_field),
         "step_mul": int(getattr(snapshot, "step_mul", 0) or 0),
@@ -189,6 +203,8 @@ class ZergTreeRuntime:
         self.schema = schema
         self.tactical_config = tactical_config or {}
         self.mode = self.config["mode"]
+        self._started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                         time.gmtime())
         self.extractor = StateFeatureExtractor(schema)
         # Task 1.1: run identity lives and dies with this runtime object.
         self._run_id = str(self.config.get("run_id") or generate_run_id())
@@ -270,13 +286,20 @@ class ZergTreeRuntime:
         if configured and configured.get("scene_config_id"):
             return str(configured["scene_config_id"]), \
                 str(configured.get("source", "experiment_manifest"))
-        identity = scene_config_identity(snapshot, map_field)
         episode = getattr(self, "_pending_identity", None)
         episode_key = episode[1] if episode else None
         if episode_key:
             cached = self._scene_cache.get(episode_key)
             if cached is not None:
                 return cached
+        # Birth positions enter ONLY at the episode's opening snapshot; the
+        # identity is then frozen for the whole episode.
+        include_positions = int(getattr(snapshot, "snapshot_id", 0) or 0) == 1
+        identity = scene_config_identity(snapshot, map_field,
+                                         include_positions=include_positions)
+        identity = (identity[0], identity[1] +
+                    ("+birth_positions" if include_positions else ""))
+        if episode_key:
             self._scene_cache[episode_key] = identity
         return identity
 
@@ -419,6 +442,32 @@ class ZergTreeRuntime:
     @property
     def source_fingerprint(self) -> Optional[str]:
         return self._source_fingerprint
+
+    def write_run_manifest(self) -> Optional[Path]:
+        """Task 5.8: a reproducibility manifest for this run — identity,
+        scene configs seen so far, fingerprints, mode and config digest."""
+        if self.mode == "off":
+            return None
+        records_path = self.config.get("records_path") or DEFAULT_RECORDS_PATH
+        resolved = Path(records_path)
+        if not resolved.is_absolute():
+            resolved = self.workspace / resolved
+        manifest = {
+            "kind": "zerg_run_manifest_v1",
+            "run_id": self._run_id,
+            "mode": self.mode,
+            "source_fingerprint": self._source_fingerprint,
+            "execution_context_hash": self._context_hash,
+            "episode_ids_seen": sorted(self._episode_seen),
+            "scene_configs": dict(self._scene_cache),
+            "config_digest": canonical_digest(self.config),
+            "started_at": getattr(self, "_started_at", None),
+        }
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        out = resolved.parent / f"run_manifest_{self._run_id}.json"
+        out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                       encoding="utf-8")
+        return out
 
     # -- sinks --------------------------------------------------------------
     def _writer_for(self) -> DecisionRecordWriter:
@@ -602,6 +651,37 @@ class ZergTreeRuntime:
                         self.stats["routed_candidates"].get(slot, 0) + count
         meta["route_counts"] = route_counts
         meta["scores"] = [row.to_record() for row in scores]
+
+        # ---- Phase 1: A-class (skill-internal) shadow scoring -------------
+        # The collector holds THIS decision step's proposals keyed by
+        # (run_id, episode_id, snapshot_id, game_loop); candidates_for
+        # validates the identity, so a stale step's plans can never be
+        # scored. propose() is NOT called again; candidates and actions are
+        # untouched (shadow).
+        snapshot_id = int(getattr(snapshot, "snapshot_id", 0) or 0)
+        game_loop = int(getattr(snapshot, "game_loop", 0) or 0)
+        internal_by_skill = {}
+        if self._active_collector is not None and snapshot is not None:
+            try:
+                internal_by_skill = self._active_collector.candidates_for(
+                    snapshot_id, game_loop)
+            except Exception:
+                internal_by_skill = {}
+        internal_flat = [c for items in internal_by_skill.values()
+                         for c in items]
+        internal_scores, internal_routes = (score_routed(
+            self._last_state_features or {}, internal_flat, models,
+            schema=self.schema) if internal_flat else ([], {}))
+        if isinstance(self.stats.get("routed_candidates"), dict):
+            for slot, count in internal_routes.items():
+                if count:
+                    self.stats["routed_candidates"][slot] = \
+                        self.stats["routed_candidates"].get(slot, 0) + count
+        meta["internal_route_counts"] = internal_routes
+        meta["internal_scores"] = [row.to_record() for row in internal_scores]
+        meta["internal_candidates"] = {
+            skill: [c.to_record() for c in items]
+            for skill, items in internal_by_skill.items()}
         supported = [row for row in scores if row.supported]
         predicted = None
         if supported:
@@ -624,9 +704,16 @@ class ZergTreeRuntime:
                        n_candidates=len(candidates),
                        execution_context_hash=self._context_hash)
 
-        # Task 4.1: BASE complete-plan candidate (REAL Coordinator plans).
-        base_complete = self._base_complete_candidate(
-            manager, snapshot, summary, candidates, teacher)
+        # ---- Phase 2: complete branches from the Coordinator's own
+        # validated cache (real CandidatePlan objects; BASE first).
+        branches = []
+        if snapshot is not None:
+            try:
+                branches = build_branch_candidates(manager, snapshot, summary)
+                branch_scoring_features(branches, summary)
+            except Exception:
+                branches = []
+        base_complete = branches[0] if branches else None
 
         selected = teacher
         final_actions_map = {f"u{i}": action for i, action
@@ -634,30 +721,35 @@ class ZergTreeRuntime:
         execution_status = "pending"
         if self.mode == "tree_score":
             selector_config = self.config.get("selector", {})
-            if not self._tree_score_ready(manager, model, base_complete):
+            model = self.scorer_model("joint_scorer")
+            ranking_model = None
+            from .scorer import PairwiseRankModel
+            if isinstance(model, PairwiseRankModel):
+                ranking_model = model       # Task 4.3: ranking -> tournament
+            if not self._tree_score_ready(manager, model, base_complete,
+                                          branches):
                 self.stats["tree_score_blocked"] += 1
                 self.log_event("rejected", episode_id=episode,
                                reason="tree_score_gate_failed",
+                               gate=dict(self.last_tree_score_gate),
                                fallback="base")
             else:
-                decision = select_skill_plan(
-                    self._last_state_features or {}, candidates, model=model,
+                # Task 2.3/2.4: the OFFICIAL B-class replacement path is
+                # complete branches only — summary-level action lists are
+                # never used to bypass the plan checks.
+                decision = select_complete_plan(
+                    branches, self._last_state_features or {},
+                    model=(ranking_model or model),
                     min_gain=float(selector_config.get("min_gain", 0.0)),
                     tie_tolerance=float(selector_config.get(
                         "tie_tolerance", 1e-9)),
                     schema=self.schema)
                 meta["selection"] = {k: v for k, v in decision.items()
                                      if k != "scores"}
-                selected_candidate = next(
-                    (c for c in candidates
-                     if c.candidate_id ==
-                     decision.get("selected_candidate_id")), None)
-                if decision.get("changed") and selected_candidate is not None:
-                    # Summary-level candidates carry no complete branch
-                    # objects: apply_* refuses and we fall back to BASE —
-                    # selected_candidate then records the ACTUAL BASE.
-                    replacement = apply_selected_plan(
-                        selected_candidate, manager, context=context,
+                selected_branch = decision.get("selected")
+                if decision.get("changed") and selected_branch is not None:
+                    replacement = apply_complete_plan(
+                        selected_branch, manager, context=context,
                         memory=getattr(manager, "memory", None))
                     meta["replacement"] = {
                         k: v for k, v in replacement.items()
@@ -672,7 +764,7 @@ class ZergTreeRuntime:
                                 manager, replacement["final_plans"],
                                 swapped, summary)
                             rule_actions = swapped
-                            selected = selected_candidate.candidate_id
+                            selected = selected_branch.candidate_id
                             self.stats["tree_score_changes"] += 1
                             final_actions_map = dict(
                                 replacement["final_actions"])
@@ -692,7 +784,8 @@ class ZergTreeRuntime:
                                            reason="action_list_incomplete",
                                            fallback="base")
                     else:
-                        # Phase 7 fix: record the ACTUAL fallback target.
+                        # Replacement failed: record the ACTUAL BASE as the
+                        # final selection.
                         selected = teacher
                         self.stats["tree_score_fallbacks"] += 1
                         self.log_event("rejected", episode_id=episode,
@@ -705,7 +798,8 @@ class ZergTreeRuntime:
             teacher_choice=teacher, model_scores=meta["scores"],
             selected_candidate=selected, final_actions=final_actions_map,
             execution_status=execution_status,
-            skill_proposals=self._skill_proposals(snapshot))
+            skill_proposals=self._enriched_skill_proposals(
+                snapshot, meta, final_actions_map, execution_status))
         meta["selected_candidate"] = selected
         return rule_actions, summary, meta
 
@@ -752,31 +846,39 @@ class ZergTreeRuntime:
             candidate_skill=str(chosen.get("skill") or "joint"),
             plan_objects_available=True)
 
-    # -- tree_score gate (Task 4.4) -----------------------------------------
-    def _tree_score_ready(self, manager, model: Optional[ScorerModel],
-                          base_complete: Optional[CompletePlanCandidate]
+    # -- tree_score gate (V1.3 Task 2.6) ------------------------------------
+    def _tree_score_ready(self, manager, model,
+                          base_complete: Optional[CompletePlanCandidate],
+                          branches: Optional[List[CompletePlanCandidate]] = None
                           ) -> bool:
+        """Every condition must hold; any failure means Tree Score falls
+        back to BASE (or stays blocked). Correction models are veto
+        instruments, not ranking instruments for plan replacement."""
+        snapshot_id = getattr(self._read_snapshot(manager),
+                              "snapshot_id", None)
         checks = {
             "model_loaded": model is not None,
-            "model_target_sortable": model is not None
-            and model.record.get("target") in SORTABLE_MODEL_TARGETS,
+            "model_target_sortable": model is not None and
+            model.record.get("target") in ("gain", "ranking", "imitation"),
+            "model_kind_supported": model is not None
+            and type(model).__name__ in ("ScorerModel", "PairwiseRankModel"),
             "source_fingerprint_verified": self._source_fingerprint is not None,
             "feature_schema_verified": True,   # enforced at model load time
-            "complete_plan_objects": bool(base_complete
-                                          and base_complete.plans
-                                          and base_complete.
-                                          plan_objects_available),
+            "complete_plan_objects": bool(branches)
+            and all(b.plan_objects_available and b.plans for b in branches),
+            "branches_current_snapshot": bool(branches) and all(
+                b.snapshot_id == snapshot_id for b in branches),
+            "base_branch_present": bool(branches)
+            and branches[0].candidate_id == "joint_base",
             "validator_available":
                 getattr(manager, "evaluator", None) is not None,
             "manager_state_updatable": getattr(manager, "_pending_commit",
                                                None) is not None
             and getattr(manager, "_cache", None) is not None,
+            "replacement_interface_available": True,   # apply_complete_plan
         }
-        if not all(checks.values()):
-            self.last_tree_score_gate = checks
-            return False
         self.last_tree_score_gate = checks
-        return True
+        return all(checks.values())
 
     last_tree_score_gate: Dict[str, bool] = {}
 
@@ -784,6 +886,11 @@ class ZergTreeRuntime:
     @staticmethod
     def _update_manager_plan_state(manager: Any, plans, actions_list,
                                    summary: Dict[str, Any]) -> None:
+        if isinstance(actions_list, dict):
+            n = max((int(k[1:]) for k in actions_list
+                     if isinstance(k, str) and k.startswith("u")
+                     and k[1:].isdigit()), default=-1) + 1
+            actions_list = [actions_list.get(f"u{i}") for i in range(n)]
         pending = getattr(manager, "_pending_commit", None)
         if pending:
             snapshot, _, micro_actions, risk_now, context = pending
@@ -804,6 +911,81 @@ class ZergTreeRuntime:
                  "rationale": getattr(p, "rationale", "")
                  or "tree_score_replacement"}
                 for p in plans]
+
+    def _enriched_skill_proposals(self, snapshot, meta,
+                                  final_actions: Dict[str, int],
+                                  execution_status: str) -> Optional[Dict]:
+        """Task 1.3: per-A-candidate shadow log. Candidates keep their
+        decision-group identity; model scores, in-group predicted rank,
+        teacher (unique final-action match) and execution facts are added —
+        an unselected candidate is recorded as unselected, never as an
+        error."""
+        collector = self._active_collector
+        if collector is None or snapshot is None:
+            return None
+        try:
+            proposals = collector.records_for(int(snapshot.snapshot_id),
+                                              int(snapshot.game_loop))
+        except Exception:
+            return None
+        if not proposals:
+            return proposals
+        score_by_id = {row["candidate_id"]: row
+                       for row in meta.get("internal_scores", [])}
+        episode = meta.get("episode_id") or ""
+        run_id = self._run_id
+        snapshot_id = int(getattr(snapshot, "snapshot_id", 0) or 0)
+        for skill, candidates in proposals.items():
+            # group candidates by proposal task, then rank inside groups
+            groups: Dict[str, List[Dict[str, Any]]] = {}
+            for candidate in candidates:
+                groups.setdefault(proposal_group_id(candidate),
+                                  []).append(candidate)
+            for members in groups.values():
+                scored = []
+                for candidate in members:
+                    row = score_by_id.get(candidate["candidate_id"])
+                    supported = bool(row and row.get("supported"))
+                    raw_score = row.get("score") if row else None
+                    score = (float(raw_score)
+                             if isinstance(raw_score, (int, float))
+                             else None)
+                    matched = _matches_final_actions(candidate, final_actions)
+                    candidate["final_action_match"] = matched
+                    candidate["teacher"] = None        # resolved below
+                    candidate["execution_status"] = execution_status
+                    candidate["shadow"] = {
+                        "model_score": score,
+                        "model_supported": supported,
+                        "model_confidence": float(row["confidence"])
+                        if row and isinstance(row.get("confidence"),
+                                              (int, float)) else None,
+                        "rule_score": candidate.get("rule_score"),
+                        "reason": (row or {}).get("reason",
+                                                  "no_model_rule_fallback"),
+                    }
+                    scored.append((supported, score, candidate))
+                # predicted rank: supported first, score desc, rule order tie
+                order = sorted(
+                    range(len(scored)),
+                    key=lambda i: (not scored[i][0],
+                                   -(scored[i][1] if scored[i][1] is not None
+                                     else -1e18),
+                                   i))
+                for rank_position, index in enumerate(order):
+                    scored[index][2]["shadow"]["predicted_rank"] = \
+                        rank_position
+                matched_ids = [scored[i][2]["candidate_id"] for i
+                               in range(len(scored))
+                               if scored[i][2]["final_action_match"]]
+                teacher_id = matched_ids[0] if len(matched_ids) == 1 else None
+                for _, _, candidate in scored:
+                    candidate["teacher"] = teacher_id == \
+                        candidate["candidate_id"] if teacher_id else None
+                    candidate["decision_group_id"] = (
+                        f"{run_id}:{episode}:{snapshot_id}:{skill}:"
+                        f"{proposal_group_id(candidate)}")
+        return proposals
 
     def _skill_proposals(self, snapshot) -> Optional[Dict]:
         collector = self._active_collector

@@ -64,6 +64,9 @@ class CandidateScores:
     missing_count: int = 0
     missing_ratio: float = 0.0
     missing_features: Optional[List[str]] = None
+    rank: Optional[int] = None
+    model_kind: Optional[str] = None
+    fallback_reason: Optional[str] = None
 
     def to_record(self) -> Dict[str, Any]:
         return {
@@ -258,7 +261,10 @@ def score_candidates(state_features: Dict[str, Any],
         row.reason = "model_score" if estimate["supported"] \
             else "leaf_below_support_rule_confidence"
         results.append(row)
-    return results
+    # Task 4.2: uniform interface — stamp rank/model_kind whenever a model
+    # produced the scores.
+    return uniform_scores(results,
+                          model.record.get("kind", "zerg_scorer_model"))
 
 
 def rank_by_scores(candidates: Sequence[ZergCandidate],
@@ -470,3 +476,121 @@ def score_routed(state_features: Dict[str, Any],
         scores.extend(score_candidates(state_features, items, model=model,
                                        schema=schema))
     return scores, counts
+
+
+# -- V1.3 Phase 4: unified model typing, loading and scoring ----------------
+
+MODEL_LOADERS = {
+    "zerg_scorer_model": ScorerModel,
+    "zerg_pairwise_ranking_model_v1": PairwiseRankModel,
+}
+
+
+def load_zerg_model(source):
+    """Task 4.1: the ONE model-loading entry. Dispatches on the record's
+    ``kind`` — a ranking record NEVER becomes a ScorerModel and vice versa.
+    ``source`` is a path to a model JSON or an already-loaded dict."""
+    from pathlib import Path as _Path
+    from .schema import load_json
+    record = load_json(source) if isinstance(source, (str, _Path)) else source
+    kind = record.get("kind")
+    loader = MODEL_LOADERS.get(kind)
+    if loader is None:
+        raise ValueError(f"unsupported model kind {kind!r}; expected one of "
+                         f"{sorted(MODEL_LOADERS)}")
+    return loader(record)
+
+
+def _uniform_row(candidate_id: str, score: float, supported: bool,
+                 confidence: float, rank: int, model_kind: str,
+                 fallback_reason: Optional[str], rule_score=None,
+                 **extra) -> CandidateScores:
+    row = CandidateScores(
+        candidate_id=candidate_id, score=score, supported=supported,
+        confidence=confidence, reason=fallback_reason or "model_score",
+        rule_score=rule_score)
+    row.rank = rank
+    row.model_kind = model_kind
+    row.fallback_reason = fallback_reason
+    for key, value in extra.items():
+        setattr(row, key, value)
+    return row
+
+
+def uniform_scores(scores: Sequence[CandidateScores],
+                   model_kind: str) -> List[CandidateScores]:
+    """Task 4.2: fill the uniform fields (rank / model_kind /
+    fallback_reason) on score rows, descending by score with input order as
+    the deterministic tie-break."""
+    decorated = []
+    for index, row in enumerate(scores):
+        decorated.append((index, row))
+    order = sorted(range(len(scores)),
+                   key=lambda i: (not scores[i].supported,
+                                  -(scores[i].score
+                                    if isinstance(scores[i].score,
+                                                  (int, float)) else -1e18),
+                                   i))
+    for rank_position, index in enumerate(order):
+        row = scores[index]
+        row.rank = rank_position
+        row.model_kind = model_kind
+        if not row.supported:
+            row.fallback_reason = row.reason
+    return scores
+
+
+def correction_veto_scores(model: ScorerModel,
+                           flat_by_candidate: Dict[str, Dict[str, float]]
+                           ) -> Dict[str, Dict[str, Any]]:
+    """Task 4.3: correction models have VETO semantics, never ranking
+    semantics. ``veto_target = -winner_gain`` of the frozen old model: a
+    positive prediction marks states where following the old model's choice
+    had NEGATIVE real gain. Output per candidate: {'value', 'veto',
+    'supported'} — runtime selection never consumes this as a preference."""
+    if model.record.get("target") != "correction":
+        raise ValueError("correction_veto_scores requires a correction model")
+    out: Dict[str, Dict[str, Any]] = {}
+    for cid, flat in flat_by_candidate.items():
+        try:
+            leaves = model.estimate(flat)
+        except Exception:
+            leaves = []
+        value = float(leaves[0]["value"]) if leaves else None
+        supported = bool(leaves and leaves[0].get("supported"))
+        out[cid] = {"value": value, "supported": supported,
+                    "veto": bool(value is not None and value > 0)}
+    return out
+
+
+def pairwise_uniform_scores(model: PairwiseRankModel,
+                            flat_by_candidate: Dict[str, Dict[str, float]],
+                            rule_positions: Optional[Dict[str, int]] = None,
+                            min_gain: float = 0.0
+                            ) -> List[CandidateScores]:
+    """Task 4.2: the ranking model's uniform score view — one
+    CandidateScores row per candidate with tournament score, in-group rank
+    (ties break by rule position), and the model kind stamped."""
+    tournament = model.score_candidates(flat_by_candidate)
+    ids = list(flat_by_candidate)
+    rows = []
+    for cid in ids:
+        entry = tournament.get(cid, {})
+        row = CandidateScores(
+            candidate_id=cid,
+            score=float(entry.get("score", 0.0)),
+            supported=bool(entry.get("supported", False)),
+            confidence=1.0 if entry.get("supported") else 0.0,
+            reason="ranking_tournament" if entry.get("supported")
+            else "ranking_unsupported_rule_fallback")
+        row.wins = entry.get("wins", 0)
+        row.losses = entry.get("losses", 0)
+        rows.append(row)
+    order = sorted(range(len(rows)),
+                   key=lambda i: (not rows[i].supported, -rows[i].score,
+                                  (rule_positions or {}).get(
+                                      rows[i].candidate_id, 10 ** 6)))
+    for rank_position, index in enumerate(order):
+        rows[index].rank = rank_position
+        rows[index].model_kind = "zerg_pairwise_ranking_model_v1"
+    return rows

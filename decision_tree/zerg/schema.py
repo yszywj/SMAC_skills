@@ -440,6 +440,9 @@ def validate_scorer_model(model: Dict[str, Any],
         _identifier(model["source_fingerprint"], "source_fingerprint")
     if model.get("dataset_hash") is not None:
         _identifier(model["dataset_hash"], "dataset_hash")
+    for field_name in ("model_id", "parent_model_id"):
+        if model.get(field_name) is not None:
+            _identifier(model[field_name], field_name)
     if model.get("validation_report") is not None \
             and not isinstance(model["validation_report"], dict):
         raise ValueError("validation_report must be an object when present")

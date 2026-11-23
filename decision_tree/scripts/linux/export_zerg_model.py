@@ -39,7 +39,10 @@ def main() -> int:
                         help="trained zerg_scorer_model JSON (or '-' for a "
                              "training run output)")
     parser.add_argument("--scorer", required=True, choices=DEFAULT_SCORER_SLOTS)
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--out", default=None,
+                        help="explicit output path (overrides --out-dir)")
+    parser.add_argument("--out-dir", default=None,
+                        help="base dir; writes <out-dir>/<model_id>/model.json")
     parser.add_argument("--workspace", default=str(ROOT))
     parser.add_argument("--base-dir", default="skills/tactical_v1")
     parser.add_argument("--overlay-dir",
@@ -81,7 +84,11 @@ def main() -> int:
     print(json.dumps(fingerprint, indent=2))
     if args.dry_run:
         return 0
-    out = Path(args.out)
+    out = Path(args.out) if args.out else None
+    if args.out_dir:
+        # Task 5.7: each model version gets its own output directory.
+        model_id = model.get("model_id") or fingerprint["model_sha256"][:16]
+        out = Path(args.out_dir) / str(model_id) / "model.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(dumps(model), encoding="utf-8")
     print(f"deployable model written: {out}")

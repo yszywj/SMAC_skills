@@ -472,7 +472,12 @@ class ZergTrainingBackend:
             record["missing_imputation"] = body["missing_imputation"]
         record["validation_report"] = report.get("validation", {})
         record = validate_scorer_model(record, self.schema)
+        record["model_id"] = f"mdl_{canonical_digest(record)[:16]}"
+        if target == "correction" and old_model is not None:
+            record["parent_model_id"] = old_model.get("model_id")
+        record = validate_scorer_model(record, self.schema)
         report["model_sha256"] = canonical_digest(record)
+        report["model_id"] = record["model_id"]
         return record, report
 
     # -- A-class internal scorers (Phase 3.4/3.5) ---------------------------
@@ -606,7 +611,12 @@ class ZergTrainingBackend:
         record["inactive_features"] = report.pop("inactive_features", [])
         record["validation_report"] = report.get("validation", {})
         record = validate_scorer_model(record, self.schema)
+        record["model_id"] = f"mdl_{canonical_digest(record)[:16]}"
+        if target == "correction" and old_model is not None:
+            record["parent_model_id"] = old_model.get("model_id")
+        record = validate_scorer_model(record, self.schema)
         report["model_sha256"] = canonical_digest(record)
+        report["model_id"] = record["model_id"]
         return record, report
 
     # -- pairwise ranking (Phase 6.3) ---------------------------------------
@@ -679,7 +689,10 @@ class ZergTrainingBackend:
         }
         record["validation_report"] = report["validation"]
         record = validate_ranking_model(record, self.schema)
+        record["model_id"] = f"mdl_{canonical_digest(record)[:16]}"
+        record = validate_ranking_model(record, self.schema)
         report["model_sha256"] = canonical_digest(record)
+        report["model_id"] = record["model_id"]
         return record, report
 
     def _ranking_report(self, body, feature_names, pairs) -> Dict[str, Any]:
