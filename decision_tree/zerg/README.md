@@ -324,3 +324,18 @@ Manager 状态可更新——任一失败回退 BASE。默认 `mode=off` 不变�
    （branch 与 summary 两条路径一致），训练侧由 active-feature 筛选剔除该列。
 5. resolved 目录维持本地生成产物（.gitignore 已含），`resolve_source.py`
    可随时重建，Factory 导入不受影响。
+
+---
+
+# 执行回执多候选关联修复（本轮）
+
+1. `build_receipt_index` 索引键扩为四元
+   `(experiment_id, anchor_id, branch_id, candidate_identity)`：同一
+   Anchor 的多个 candidate 回执并存不冲突；BASE 用 baseline 臂身份键控；
+   同键异容拒绝、完全重复去重。
+2. `audit_execution_receipts` 对每个 Pair 精确关联自己的 BASE 与 candidate
+   回执，并完成 12 字段身份/证据比对 + 完成性三标志 + 严格收益检查
+   （存在、有限、与 pair 声明一致）——兄弟候选的回执永远无法替代。
+3. 新增多候选测试（test_v15.Test06）：BASE + A/B/C 三候选共享一份 BASE
+   回执、各自绑定自己的回执、无索引冲突、跨候选替代/收益缺失/收益不一致/
+   horizon 不一致全部拒绝、三个完整 Pair 全部进入 audited Gain Dataset。

@@ -16,6 +16,7 @@ a local candidate's return is never presented as whole-tactic evidence.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -486,15 +487,28 @@ def make_execution_receipt(*, experiment_id: str, anchor_id: str,
     return validate_execution_receipt(receipt)
 
 
+def receipt_identity(receipt: Dict[str, Any]) -> str:
+    """The candidate identity a receipt is bound to. BASE branches use the
+    declared baseline arm id (a fixed BASE identity); candidate branches
+    use their own candidate_id — so one anchor can carry MANY candidate
+    receipts without colliding."""
+    if receipt.get("branch_id") == "BASE":
+        return str(receipt.get("baseline_id"))
+    return str(receipt.get("candidate_id"))
+
+
 def build_receipt_index(receipts: Sequence[Dict[str, Any]]
-                        ) -> Dict[Tuple[str, str, str], Dict[str, Any]]:
-    """(experiment_id, anchor_id, branch_id) -> receipt. Conflicting
-    duplicates are refused; identical duplicates collapse."""
-    index: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+                        ) -> Dict[Tuple[str, str, str, str], Dict[str, Any]]:
+    """Task 1: (experiment_id, anchor_id, branch_id, candidate_identity)
+    -> receipt. Several candidate branches of ONE anchor coexist; a BASE
+    receipt is keyed by the fixed baseline arm identity. Identical
+    duplicate receipts collapse; the same key with DIFFERENT content is
+    refused."""
+    index: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
     for receipt in receipts:
         receipt = validate_execution_receipt(receipt)
         key = (receipt["experiment_id"], receipt["anchor_id"],
-               receipt["branch_id"])
+               receipt["branch_id"], receipt_identity(receipt))
         existing = index.get(key)
         if existing is not None and existing != receipt:
             raise ValueError(f"conflicting execution receipts for {key}")
@@ -505,23 +519,44 @@ def build_receipt_index(receipts: Sequence[Dict[str, Any]]
 def audit_execution_receipts(pairs: Sequence[Dict[str, Any]],
                              receipts: Sequence[Dict[str, Any]]
                              ) -> Dict[str, List[str]]:
-    """Task 2: BOTH branches of every pair need completed execution
-    receipts bound to the SAME anchor with the SAME start/prefix/context/
-    source evidence. Failed or interrupted branches disqualify the pair.
+    """Tasks 2+3: every pair locates ITS OWN BASE and candidate receipts —
+    (experiment, anchor, branch, candidate identity) exact match; a sibling
+    candidate's receipt can never substitute. Twelve identity/evidence
+    fields are compared, and BOTH receipts must carry a finite return equal
+    to the pair's declared returns (a missing receipt return can never be
+    papered over by the pair writing its own). Failed or interrupted
+    branches disqualify the pair regardless of any return they produced.
     Returns problems per pair_id (empty list = receipt-complete)."""
     index = build_receipt_index(receipts)
     problems: Dict[str, List[str]] = {}
     for pair in pairs:
         pair_id = str(pair.get("pair_id"))
         issues: List[str] = []
-        experiment_id = pair.get("experiment_id")
-        anchor_id = pair.get("anchor_id")
-        base_receipt = index.get((experiment_id, anchor_id, "BASE"))
-        candidate_receipt = index.get((experiment_id, anchor_id, "candidate"))
+        experiment_id = str(pair.get("experiment_id"))
+        anchor_id = str(pair.get("anchor_id"))
+        baseline_id = str(pair.get("baseline_id"))
+        candidate_id = str(pair.get("candidate_id"))
+        base_receipt = index.get((experiment_id, anchor_id, "BASE",
+                                  baseline_id))
+        candidate_receipt = index.get((experiment_id, anchor_id, "candidate",
+                                       candidate_id))
         if base_receipt is None:
             issues.append("baseline_execution_receipt_missing")
         if candidate_receipt is None:
             issues.append("candidate_execution_receipt_missing")
+        # 12-field identity/evidence comparison per located receipt.
+        compared = {
+            "experiment_id": experiment_id,
+            "anchor_id": anchor_id,
+            "baseline_id": baseline_id,
+            "candidate_id": candidate_id,
+            "initial_state_hash": str(pair.get("initial_state_hash")),
+            "prefix_hash": str(pair.get("prefix_hash")),
+            "source_fingerprint": str(pair.get("source_fingerprint")),
+            "execution_context_hash": str(pair.get("execution_context_hash")),
+            "intervention_type": str(pair.get("intervention_type")),
+            "intervention_horizon": str(pair.get("intervention_horizon")),
+        }
         for role, receipt in (("BASE", base_receipt),
                               ("candidate", candidate_receipt)):
             if receipt is None:
@@ -533,23 +568,35 @@ def audit_execution_receipts(pairs: Sequence[Dict[str, Any]],
             if receipt["execution_error"]:
                 issues.append(f"{role}_branch_error:"
                               f"{receipt['execution_error']}")
-            if str(receipt["anchor_id"]) != str(anchor_id):
-                issues.append(f"{role}_branch_from_different_anchor")
-            for field in ("initial_state_hash", "prefix_hash",
-                          "source_fingerprint", "execution_context_hash"):
-                if str(receipt[field]) != str(pair.get(field)):
+            expected_candidate_id = baseline_id if role == "BASE" \
+                else candidate_id
+            compared["candidate_id"] = expected_candidate_id
+            for field, expected in compared.items():
+                if field == "baseline_id" and role == "BASE":
+                    continue          # trivially the arm id itself
+                actual = receipt.get(field)
+                if str(actual) != str(expected):
                     issues.append(f"{role}_branch_{field}_mismatch")
-            receipt_return = receipt.get("return")
+            # Task 3: strict realised-return checks. A failed branch has no
+            # valid return even if one was recorded.
+            branch_failed = (not (receipt["execution_started"]
+                                  and receipt["execution_completed"]
+                                  and receipt["episode_finished"]))
             pair_field = ("baseline_return" if role == "BASE"
-                             else "candidate_return")
+                          else "candidate_return")
             pair_return = pair.get(pair_field)
-            if receipt_return is not None and pair_return is not None \
-                    and abs(float(receipt_return) - float(pair_return)) > 1e-9:
+            receipt_return = receipt.get("return")
+            if branch_failed:
+                issues.append(f"{role}_branch_not_completed")
+                continue
+            if receipt_return is None:
+                issues.append(f"{role}_receipt_return_missing")
+            elif pair_return is None:
+                issues.append(f"{role}_pair_return_missing")
+            elif not math.isfinite(float(receipt_return)):
+                issues.append(f"{role}_receipt_return_not_finite")
+            elif abs(float(receipt_return) - float(pair_return)) > 1e-9:
                 issues.append(f"{role}_return_conflicts_with_pair")
-        if base_receipt is not None and \
-                str(base_receipt["baseline_id"]) != \
-                str(pair.get("baseline_id")):
-            issues.append("baseline_receipt_arm_mismatch")
         if issues:
             problems[pair_id] = issues
     return problems

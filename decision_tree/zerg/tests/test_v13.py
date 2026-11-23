@@ -284,7 +284,8 @@ class TestCCounterfactualPipeline(unittest.TestCase):
                         experiment_id="expA",
                         anchor_id=pair["anchor_id"],
                         baseline_id="BASE",
-                        candidate_id=pair["candidate_id"],
+                        candidate_id=("BASE" if branch == "BASE"
+                                      else pair["candidate_id"]),
                         branch_id=branch,
                         initial_state_hash="a" * 64,
                         prefix_hash="b" * 64,

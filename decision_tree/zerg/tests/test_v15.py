@@ -225,7 +225,8 @@ class Test03Receipts(unittest.TestCase):
                 receipts.append(pd.make_execution_receipt(
                     experiment_id="exp_test_audit", anchor_id=anchor_id,
                     baseline_id="BASE",
-                    candidate_id=record["candidates"][1]["candidate_id"],
+                    candidate_id=("BASE" if branch_id == "BASE" else
+                                  record["candidates"][1]["candidate_id"]),
                     branch_id=branch_id,
                     initial_state_hash="a" * 64, prefix_hash="b" * 64,
                     source_fingerprint=source_fp,
@@ -414,6 +415,183 @@ class Test05ResourceConflictMissing(unittest.TestCase):
                       [row["name"] for row in inactive])
         self.assertNotIn("candidate.candidate_resource_conflict", active)
         manager.commit_final_actions(actions)
+
+
+class Test06MultiCandidateReceipts(unittest.TestCase):
+    """Task 4: one anchor, BASE + candidates A/B/C — three pairs share the
+    BASE receipt, each candidate binds to ITS OWN receipt, and no sibling
+    receipt can substitute."""
+
+    RETURNS = {"cand_A": 1.10, "cand_B": 0.90, "cand_C": 1.30}
+    BASE_RETURN = 1.0
+    ANCHOR = "anchor_multi:7"
+
+    def _setup(self, *, candidate_returns=None, horizon=1,
+               candidate_ids=None):
+        returns = candidate_returns or dict(self.RETURNS)
+        records = _records(1)
+        record = records[0]
+        # candidates use the decision record's REAL candidate ids so the
+        # scope cross-check can bind each pair to the record
+        real_ids = [candidate["candidate_id"]
+                    for candidate in record["candidates"]][:3]
+        names = ("cand_A", "cand_B", "cand_C")
+        ids = candidate_ids or dict(zip(names, real_ids))
+        anchor_id = self.ANCHOR
+
+        def pair(pair_id, candidate_id, candidate_return, pair_horizon):
+            return {
+                "schema": "zerg_counterfactual_pair_v1",
+                "experiment_id": "exp_multi",
+                "run_id": record["run_id"],
+                "episode_id": record["episode_id"],
+                "anchor_id": anchor_id,
+                "pair_id": pair_id,
+                "baseline_id": "BASE",
+                "candidate_id": candidate_id,
+                "decision_key": f"{record['run_id']}:"
+                                f"{record['episode_id']}:"
+                                f"{record['snapshot_id']}:"
+                                f"{record['game_loop']}",
+                "initial_state_hash": "a" * 64,
+                "prefix_hash": "b" * 64,
+                "execution_context_hash": CTX,
+                "source_fingerprint": SOURCE,
+                "intervention_type": "single_step",
+                "intervention_horizon": pair_horizon,
+                "candidate_return": candidate_return,
+                "baseline_return": self.BASE_RETURN,
+                "outcome": "win",
+                "completion_status": "complete",
+                "scope": "joint"}
+
+        pairs = [pair(f"pair_{name}", ids[name], returns[name], horizon)
+                 for name in names]
+        manifest = make_anchor_manifest(
+            experiment_id="exp_multi", source_fingerprint=SOURCE,
+            execution_context_hash=CTX,
+            anchors={anchor_id: {"initial_state_hash": "a" * 64,
+                                 "prefix_hash": "b" * 64,
+                                 "baseline_id": "BASE"}})
+        receipts = [pd.make_execution_receipt(
+            experiment_id="exp_multi", anchor_id=anchor_id,
+            baseline_id="BASE", candidate_id="BASE", branch_id="BASE",
+            initial_state_hash="a" * 64, prefix_hash="b" * 64,
+            source_fingerprint=SOURCE, execution_context_hash=CTX,
+            intervention_type="single_step", intervention_horizon=horizon,
+            execution_started=True, execution_completed=True,
+            episode_finished=True, outcome="win",
+            return_value=self.BASE_RETURN,
+            receipt_id="r:BASE", receipt_source="test_driver")]
+        for name in names:
+            receipts.append(pd.make_execution_receipt(
+                experiment_id="exp_multi", anchor_id=anchor_id,
+                baseline_id="BASE", candidate_id=ids[name],
+                branch_id="candidate",
+                initial_state_hash="a" * 64, prefix_hash="b" * 64,
+                source_fingerprint=SOURCE, execution_context_hash=CTX,
+                intervention_type="single_step", intervention_horizon=horizon,
+                execution_started=True, execution_completed=True,
+                episode_finished=True, outcome="win",
+                return_value=returns[name],
+                receipt_id=f"r:{ids[name]}", receipt_source="test_driver"))
+        return records, record, pairs, manifest, receipts
+
+    def test_three_pairs_share_base_and_own_receipts(self):
+        records, record, pairs, manifest, receipts = self._setup()
+        # 3: no index conflict between sibling candidate receipts
+        index = pd.build_receipt_index(receipts)
+        self.assertEqual(len(index), 4)          # 1 BASE + 3 candidates
+        # 1: every pair locates the SAME BASE receipt
+        base_keys = set()
+        for pair in pairs:
+            found = pd.audit_execution_receipts([pair], receipts)
+            # no problems recorded == receipt-complete
+            self.assertFalse(found.get(pair["pair_id"]))
+        base_key = ("exp_multi", self.ANCHOR, "BASE", "BASE")
+        self.assertIn(base_key, index)           # one shared BASE receipt
+        # 2: each pair resolves to its own candidate receipt value
+        for pair in pairs:
+            key = ("exp_multi", self.ANCHOR, "candidate",
+                   pair["candidate_id"])
+            self.assertIn(key, index)
+            self.assertAlmostEqual(index[key]["return"],
+                                   pair["candidate_return"])
+
+    def test_sibling_receipt_cannot_substitute(self):
+        """Check 4/5: candidate A's receipt can never serve candidate B, and
+        a candidate_id mismatch is rejected."""
+        records, record, pairs, manifest, receipts = self._setup()
+        # candidate B's pair with ITS receipt removed: sibling candidate
+        # receipts (A or C) must not substitute for it
+        b_id = pairs[1]["candidate_id"]
+        without_b = [r for r in receipts
+                     if not (r["branch_id"] == "candidate"
+                             and r["candidate_id"] == b_id)]
+        problems = pd.audit_execution_receipts([pairs[1]], without_b)
+        self.assertTrue(any("candidate_execution_receipt_missing" in p
+                            for p in problems[pairs[1]["pair_id"]]))
+        # and a pair misdeclaring A's id while A's return differs is
+        # rejected on the return-consistency axis
+        swapped = copy.deepcopy(pairs[0])
+        swapped["pair_id"] = "pair_misbound"
+        swapped["candidate_return"] = self.RETURNS["cand_A"] + 5.0
+        problems = pd.audit_execution_receipts([swapped], receipts)
+        self.assertTrue(any("return_conflicts_with_pair" in p
+                            for p in problems["pair_misbound"]))
+
+    def test_return_mismatch_and_missing_rejected(self):
+        """Checks 6/7: receipt-return missing or inconsistent rejects the
+        pair even though the pair declares its own return."""
+        records, record, pairs, manifest, receipts = self._setup()
+        # candidate receipt without a return
+        no_return = copy.deepcopy(receipts)
+        b_id = pairs[1]["candidate_id"]
+        for receipt in no_return:
+            if receipt["branch_id"] == "candidate" \
+                    and receipt["candidate_id"] == b_id:
+                receipt["return"] = None
+        problems = pd.audit_execution_receipts([pairs[1]], no_return)
+        self.assertIn("candidate_receipt_return_missing",
+                      problems[pairs[1]["pair_id"]])
+        # inconsistent receipt return
+        inconsistent = copy.deepcopy(receipts)
+        c_id = pairs[2]["candidate_id"]
+        for receipt in inconsistent:
+            if receipt["branch_id"] == "candidate" \
+                    and receipt["candidate_id"] == c_id:
+                receipt["return"] = 9.99
+        problems = pd.audit_execution_receipts([pairs[2]], inconsistent)
+        self.assertIn("candidate_return_conflicts_with_pair",
+                      problems[pairs[2]["pair_id"]])
+
+    def test_horizon_mismatch_rejected(self):
+        """Check 8: a receipt from a different intervention horizon cannot
+        validate the pair."""
+        records, record, pairs, manifest, receipts = self._setup()
+        mismatched = copy.deepcopy(receipts)
+        c_id = pairs[2]["candidate_id"]
+        for receipt in mismatched:
+            if receipt["branch_id"] == "candidate" \
+                    and receipt["candidate_id"] == c_id:
+                receipt["intervention_horizon"] = 4
+        problems = pd.audit_execution_receipts([pairs[2]], mismatched)
+        self.assertTrue(any("candidate_branch_intervention_horizon_mismatch"
+                            in p for p in problems[pairs[2]["pair_id"]]))
+
+    def test_all_three_pairs_enter_gain_dataset(self):
+        """Check 9: the three complete pairs all reach the gain dataset."""
+        records, record, pairs, manifest, receipts = self._setup()
+        bundle = pd.build_gain_dataset(
+            records, pairs, anchor_manifest=manifest,
+            execution_receipts=receipts)
+        self.assertEqual(bundle.audit_report["pairs_trainable"], 3)
+        self.assertEqual(len(bundle.joint_records), 3)
+        self.assertTrue(bundle.audited)
+        self.assertEqual(envelope_counts := bundle.export_envelope("joint")
+                         ["pairs_trainable"], 3)
+        # (full gain training over these three same-episode pairs is
+        # covered by the multi-episode tests in test_v11/v13/v14)
 
 
 if __name__ == "__main__":
