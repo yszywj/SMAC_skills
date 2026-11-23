@@ -39,7 +39,8 @@ COMPLETION_STATUSES = ("complete", "prefix_mismatch", "context_mismatch",
 FEATURE_FORBIDDEN = frozenset({
     "episode_id", "episode", "run_id", "scene_id", "scene_config_id",
     "seed", "sc2_seed", "map_id", "unit_tag", "actor", "actor_id", "tag",
-    "snapshot_id", "group_id", "game_version"})
+    "snapshot_id", "group_id", "game_version", "candidate_id",
+    "proposal_id", "instance_id", "task_key"})
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 
@@ -163,6 +164,68 @@ def flatten_row_features(global_features: Dict[str, Any],
     """Deprecated alias; delegates to the single join."""
     return build_model_features(global_features, candidate_features, schema,
                                 shared_layers)
+
+
+# -- Task 3.4: internal (unit-level) scorer feature layout ------------------
+
+UNIT_AGGREGATIONS = ("mean", "min", "max")
+
+
+def build_internal_model_features(global_features: Dict[str, Any],
+                                  candidate_features: Dict[str, Any],
+                                  controlled_actors: Sequence[str],
+                                  schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                                  shared_layers: Sequence[str] = ("team",
+                                                                  "skill")
+                                  ) -> Dict[str, float]:
+    """Feature join for skill-INTERNAL scorers: team + skill + candidate
+    layers plus AGGREGATED unit features over the candidate's controlled
+    actors (mean/min/max + count + type fractions). Unit tags never enter
+    the vector; aggregation order is schema-fixed, so a missing single
+    value never shifts other features' positions."""
+    ordered = build_model_features(global_features, candidate_features,
+                                   schema, shared_layers)
+    units = (global_features or {}).get("units")
+    if units is None:
+        raise FeatureLayerMissing("units")
+    unit_types = (global_features or {}).get("unit_types", {}) or {}
+    actors = [actor for actor in (controlled_actors or ())
+              if actor in units]
+
+    def unit_values(name: str) -> List[float]:
+        values = []
+        for actor in actors:
+            value = units[actor].get(name)
+            resolved = as_feature_float(value)
+            if not math.isnan(resolved):
+                values.append(resolved)
+        return values
+
+    ordered["unit.count"] = float(len(actors))
+    for unit_type in schema.unit_types():
+        fraction = (sum(1 for actor in actors
+                        if unit_types.get(actor) == unit_type)
+                    / len(actors)) if actors else 0.0
+        ordered[f"unit.type_fraction.{unit_type}"] = float(fraction)
+    for name in schema.names(layer="unit"):
+        values = unit_values(name)
+        if not values:
+            for agg in UNIT_AGGREGATIONS:
+                ordered[f"unit.{agg}.{name}"] = float("nan")
+            continue
+        ordered[f"unit.mean.{name}"] = math.fsum(values) / len(values)
+        ordered[f"unit.min.{name}"] = float(min(values))
+        ordered[f"unit.max.{name}"] = float(max(values))
+    return ordered
+
+
+def internal_scorer_feature_names(schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                                  shared_layers: Sequence[str] = ("team",
+                                                                  "skill")
+                                  ) -> List[str]:
+    return list(build_internal_model_features(
+        {layer: {} for layer in shared_layers} | {"units": {}}, {},
+        [], schema, shared_layers).keys())
 
 
 # -- decision records -------------------------------------------------------
@@ -353,12 +416,17 @@ def validate_scorer_model(model: Dict[str, Any],
     feature_names = model.get("feature_names")
     if not isinstance(feature_names, list) or not feature_names:
         raise ValueError("feature_names required")
-    # Task 1.3: names AND order must match the single join exactly.
-    expected = scorer_feature_names(schema)
+    layout = model.get("feature_layout", "standard")
+    if layout not in ("standard", "internal"):
+        raise ValueError("feature_layout must be 'standard' or 'internal'")
+    # Task 1.3 / Task 3.4: names AND order must match the declared layout's
+    # single-join output exactly.
+    expected = (internal_scorer_feature_names(schema) if layout == "internal"
+                else scorer_feature_names(schema))
     if feature_names != expected:
         raise ValueError(
-            "model feature_names must exactly equal the "
-            "build_model_features order "
+            f"model feature_names must exactly equal the {layout} "
+            f"build_model_features order "
             f"(got {len(feature_names)} names, expected {len(expected)})")
     forbidden = sorted(set(feature_names) & FEATURE_FORBIDDEN)
     if forbidden:
@@ -378,6 +446,18 @@ def validate_scorer_model(model: Dict[str, Any],
     if model.get("training_configuration") is not None \
             and not isinstance(model["training_configuration"], dict):
         raise ValueError("training_configuration must be an object")
+    active = model.get("active_feature_names")
+    if active is not None:
+        if (not isinstance(active, list) or not active
+                or sorted(active) != sorted(set(active))):
+            raise ValueError("active_feature_names must be a unique list")
+        unknown = sorted(set(active) - set(feature_names))
+        if unknown:
+            raise ValueError(f"active features outside declared layout: "
+                             f"{unknown}")
+    inactive = model.get("inactive_features")
+    if inactive is not None and not isinstance(inactive, list):
+        raise ValueError("inactive_features must be a list when present")
 
     capacity = model.get("capacity", {})
     estimator = capacity.get("estimator_type", "single_threshold_tree")

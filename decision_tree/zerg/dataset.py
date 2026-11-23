@@ -28,8 +28,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema
 from .schema import DECISION_RECORD_SCHEMA, PAIR_RECORD_SCHEMA, dumps, \
-    build_model_features, scorer_feature_names, validate_decision_record, \
-    validate_pair_record, audit_pair, pair_is_trainable
+    build_internal_model_features, build_model_features, \
+    scorer_feature_names, validate_decision_record, validate_pair_record, \
+    audit_pair, pair_is_trainable
 
 RecordKey = Tuple[str, str, int, int]
 
@@ -409,3 +410,181 @@ def feature_names_for(schema: ZergFeatureSchema = DEFAULT_SCHEMA,
                       shared_layers: Sequence[str] = ("team", "skill")
                       ) -> List[str]:
     return scorer_feature_names(schema, shared_layers)
+
+
+# -- A-class (skill-internal) training rows (Phase 3) -----------------------
+
+def _matches_final_actions(candidate: Dict[str, Any],
+                           final_actions: Dict[str, int]) -> bool:
+    """A-class teacher evidence: every controlled actor of the candidate has
+    its proposed action present AND unchanged in the final action list."""
+    controlled = candidate.get("controlled_actors") or ()
+    proposed = candidate.get("proposed_actions") or {}
+    if not controlled:
+        return False
+    for actor in controlled:
+        if actor not in final_actions:
+            return False
+        if actor in proposed and final_actions[actor] != proposed[actor]:
+            return False
+    return True
+
+
+def proposal_group_id(candidate: Dict[str, Any]) -> str:
+    """Task 3.2: distinguish independent control tasks of the SAME skill at
+    one decision point. Uses the plan's task identity (task_key, falling
+    back to instance_id, falling back to the sorted controlled-actor set) —
+    never a model feature."""
+    task_key = candidate.get("task_key")
+    if task_key:
+        return f"task:{task_key}"
+    instance_id = candidate.get("instance_id")
+    if instance_id:
+        return f"inst:{instance_id}"
+    actors = sorted(candidate.get("controlled_actors") or [])
+    return "actors:" + "|".join(actors) if actors else "actors:unknown"
+
+
+def decision_group_id(record: Dict[str, Any], skill: str,
+                      candidate: Dict[str, Any]) -> str:
+    """run_id + episode_id + snapshot_id + skill + proposal_group_id.
+    Comparisons (teacher labels, ranking) are only valid WITHIN one group."""
+    key = record_key(record)
+    return f"{key[0]}:{key[1]}:{key[2]}:{skill}:{proposal_group_id(candidate)}"
+
+
+def expand_skill_proposals(records: Sequence[Dict[str, Any]],
+                           schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                           shared_layers: Sequence[str] = ("team", "skill")
+                           ) -> List[Dict[str, Any]]:
+    """Task 3.1: turn ``record["skill_proposals"]`` into training rows.
+
+    - one candidate group per (decision point, skill, proposal task);
+      A-class rows are NEVER merged into the B-class joint candidate set;
+    - same state feature schema and the SAME single join as B-class rows;
+    - Task 3.3 teacher labels derived from the Coordinator's FINAL choice:
+      ``matched_final_actions`` = every controlled actor's proposed action
+      survived into ``final_actions``; the (unique) matching candidate of a
+      group carries ``teacher=1``. An unselected candidate is just
+      unselected — never labelled as a rule error;
+    - ``executed`` additionally requires ``execution_status == "committed"``.
+    """
+    rows: List[Dict[str, Any]] = []
+    for record in records:
+        proposals = record.get("skill_proposals") or {}
+        if not proposals:
+            continue
+        final_actions = record.get("final_actions", {}) or {}
+        committed = record.get("execution_status") == "committed"
+        for skill, candidates in proposals.items():
+            # group rows first so teacher labels resolve within a group
+            groups: Dict[str, List[Dict[str, Any]]] = {}
+            for candidate in candidates:
+                if not candidate.get("legal"):
+                    continue
+                groups.setdefault(proposal_group_id(candidate),
+                                  []).append(candidate)
+            for group_key, members in groups.items():
+                matched_ids = [
+                    candidate["candidate_id"] for candidate in members
+                    if _matches_final_actions(candidate, final_actions)
+                ]
+                teacher_id = matched_ids[0] if len(matched_ids) == 1 else None
+                for candidate in members:
+                    candidate_id = candidate["candidate_id"]
+                    matched = candidate_id in matched_ids
+                    controlled = tuple(candidate.get("controlled_actors")
+                                       or ())
+                    try:
+                        features_internal = build_internal_model_features(
+                            record["global_features"],
+                            candidate.get("features", {}), controlled,
+                            schema, shared_layers)
+                    except Exception:
+                        features_internal = None   # units layer absent
+                    rows.append({
+                        "group_id": episode_group(record),
+                        "decision_group_id": decision_group_id(
+                            record, skill, candidate),
+                        "proposal_group_id": group_key,
+                        "decision_key": dumps_key(record_key(record)),
+                        "run_id": record["run_id"],
+                        "episode_id": record["episode_id"],
+                        "candidate_id": candidate_id,
+                        "candidate_family": candidate.get(
+                            "candidate_family", "skill_internal"),
+                        "candidate_skill": skill,
+                        "controlled_actors": list(controlled),
+                        "source_plan_id": candidate.get("source_plan_id"),
+                        "resource_claims": candidate.get("resource_claims",
+                                                         {}),
+                        "dependencies": candidate.get("dependencies", []),
+                        "unit_type": (record.get("global_features", {})
+                                      .get("unit_types", {}) or {}).get(
+                            controlled[0]) if controlled else None,
+                        "features": build_model_features(
+                            record["global_features"],
+                            candidate.get("features", {}), schema,
+                            shared_layers),
+                        "features_internal": features_internal,
+                        "weight": 1.0 / max(1, len(members)),
+                        "teacher": 1.0 if teacher_id == candidate_id else 0.0,
+                        "matched_final_actions": matched,
+                        "entered_final_plan": matched,
+                        "executed": bool(matched and committed),
+                        "final_action_kept": matched,
+                        "rule_score": candidate.get("rule_score"),
+                        "candidate_return": candidate.get("candidate_return"),
+                        "baseline_return": record.get("baseline_return"),
+                        "gain": (candidate.get("candidate_return")
+                                 - record["baseline_return"])
+                        if candidate.get("candidate_return") is not None
+                        and record.get("baseline_return") is not None
+                        else None,
+                        "objective": "skill_internal",
+                    })
+    return rows
+
+
+def export_internal_training_rows(rows: Sequence[Dict[str, Any]], *,
+                                  skill: Optional[str] = None,
+                                  unit_type: Optional[str] = None,
+                                  family: Optional[str] = None
+                                  ) -> List[Dict[str, Any]]:
+    """Task 3.6: filter A-class rows by skill name, unit type or family for
+    per-scorer training data exports."""
+    picked = []
+    for row in rows:
+        if skill is not None and row["candidate_skill"] != skill:
+            continue
+        if unit_type is not None and row.get("unit_type") != unit_type:
+            continue
+        if family is not None and row["candidate_family"] != family:
+            continue
+        picked.append(row)
+    return picked
+
+
+# -- counterfactual pair splits (Task 1.3.2/1.3.3) ---------------------------
+
+def anchor_group(pair: Dict[str, Any]) -> str:
+    """One anchor = one partition unit: every branch (BASE + candidates) of
+    the same anchor stays on the same side."""
+    return f"{pair['run_id']}:{pair['episode_id']}:{pair['anchor_id']}"
+
+
+def split_pairs(pairs: Sequence[Dict[str, Any]],
+                validation_fraction: float = 0.25,
+                split_seed: int = 0,
+                min_train_groups: int = 4
+                ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Anchor-level deterministic split: BASE and candidate branches of one
+    anchor can never straddle train/validation."""
+    from decision_tree.learning.train import group_split
+    rows = [{"group_id": anchor_group(pair), "_pair": pair}
+            for pair in pairs]
+    train_rows, validation_rows = group_split(
+        rows, validation_fraction=validation_fraction,
+        split_seed=split_seed, min_train_groups=min_train_groups)
+    return ([row["_pair"] for row in train_rows],
+            [row["_pair"] for row in validation_rows])

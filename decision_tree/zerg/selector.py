@@ -276,3 +276,115 @@ def _validator_module(manager):
         return importlib.import_module(f"{package}.validator")
     except Exception:
         return None
+
+
+def apply_complete_plan(selected, manager, context=None, memory=None,
+                        base_plans=None, base_actions=None):
+    """Task 4.2: apply a model-selected COMPLETE branch.
+
+    ``selected`` must be a :class:`candidates.CompletePlanCandidate` whose
+    ``plans`` are the Coordinator's REAL complete plan objects for the
+    CURRENT snapshot (``plan_objects_available`` true). The whole branch is
+    replaced as a unit — plans, actions, ResourceClaims, Dependencies,
+    Commitments, atomicity and execution duties all travel with the objects;
+    there is no partial-plan splice that could orphan another unit's task.
+    The complete Validator re-runs on the final action list, bounded repair
+    runs when problems remain, and any failure returns the untouched BASE.
+    """
+    result = {
+        "applied": False,
+        "fallback_to_base": False,
+        "reason": None,
+        "replaced_plan_ids": [],
+        "validator_problems": [],
+        "repair_log": [],
+        "final_plans": base_plans,
+        "final_actions": base_actions,
+        "commit_status": "base_unchanged",
+    }
+    from .candidates import CompletePlanCandidate
+    if not isinstance(selected, CompletePlanCandidate):
+        result["reason"] = "not_a_complete_plan_candidate"
+        return result
+    if not selected.plan_objects_available or not selected.plans:
+        # Summary-level candidate (actions only): full-plan replacement
+        # cannot preserve semantics, so it is refused outright.
+        result["reason"] = "no_complete_plan_objects_refused"
+        result["fallback_to_base"] = True
+        return result
+    if not selected.legal:
+        result["reason"] = "candidate_not_legal"
+        result["fallback_to_base"] = True
+        return result
+
+    snapshot = getattr(context, "snapshot", None)
+    if snapshot is None and manager is not None:
+        pending = getattr(manager, "_pending_commit", None)
+        snapshot = pending[0] if pending else None
+    if snapshot is not None \
+            and selected.snapshot_id != getattr(snapshot, "snapshot_id", None):
+        result["reason"] = "plan_not_from_current_decision_step"
+        result["fallback_to_base"] = True
+        return result
+
+    if base_plans is None:
+        pending = getattr(manager, "_pending_commit", None)
+        cache = getattr(manager, "_cache", None)
+        base_plans = list(pending[1]) if pending else (list(cache[3])
+                                                       if cache else [])
+    if base_actions is None:
+        cache = getattr(manager, "_cache", None)
+        cached = cache[1] if cache else {}
+        if isinstance(cached, list):
+            cached = {f"u{i}": a for i, a in enumerate(cached)}
+        base_actions = dict(cached)
+
+    result["replaced_plan_ids"] = sorted({str(getattr(p, "proposal_id", ""))
+                                          for p in base_plans}
+                                         - set(selected.source_plan_ids))
+    validator = _validator_module(manager)
+    evaluator = getattr(manager, "evaluator", None)
+    skills = getattr(manager, "skills", None)
+    memory = memory if memory is not None else getattr(manager, "memory",
+                                                       None)
+    if validator is None or evaluator is None:
+        result["reason"] = "validator_or_evaluator_unavailable"
+        return result
+
+    new_plans = list(selected.plans)
+    new_actions = dict(selected.actions)
+    try:
+        report = evaluator.effects(context, new_actions)
+        problems = validator.complete_and_validate(
+            new_plans, context, new_actions, report=report, memory=memory)
+        if problems:
+            new_plans, new_actions, repair_log = validator.repair(
+                new_plans, context, new_actions, memory, evaluator,
+                skills=skills)
+            result["repair_log"] = list(repair_log)
+            report = evaluator.effects(context, new_actions)
+            problems = validator.complete_and_validate(
+                new_plans, context, new_actions, report=report, memory=memory)
+    except Exception as exc:               # any failure -> full BASE fallback
+        result["reason"] = f"replacement_error:{type(exc).__name__}"
+        result["validator_problems"] = [str(exc)]
+        result["fallback_to_base"] = True
+        result["final_plans"], result["final_actions"] = \
+            base_plans, base_actions
+        return result
+
+    result["validator_problems"] = problems
+    if problems:
+        result["reason"] = "validation_failed_full_base_fallback"
+        result["fallback_to_base"] = True
+        result["final_plans"], result["final_actions"] = \
+            base_plans, base_actions
+        return result
+    result.update({
+        "applied": True,
+        "reason": "replacement_validated",
+        "final_plans": new_plans,
+        "final_actions": new_actions,
+        "commit_status": "pending_manager_commit",
+    })
+    return result

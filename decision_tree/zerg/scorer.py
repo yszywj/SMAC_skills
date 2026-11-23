@@ -101,6 +101,9 @@ class ScorerModel:
         self.record = validate_scorer_model(model_record)
         self.scorer = self.record["scorer"]
         self.feature_names = list(self.record["feature_names"])
+        self.feature_layout = self.record.get("feature_layout", "standard")
+        self.active_feature_names: List[str] = list(
+            self.record.get("active_feature_names") or self.feature_names)
         self.families: Optional[Dict[str, Any]] = self.record.get("families") \
             or None
         self.trees: List[Dict[str, Any]] = self.record.get("trees") or []
@@ -218,13 +221,20 @@ def score_candidates(state_features: Dict[str, Any],
             results.append(row)
             continue
         try:
-            flat = _candidate_flat_features(candidate, state_features, schema)
+            if model.feature_layout == "internal":
+                from .schema import build_internal_model_features
+                flat = build_internal_model_features(
+                    state_features, candidate.features,
+                    candidate.controlled_actors, schema)
+            else:
+                flat = _candidate_flat_features(candidate, state_features,
+                                                schema)
         except FeatureLayerMissing as exc:
             # A whole layer absent is a plumbing error, never imputed away.
             row.reason = f"layer_missing_{exc.layer}_rule_fallback"
             results.append(row)
             continue
-        report = missing_report(flat, model.feature_names)
+        report = missing_report(flat, model.active_feature_names)
         row.missing_count = report["missing_count"]
         row.missing_ratio = report["missing_ratio"]
         row.missing_features = report["missing_features"]
@@ -409,10 +419,15 @@ class PairwiseRankModel:
     def score_candidates(self, flat_by_candidate: Dict[str, Dict[str, float]],
                          candidate_ids: Optional[Sequence[str]] = None
                          ) -> Dict[str, Dict[str, Any]]:
-        """Tournament scores per candidate id; unsupported pairs contribute
-        0 and mark the whole point unsupported."""
+        """Task 6.2: full round-robin tournament. Every ordered pair is
+        evaluated in BOTH directions; wins/losses are counted and the score
+        is the signed preference sum. Unsupported pairs contribute 0 and
+        mark the point unsupported (callers fall back to the rule order,
+        with the candidate's rule rank as the tie-break)."""
         ids = list(candidate_ids or flat_by_candidate)
         scores = {cid: 0.0 for cid in ids}
+        wins = {cid: 0 for cid in ids}
+        losses = {cid: 0 for cid in ids}
         supported = True
         for i, a in enumerate(ids):
             for b in ids[i + 1:]:
@@ -425,5 +440,33 @@ class PairwiseRankModel:
                     continue
                 scores[a] += ab - ba
                 scores[b] += ba - ab
-        return {cid: {"score": scores[cid], "supported": supported}
+                if ab - ba > 0:
+                    wins[a] += 1
+                    losses[b] += 1
+                elif ba - ab > 0:
+                    wins[b] += 1
+                    losses[a] += 1
+        return {cid: {"score": scores[cid], "supported": supported,
+                      "wins": wins[cid], "losses": losses[cid]}
                 for cid in ids}
+
+
+def score_routed(state_features: Dict[str, Any],
+                 candidates: Sequence[ZergCandidate],
+                 models: Dict[str, Optional[ScorerModel]],
+                 schema: ZergFeatureSchema = DEFAULT_SCHEMA
+                 ) -> Tuple[List[CandidateScores], Dict[str, int]]:
+    """Task 3.5: route candidates per scorer slot, score each slot with ITS
+    model (standard or internal layout), and report how many candidates
+    each scorer received. Training and online scoring share
+    ``route_candidates``, so the routing rule is identical on both sides."""
+    routed = route_candidates(candidates, state_features)
+    scores: List[CandidateScores] = []
+    counts = {name: len(items) for name, items in routed.items()}
+    for slot_name, items in routed.items():
+        if not items:
+            continue
+        model = models.get(slot_name)
+        scores.extend(score_candidates(state_features, items, model=model,
+                                       schema=schema))
+    return scores, counts

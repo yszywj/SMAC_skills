@@ -151,3 +151,80 @@ Ran 7 tests ... OK
 
 最小测试：`python -m unittest decision_tree.zerg.tests.test_minimal
 decision_tree.zerg.tests.test_v11` → 23 tests OK。
+
+---
+
+# V1.2 修复（定向修复，不重写架构）
+
+## Phase 1 实验身份
+- `run_id` 由 `generate_run_id()`（时间戳+pid+进程内序号）在 runtime 构造时
+  生成一次，或从 config 显式传入；`reset()`/`new_run()` 语义分离；所有决策
+  记录、事件、配对记录都携带。
+- `episode_id` 在 run 内唯一：`prepare_decision` 在 manager.step **之前**
+  解析身份（finalize 边界 + snapshot/loop 回卷双信号），重复局号得到
+  `_r<n>` 后缀；换局时 collector 缓存同步清理（先于 propose 采集）。
+- `scene_config_id`：experiment manifest 显式提供，否则 canonical hash
+  （地图+step_mul+兵种构成+敌我数量+search_location；不含随步变化的位置/
+  血量/剩余步数），按 Episode 冻结，来源写入 `scene_config_source`。
+- 切分：episode 分组（局部模型）/scene_config 留出（跨配置）；反事实配对
+  按 anchor 分组（`split_pairs`）；三集清单+不重叠断言。
+
+## Phase 2 恒缺失特征
+- `feature_availability` / `select_active_features`：统计每特征有限值数/
+  缺失比例/有效 Episode 数；恒缺失列进入 `inactive_features`（原因
+  `constant_missing_in_training`），不进 `active_feature_names`，绝不填 0；
+  原始记录保留完整 schema。
+- 中位数插补只从训练集的 active 列计算；模型声明
+  `active_feature_names`，推理缺失报告只针对 active 列。
+- `FEATURE_FORBIDDEN` 补齐 candidate_id/proposal_id/instance_id/task_key。
+
+## Phase 3 A 类链路
+- `dataset.expand_skill_proposals`：A 类候选 → 训练行（同唯一拼接；
+  `features_internal` = 单位聚合布局）；`export_internal_training_rows`
+  按 Skill / 单位类型导出。
+- `decision_group_id = run:episode:snapshot:skill:proposal_group_id`
+  （proposal_group_id 取 task_key→instance_id→controlled_actors）；
+  组内才可比较，跨组不伪造互斥。
+- 内部教师标签：`matched_final_actions`（proposed 动作原样进入
+  final_actions）→ 唯一匹配者 `teacher=1`；`entered_final_plan` /
+  `executed`（需 committed）/ `final_action_kept`；未选中 ≠ 规则错误。
+- `schema.build_internal_model_features`：team+skill+candidate+unit 聚合
+  （mean/min/max/count/type_fraction，86 维固定顺序，tag 不入特征）；
+  `training.train_internal` 用该布局训练 A 类评分器（imitation/gain/
+  ranking/correction 全支持，按 candidate_skill/unit_type 过滤）。
+- `scorer.score_routed`：按 `route_candidates`（单一兵种→类型评分器，
+  混合→joint，未知→joint 安全回退）逐槽评分，runtime 统计各槽候选数。
+
+## Phase 4 B 类完整计划
+- `candidates.CompletePlanCandidate`：完整分支对象（plans/actions/claims/
+  dependencies/duties/rule_score/features/legal/source_plan_ids）；BASE
+  由 `_pending_commit` 真实计划构建；summary 级备选标记
+  `plan_objects_available=False`——可评分记录但永不触发替换；不允许用
+  JSON 动作伪造 CandidatePlan。
+- `selector.apply_complete_plan`：整组替换（不局部拼接），Validator 完整
+  重跑 + 有界 repair，失败整体回退 BASE。
+- `runtime._tree_score_ready`：模型存在/目标可排序/指纹一致/schema 一致/
+  完整计划对象存在/Validator 可用/Manager 状态可更新——任一不满足拒绝。
+  默认仍 `mode=off`。
+
+## Phase 5 工厂
+- `runtime.wrap` 接受 `ZergManagerBundle`：校验实际模块文件位于 resolved
+  树、指纹一致、并使用 bundle 的 effective_config 重建执行上下文
+  （含 action_space_version / observation_protocol / model_algorithm）。
+- `load_resolved_package`：模块命名空间带源码指纹后缀；同指纹仅在
+  `__file__` 匹配时复用缓存；不同指纹加载到新隔离命名空间，绝不驱逐
+  存活模块。
+
+## Phase 6 Pairwise Ranking
+- 训练样本双向生成（反向 margin 取负），消除固定位置偏差。
+- 推理：`PairwiseRankModel.score_candidates` 全轮询锦标赛，双向比较，
+  记录 wins/losses；并列时调用方以原规则名次 tie-break；不支持→规则回退。
+- 评估：pairwise_accuracy 要求正反两方向同时正确（另报 forward/reverse
+  单向准确率）；NDCG 只用候选级真实收益完整且 provenance=paired_gain 的
+  决策点。
+
+## Phase 7 执行反馈
+- 模型候选替换失败 → `selected_candidate` 记录实际回退的 BASE。
+- `committed` 事件区分：`commit_call_completed` + `memory_commit ∈
+  {new_commit, idempotent, partial_or_arbitrated, none}`；committed 仅表示
+  原 Skill 记忆提交条件通过，不是 SC2 引擎确认。

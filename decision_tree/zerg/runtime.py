@@ -1,45 +1,53 @@
-"""Runtime integration: off / shadow / tree_score (V1.1).
+"""Runtime integration: off / shadow / tree_score (V1.2).
 
-Safety contract (enforced structurally here):
+Safety contract:
 
-- ``off``: the runtime is inert. ``wrap(manager)`` returns the manager
-  itself; no models are created, nothing is recorded, behaviour is
-  bit-identical to the original skill.
+- ``off``: inert; ``wrap`` returns the manager untouched.
 - ``shadow``: candidates from the manager's own decision are scored and the
-  disagreement with the rule choice is recorded to a separate zerg JSONL
-  log. Actions, memory and the tactical Telemetry are never touched.
-- ``tree_score``: the selector may replace the complete plan ONLY through
-  ``selector.apply_selected_plan`` — real CandidatePlan objects, full
-  Validator re-run, bounded repair, full BASE fallback on any failure.
-  Summary-level candidates without plan objects can never trigger a swap.
-  After any swap the runner still calls ``commit_final_actions``; the
-  manager's own surviving-plan logic keeps full control of TacticalMemory.
+  disagreement recorded to a separate JSONL log; actions, memory and the
+  tactical Telemetry are never touched.
+- ``tree_score``: guarded by ``_tree_score_ready`` (model present, target
+  correct, source fingerprint and feature schema verified, COMPLETE branch
+  plan objects available, validator importable, manager plan state
+  updatable). Replacement goes through ``selector.apply_complete_plan``
+  (whole Coordinator branch, full Validator re-run, bounded repair, full
+  BASE fallback). If any gate fails — or the selected candidate has no
+  complete plan objects — Tree Score stays effectively Shadow-only; an
+  action-list swap is never used as a bypass.
 
-Event log (Phase 9): proposed / selected / submitted / committed /
-rejected / episode_finished events go to a separate zerg events JSONL with
-rule and final action hashes, replaced units, validator results and model
-support. ``committed`` means the ORIGINAL skill memory-commit condition
-passed — it is NOT an SC2 engine acknowledgement. Shadow never changes
-actions or memory; any model error falls back to the rule behaviour.
+Identity (V1.2 Phase 1):
+
+- ``run_id`` is generated ONCE per runtime (or taken from config) and never
+  changes for the lifetime of the collection process; ``reset`` clears
+  episode state only. Every decision record, event and pair record carries
+  it.
+- ``episode_id`` is unique inside the run: repeated episode numbers get a
+  deterministic ``_r<n>`` suffix when a new game actually starts.
+- ``scene_config_id`` comes from the experiment manifest when provided,
+  otherwise from a canonical hash over map + roster + birth positions +
+  environment parameters (never map name or unit count alone); its source
+  is stored on every record.
 """
 from __future__ import annotations
 
 import copy
 import hashlib
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .candidates import joint_candidates_from_summary
+from .candidates import CompletePlanCandidate, joint_candidates_from_summary
 from .dataset import DecisionRecordWriter, build_decision_record, \
     dumps_key, finalise_outcome, record_key
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema, StateFeatureExtractor
 from .fingerprints import assert_model_source, execution_context, \
     execution_context_hash, runtime_policy_contract, source_hash
 from .proposal_collector import PRIORITY_SKILLS, SkillProposalCollector
-from .schema import load_json
-from .scorer import ScorerModel, score_candidates
-from .selector import apply_selected_plan, select_skill_plan
+from .schema import digest as canonical_digest, load_json
+from .scorer import ScorerModel, score_candidates, score_routed
+from .selector import apply_complete_plan, apply_selected_plan, select_skill_plan
 
 MODES = ("off", "shadow", "tree_score")
 RUNTIME_CONFIG_KIND = "zerg_tree_runtime_config"
@@ -50,6 +58,20 @@ DEFAULT_SCORER_SLOTS = ("zergling_scorer", "hydralisk_scorer",
                         "baneling_scorer", "joint_scorer")
 EVENT_KINDS = ("proposed", "selected", "submitted", "committed",
                "rejected", "episode_finished")
+SORTABLE_MODEL_TARGETS = ("gain", "ranking", "imitation", "correction")
+
+
+_RUN_SEQ = {"n": 0}
+
+
+def generate_run_id() -> str:
+    """Task 1.1: one identity per collection process. Clock + pid + an
+    in-process sequence: a new process necessarily gets a new run_id, and
+    repeated construction inside one process still yields unique ids. Once
+    created, a runtime's run_id never changes."""
+    _RUN_SEQ["n"] += 1
+    stamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+    return f"run_{stamp}_{os.getpid()}_{_RUN_SEQ['n']:03d}"
 
 
 def default_config(workspace: str = ".") -> Dict[str, Any]:
@@ -59,6 +81,11 @@ def default_config(workspace: str = ".") -> Dict[str, Any]:
         "workspace": workspace,
         "source_root": workspace or ".",
         "run_id": None,
+        "scene_config": None,          # {"scene_config_id": ..., "source":
+                                       #  "experiment_manifest"} or None
+        "action_space_version": "smac_v2_standard_v1",
+        "observation_protocol": "shared_team_vision_snapshot_v1",
+        "model_algorithm": "weighted_sse_threshold_tree_v1",
         "base_dir": "skills/tactical_v1",
         "overlay_dir": ("runs/contact_all_attack_20261122_230107_662982/"
                         "marginal_near/skills/tactical_v1"),
@@ -83,11 +110,15 @@ def validate_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for name in config.get("scorers", {}):
         if name not in DEFAULT_SCORER_SLOTS:
             raise ValueError(f"unknown scorer slot {name}")
+    scene = config.get("scene_config")
+    if scene is not None:
+        if not isinstance(scene, dict) or not scene.get("scene_config_id"):
+            raise ValueError("scene_config requires scene_config_id")
+        scene.setdefault("source", "experiment_manifest")
     return config
 
 
 def runtime_policy_for_scorers(mode: str, scorers) -> Dict[str, Any]:
-    """Policy contract used when exporting a model outside a live runtime."""
     return runtime_policy_contract(mode, scorers, {}, DEFAULT_SCHEMA)
 
 
@@ -95,6 +126,31 @@ def actions_hash(actions: Any) -> str:
     material = json.dumps(list(actions) if isinstance(actions, (list, tuple))
                           else dict(actions), sort_keys=True)
     return hashlib.sha256(material.encode()).hexdigest()[:16]
+
+
+def scene_config_identity(snapshot, map_field: str) -> Tuple[str, str]:
+    """Task 1.2: canonical scene-config hash over everything that actually
+    shapes the game: map, step_mul, roster (actor -> type id + birth
+    position), declared enemy count and search location. Map name or unit
+    count alone is never the identity."""
+    allies = getattr(snapshot, "allies", {}) or {}
+    # Composition identity only: unit types of the declared roster. Current
+    # positions / health / remaining steps are PER-STEP STATE and must never
+    # leak into the scene-config identity (birth positions belong to an
+    # experiment-manifest supplied config).
+    roster = sorted((actor, int(getattr(unit, "unit_type_id", 0) or 0))
+                    for actor, unit in allies.items()
+                    if getattr(unit, "alive", True))
+    identity = {
+        "map": str(map_field),
+        "step_mul": int(getattr(snapshot, "step_mul", 0) or 0),
+        "n_allies": int(getattr(snapshot, "n_allies", 0) or 0),
+        "n_enemies": int(getattr(snapshot, "n_enemies", 0) or 0),
+        "search_location": [round(float(v), 3) for v in
+                            (getattr(snapshot, "search_location", ()) or ())],
+        "roster": roster,
+    }
+    return f"sconf_{canonical_digest(identity)[:16]}", "canonical_hash"
 
 
 class EventLog:
@@ -134,43 +190,136 @@ class ZergTreeRuntime:
         self.tactical_config = tactical_config or {}
         self.mode = self.config["mode"]
         self.extractor = StateFeatureExtractor(schema)
+        # Task 1.1: run identity lives and dies with this runtime object.
+        self._run_id = str(self.config.get("run_id") or generate_run_id())
+        self._episode_seen: Dict[str, int] = {}
+        self._episode_closed = False
+        self._scene_cache: Dict[str, Tuple[str, str]] = {}
+        self._last_loop: Optional[int] = None
+        self._last_snapshot_id: Optional[int] = None
         self._models: Dict[str, Optional[ScorerModel]] = {}
         self._context_hash: Optional[str] = None
         self._source_fingerprint: Optional[str] = None
         self._writer: Optional[DecisionRecordWriter] = None
         self._events: Optional[EventLog] = None
         self._buffer: Dict[Tuple, Dict[str, Any]] = {}
-        self._open_decisions: Dict[str, Tuple] = {}
+        self._active_collector: Optional[SkillProposalCollector] = None
+        self.bundle_provenance: Optional[Dict[str, Any]] = None
         self.last_error: Optional[str] = None
         self.stats: Dict[str, int] = {
             "decisions_seen": 0, "decisions_recorded": 0,
             "shadow_disagreements": 0, "tree_score_changes": 0,
-            "tree_score_fallbacks": 0, "model_errors": 0}
+            "tree_score_fallbacks": 0, "tree_score_blocked": 0,
+            "model_errors": 0, "routed_candidates": {}}
         if self.mode != "off":
+            self._build_execution_context()
             self._load_models()
-            self._policy = runtime_policy_contract(
-                self.mode,
-                [name for name, slot in self.config["scorers"].items()
-                 if slot.get("enabled")],
-                {"selector": self.config.get("selector", {})},
-                schema)
-            context = execution_context(
-                source_hash(str(self.config.get("source_root")
-                                or self.workspace),
-                            self.config.get("base_dir"),
-                            self.config.get("overlay_dir")),
-                self.tactical_config, self._policy, schema)
-            self._context = context
-            self._context_hash = execution_context_hash(context)
-            self._source_fingerprint = context["source_fingerprint"]
-            for name, model in self._models.items():
-                if model is None:
-                    continue
-                from .fingerprints import validate_deployment
-                validate_deployment(model.record, context)
-                # Task 3.2: model source fingerprint must equal the live one.
-                assert_model_source(model.record, self._source_fingerprint,
-                                    allow_missing=False)
+
+    # -- identity -----------------------------------------------------------
+    @property
+    def run_id(self) -> str:
+        return self._run_id
+
+    def new_run(self, run_id: Optional[str] = None) -> str:
+        """Explicitly start a new collection run inside this process (same
+        runtime object, fresh identity, episode bookkeeping cleared)."""
+        self._run_id = str(run_id or generate_run_id())
+        self._episode_seen.clear()
+        self._episode_closed = False
+        self._scene_cache.clear()
+        self._last_loop = None
+        self._last_snapshot_id = None
+        self._buffer.clear()
+        if self._active_collector is not None:
+            self._active_collector.start_run(self._run_id)
+        return self._run_id
+
+    def reset(self) -> None:
+        """Episode-state reset only; the run_id survives (Task 1.1.6)."""
+        self._episode_seen.clear()
+        self._episode_closed = False
+        self._scene_cache.clear()
+        self._last_loop = None
+        self._last_snapshot_id = None
+        self._buffer.clear()
+
+    def resolve_episode_id(self, raw_episode: str, snapshot_id: int,
+                           game_loop: int) -> str:
+        """Unique episode id inside the run. A repeat of an episode number
+        becomes a NEW game when a snapshot/loop rollover is observed OR when
+        the caller finalised the previous episode (explicit boundary)."""
+        key = str(raw_episode)
+        is_new_game = self._episode_closed \
+            or (self._last_snapshot_id is not None
+                and snapshot_id < self._last_snapshot_id) \
+            or (self._last_loop is not None and game_loop < self._last_loop)
+        self._episode_closed = False
+        if is_new_game:
+            count = self._episode_seen.get(key, 0)
+            self._episode_seen[key] = count + 1
+            if count:
+                key = f"{key}_r{count + 1}"
+        elif key not in self._episode_seen:
+            self._episode_seen[key] = 1
+        self._last_loop = game_loop
+        self._last_snapshot_id = snapshot_id
+        return key
+
+    def _scene_config(self, snapshot, map_field: str) -> Tuple[str, str]:
+        configured = self.config.get("scene_config")
+        if configured and configured.get("scene_config_id"):
+            return str(configured["scene_config_id"]), \
+                str(configured.get("source", "experiment_manifest"))
+        identity = scene_config_identity(snapshot, map_field)
+        episode = getattr(self, "_pending_identity", None)
+        episode_key = episode[1] if episode else None
+        if episode_key:
+            cached = self._scene_cache.get(episode_key)
+            if cached is not None:
+                return cached
+            self._scene_cache[episode_key] = identity
+        return identity
+
+    # -- execution context --------------------------------------------------
+    def _build_execution_context(self,
+                                 tactical_config: Optional[Dict] = None
+                                 ) -> None:
+        effective_config = tactical_config if tactical_config is not None \
+            else self.tactical_config
+        self._policy = runtime_policy_contract(
+            self.mode,
+            [name for name, slot in self.config["scorers"].items()
+             if slot.get("enabled")],
+            {"selector": self.config.get("selector", {})},
+            self.schema)
+        context = execution_context(
+            source_hash(str(self.config.get("source_root") or self.workspace),
+                        self.config.get("base_dir"),
+                        self.config.get("overlay_dir")),
+            effective_config, self._policy, self.schema,
+            extra={
+                "action_space_version":
+                    self.config.get("action_space_version"),
+                "observation_protocol":
+                    self.config.get("observation_protocol"),
+                "model_algorithm": self.config.get("model_algorithm"),
+            })
+        self._context = context
+        self._context_hash = execution_context_hash(context)
+        self._source_fingerprint = context["source_fingerprint"]
+
+    def rebind_execution_context(self, tactical_config: Dict[str, Any]) -> None:
+        """Task 5.3: rebuild the frozen context around the manager's ACTUAL
+        effective config (never silently an empty dict), then re-validate
+        every loaded model against it."""
+        self.tactical_config = dict(tactical_config or {})
+        self._build_execution_context(self.tactical_config)
+        from .fingerprints import validate_deployment
+        for name, model in self._models.items():
+            if model is None:
+                continue
+            validate_deployment(model.record, self._context)
+            assert_model_source(model.record, self._source_fingerprint)
 
     # -- model loading ------------------------------------------------------
     def _load_models(self) -> None:
@@ -183,30 +332,82 @@ class ZergTreeRuntime:
             if not resolved.is_absolute():
                 resolved = self.workspace / path
             if not resolved.is_file():
-                # An unfitted slot is a valid pure-fallback scorer; a wrong
-                # model FILE would be a hard error, an absent one is not.
                 self._models[name] = None
                 continue
             record = load_json(str(resolved))
             if record.get("scorer") != name:
                 raise ValueError(f"model file {path} declares scorer "
                                  f"{record.get('scorer')!r}, expected {name!r}")
+            if record.get("target") not in SORTABLE_MODEL_TARGETS:
+                raise ValueError(f"model file {path} has unsupported target "
+                                 f"{record.get('target')!r}")
             self._models[name] = ScorerModel(record)
+            from .fingerprints import validate_deployment
+            validate_deployment(self._models[name].record, self._context)
+            # Task 3.2/5.1: source fingerprint must match the live tree in
+            # EVERY mode — shadow data is never marked as a valid version
+            # against the wrong source.
+            assert_model_source(self._models[name].record,
+                                self._source_fingerprint,
+                                allow_missing=False)
 
     # -- integration --------------------------------------------------------
     def wrap(self, manager: Any) -> Any:
-        """Return a controller around ``manager``. In ``off`` mode the
-        manager itself is returned untouched."""
+        """Accept a raw SkillManager OR a
+        :class:`factory.ZergManagerBundle` (preferred — Task 5.1). In ``off``
+        mode the manager itself is returned untouched."""
         if self.mode == "off":
-            return manager
+            return getattr(manager, "manager", manager)
         controller = _RuntimeController(manager, self)
+        actual = controller.manager
+        if hasattr(manager, "source_fingerprint"):
+            self._verify_bundle(manager, actual)
+            if not self.tactical_config and manager.effective_config:
+                self.rebind_execution_context(manager.effective_config)
         if self.config.get("collect_skill_proposals", True):
-            controller.collector = SkillProposalCollector(
+            collector = SkillProposalCollector(
                 enabled=self.config.get("skill_proposal_skills",
                                         PRIORITY_SKILLS),
-                schema=self.schema).install(manager)
-            self._active_collector = controller.collector
+                schema=self.schema).install(actual)
+            collector.start_run(self._run_id)
+            controller.collector = collector
+            self._active_collector = collector
         return controller
+
+    def _verify_bundle(self, bundle, manager: Any) -> None:
+        """Task 5.1: verify the manager ACTUALLY comes from the resolved
+        tree the runtime fingerprinted — config declarations are never
+        accepted as proof."""
+        module = type(manager).__module__
+        module_file = str(getattr(import_module_of(manager), "__file__", ""))
+        source_root = Path(self.config.get("source_root")
+                           or self.workspace)
+        expected_root = (source_root / "decision_tree/zerg/resolved") \
+            .resolve()
+        try:
+            inside_resolved = Path(module_file).resolve().is_relative_to(
+                expected_root)
+        except AttributeError:
+            inside_resolved = str(Path(module_file).resolve()).startswith(
+                str(expected_root))
+        if not inside_resolved:
+            raise ValueError(
+                f"manager module {module} loaded from {module_file!r} is "
+                "NOT the resolved tree — refusing to wrap")
+        if bundle.source_fingerprint != self._source_fingerprint:
+            raise ValueError(
+                "bundle source fingerprint "
+                f"{str(bundle.source_fingerprint)[:16]}… != runtime "
+                f"fingerprint {str(self._source_fingerprint)[:16]}… — "
+                "refusing to wrap")
+        self.bundle_provenance = {
+            "module_path": str(bundle.module_path),
+            "module_file": module_file,
+            "source_fingerprint": bundle.source_fingerprint,
+            "manifest_path": str(bundle.manifest_path),
+            "effective_config_digest": canonical_digest(
+                bundle.effective_config),
+        }
 
     def scorer_model(self, name: str) -> Optional[ScorerModel]:
         return self._models.get(name)
@@ -241,14 +442,16 @@ class ZergTreeRuntime:
     def log_event(self, kind: str, **fields: Any) -> None:
         if self.mode == "off":
             return
+        fields.setdefault("run_id", self._run_id)
         try:
             self._events_for().log(kind, **fields)
         except Exception:
             pass                      # the event log never breaks decisions
 
     # -- recording ----------------------------------------------------------
-    def record_decision(self, *, run_id: str, episode_id: str,
+    def record_decision(self, *, episode_id: str,
                         scene_config_id: Optional[str],
+                        scene_config_source: Optional[str],
                         seed: Optional[int], map_id: Optional[str],
                         snapshot, candidates,
                         teacher_choice: Optional[str],
@@ -259,7 +462,7 @@ class ZergTreeRuntime:
                         skill_proposals: Optional[Dict[str, Any]] = None
                         ) -> Optional[Tuple]:
         record = build_decision_record(
-            run_id=run_id, episode_id=episode_id,
+            run_id=self._run_id, episode_id=episode_id,
             scene_config_id=scene_config_id, seed=seed, map_id=map_id,
             snapshot=snapshot, candidates=candidates,
             global_features=self._last_state_features or {},
@@ -269,14 +472,13 @@ class ZergTreeRuntime:
             source_hash=self._source_fingerprint or "",
             execution_context_hash=self._context_hash or "",
             schema=self.schema)
+        record["scene_config_source"] = scene_config_source
         if skill_proposals:
             # A-class section (Task 4.3): same decision key, own family and
             # candidate groups; never merged into the joint candidate list.
             record["skill_proposals"] = skill_proposals
         key = record_key(record)
-        self._buffer[key] = record        # last write per decision wins
-        decision_key = dumps_key(key)
-        self._open_decisions[decision_key] = key
+        self._buffer[key] = record
         self.stats["decisions_seen"] += 1
         return key
 
@@ -285,18 +487,15 @@ class ZergTreeRuntime:
                          ally_losses: int, enemy_losses: int,
                          damage_dealt: Optional[float] = None,
                          damage_received: Optional[float] = None,
-                         run_id: Optional[str] = None,
                          episode_id: Optional[str] = None,
                          baseline_return: Optional[float] = None
                          ) -> int:
-        """Attach the terminal outcome to this episode's buffered records and
-        flush them to the JSONL log. Returns the number of records written."""
         if self.mode == "off":
             return 0
         writer = self._writer_for()
         written = 0
         for key, record in sorted(self._buffer.items()):
-            if run_id is not None and record["run_id"] != run_id:
+            if record["run_id"] != self._run_id:
                 continue
             if episode_id is not None and record["episode_id"] != episode_id:
                 continue
@@ -311,12 +510,12 @@ class ZergTreeRuntime:
                 written += 1
                 self.stats["decisions_recorded"] += 1
         for key in [k for k, r in self._buffer.items()
-                    if (run_id is None or r["run_id"] == run_id)
+                    if r["run_id"] == self._run_id
                     and (episode_id is None or r["episode_id"] == episode_id)]:
             del self._buffer[key]
-        self.log_event("episode_finished", run_id=run_id,
-                       episode_id=episode_id, outcome=outcome,
-                       episode_return=episode_return,
+        self._episode_closed = True       # explicit new-episode boundary
+        self.log_event("episode_finished", episode_id=episode_id,
+                       outcome=outcome, episode_return=episode_return,
                        baseline_return=baseline_return,
                        ally_losses=ally_losses, enemy_losses=enemy_losses,
                        damage_dealt=damage_dealt,
@@ -327,26 +526,57 @@ class ZergTreeRuntime:
 
     # -- internals ----------------------------------------------------------
     _last_state_features: Optional[Dict[str, Any]] = None
+    _pending_identity: Optional[Tuple[str, str, str]] = None
+
+    def prepare_decision(self, payload: Dict[str, Any], manager: Any
+                         ) -> Tuple[str, str, str]:
+        """Resolve the (run_id, episode_id, scene identity) BEFORE the
+        manager steps, so propose-time recording and collector episode
+        wipes happen under the correct identity. Idempotent per decision:
+        the result is cached for observe_step."""
+        state = payload.get("state", {}) or {}
+        raw_episode = str(state.get("episode", 0))
+        game_loop = int(state.get("game_loop", 0) or 0)
+        expected_snapshot = int(getattr(manager, "_snapshot_counter", 0)) + 1
+        key = str(raw_episode)
+        is_new_game = self._episode_closed \
+            or (self._last_snapshot_id is not None
+                and expected_snapshot < self._last_snapshot_id) \
+            or (self._last_loop is not None and game_loop < self._last_loop)
+        self._episode_closed = False
+        if is_new_game:
+            count = self._episode_seen.get(key, 0)
+            self._episode_seen[key] = count + 1
+            if count:
+                key = f"{key}_r{count + 1}"
+        elif key not in self._episode_seen:
+            self._episode_seen[key] = 1
+        self._last_loop = game_loop
+        self._last_snapshot_id = expected_snapshot
+        if self._active_collector is not None \
+                and self._active_collector.episode_id != key:
+            self._active_collector.start_episode(self._run_id, key)
+        self._pending_identity = (self._run_id, key, str(state.get("map",
+                                   "unknown")))
+        return self._pending_identity
 
     def observe_step(self, payload: Dict[str, Any], manager: Any,
                      actions: List[int], summary: Dict[str, Any]
                      ) -> Tuple[List[int], Dict[str, Any], Optional[Dict]]:
-        """Shared shadow/tree_score path. Returns possibly-swapped actions,
-        the (possibly annotated) summary, and the decision meta."""
         state = payload.get("state", {}) or {}
         snapshot = self._read_snapshot(manager)
         context = self._read_context(manager)
         self._last_state_features = self.extractor.extract_state(
             snapshot, context=context) if snapshot is not None else None
-        run_id = str(self.config.get("run_id")
-                     or f"run_{state.get('episode', 0)}_{state.get('game_loop', 0)}")
-        episode = str(state.get("episode", 0))
+        prepared = self._pending_identity or self.prepare_decision(payload,
+                                                                   manager)
+        self._pending_identity = None
+        _, episode, _ = prepared
         map_field = state.get("map", "unknown")
-        if isinstance(map_field, dict):       # adapter maps carry {"name": …}
+        if isinstance(map_field, dict):
             map_field = map_field.get("name") or "unknown"
-        scene_config_id = str(state.get("scene_config_id")
-                              or f"roster:{len(state.get('allies', {}) or {})}"
-                              f":{map_field}")
+        scene_config_id, scene_config_source = self._scene_config(
+            snapshot, map_field)
         seed = state.get("seed")
         seed = int(seed) if isinstance(seed, int) else None
 
@@ -355,11 +585,22 @@ class ZergTreeRuntime:
             schema=self.schema) if snapshot is not None else []
         teacher = candidates[0].candidate_id if candidates else None
         rule_actions = list(actions)
-        meta: Dict[str, Any] = {"mode": self.mode, "run_id": run_id}
+        meta: Dict[str, Any] = {"mode": self.mode, "run_id": self._run_id,
+                                "episode_id": episode}
 
-        model = self.scorer_model("joint_scorer")
-        scores = score_candidates(self._last_state_features or {}, candidates,
-                                  model=model) if candidates else []
+        models = {name: self.scorer_model(name)
+                  for name in ("zergling_scorer", "hydralisk_scorer",
+                               "baneling_scorer", "joint_scorer")}
+        scores, route_counts = (score_routed(
+            self._last_state_features or {}, candidates, models,
+            schema=self.schema) if candidates else ([], {}))
+        self.stats.setdefault("routed_candidates", {})
+        if isinstance(self.stats.get("routed_candidates"), dict):
+            for slot, count in route_counts.items():
+                if count:
+                    self.stats["routed_candidates"][slot] = \
+                        self.stats["routed_candidates"].get(slot, 0) + count
+        meta["route_counts"] = route_counts
         meta["scores"] = [row.to_record() for row in scores]
         supported = [row for row in scores if row.supported]
         predicted = None
@@ -375,101 +616,174 @@ class ZergTreeRuntime:
         meta["agree"] = (predicted == teacher) if predicted else None
         if predicted is not None and predicted != teacher:
             self.stats["shadow_disagreements"] += 1
-        self.log_event("proposed", run_id=run_id, episode_id=episode,
+        self.log_event("proposed", episode_id=episode,
+                       scene_config_id=scene_config_id,
                        snapshot_id=getattr(snapshot, "snapshot_id", None),
                        game_loop=getattr(snapshot, "game_loop", None),
                        teacher_choice=teacher, model_choice=predicted,
                        n_candidates=len(candidates),
                        execution_context_hash=self._context_hash)
 
+        # Task 4.1: BASE complete-plan candidate (REAL Coordinator plans).
+        base_complete = self._base_complete_candidate(
+            manager, snapshot, summary, candidates, teacher)
+
         selected = teacher
         final_actions_map = {f"u{i}": action for i, action
                              in enumerate(rule_actions)}
         execution_status = "pending"
-        tree_events: List[Dict[str, Any]] = []
         if self.mode == "tree_score":
             selector_config = self.config.get("selector", {})
-            decision = select_skill_plan(
-                self._last_state_features or {}, candidates, model=model,
-                min_gain=float(selector_config.get("min_gain", 0.0)),
-                tie_tolerance=float(selector_config.get("tie_tolerance", 1e-9)),
-                schema=self.schema)
-            meta["selection"] = {k: v for k, v in decision.items()
-                                 if k != "scores"}
-            selected = decision.get("selected_candidate_id") or teacher
-            if decision.get("changed") and decision.get("selected_actions"):
+            if not self._tree_score_ready(manager, model, base_complete):
+                self.stats["tree_score_blocked"] += 1
+                self.log_event("rejected", episode_id=episode,
+                               reason="tree_score_gate_failed",
+                               fallback="base")
+            else:
+                decision = select_skill_plan(
+                    self._last_state_features or {}, candidates, model=model,
+                    min_gain=float(selector_config.get("min_gain", 0.0)),
+                    tie_tolerance=float(selector_config.get(
+                        "tie_tolerance", 1e-9)),
+                    schema=self.schema)
+                meta["selection"] = {k: v for k, v in decision.items()
+                                     if k != "scores"}
                 selected_candidate = next(
                     (c for c in candidates
-                     if c.candidate_id == decision["selected_candidate_id"]),
-                    None)
-                replacement = apply_selected_plan(
-                    selected_candidate, manager, context=context,
-                    memory=getattr(manager, "memory", None))
-                meta["replacement"] = {k: v for k, v in replacement.items()
-                                       if k in ("applied", "reason",
-                                                "replaced_plan_ids",
-                                                "validator_problems",
-                                                "repair_log",
-                                                "commit_status")}
-                if replacement.get("applied"):
-                    swapped = self._actions_list(replacement["final_actions"],
-                                                 len(rule_actions))
-                    if swapped is not None:
-                        self._update_manager_plan_state(
-                            manager, replacement["final_plans"],
-                            swapped, summary)
-                        rule_actions = swapped
-                        self.stats["tree_score_changes"] += 1
-                        execution_status = "pending"
-                        final_actions_map = dict(replacement["final_actions"])
-                        self.log_event(
-                            "selected", run_id=run_id, episode_id=episode,
-                            selected=selected, replaced=True,
-                            replaced_plan_ids=replacement["replaced_plan_ids"],
-                            validator_problems=[],
-                            rule_actions_hash=actions_hash(
-                                summary.get("actions", {})),
-                            final_actions_hash=actions_hash(swapped))
+                     if c.candidate_id ==
+                     decision.get("selected_candidate_id")), None)
+                if decision.get("changed") and selected_candidate is not None:
+                    # Summary-level candidates carry no complete branch
+                    # objects: apply_* refuses and we fall back to BASE —
+                    # selected_candidate then records the ACTUAL BASE.
+                    replacement = apply_selected_plan(
+                        selected_candidate, manager, context=context,
+                        memory=getattr(manager, "memory", None))
+                    meta["replacement"] = {
+                        k: v for k, v in replacement.items()
+                        if k in ("applied", "reason", "replaced_plan_ids",
+                                 "validator_problems", "repair_log",
+                                 "commit_status")}
+                    if replacement.get("applied"):
+                        swapped = self._actions_list(
+                            replacement["final_actions"], len(rule_actions))
+                        if swapped is not None:
+                            self._update_manager_plan_state(
+                                manager, replacement["final_plans"],
+                                swapped, summary)
+                            rule_actions = swapped
+                            selected = selected_candidate.candidate_id
+                            self.stats["tree_score_changes"] += 1
+                            final_actions_map = dict(
+                                replacement["final_actions"])
+                            self.log_event(
+                                "selected", episode_id=episode,
+                                selected=selected, replaced=True,
+                                replaced_plan_ids=replacement[
+                                    "replaced_plan_ids"],
+                                validator_problems=[],
+                                rule_actions_hash=actions_hash(
+                                    summary.get("actions", {})),
+                                final_actions_hash=actions_hash(swapped))
+                        else:
+                            selected = teacher
+                            self.stats["tree_score_fallbacks"] += 1
+                            self.log_event("rejected", episode_id=episode,
+                                           reason="action_list_incomplete",
+                                           fallback="base")
                     else:
+                        # Phase 7 fix: record the ACTUAL fallback target.
+                        selected = teacher
                         self.stats["tree_score_fallbacks"] += 1
-                        self.log_event("rejected", run_id=run_id,
-                                       episode_id=episode,
-                                       reason="action_list_incomplete",
+                        self.log_event("rejected", episode_id=episode,
+                                       reason=replacement.get("reason"),
                                        fallback="base")
-                else:
-                    # Task 5.2: replacement failed -> complete BASE fallback.
-                    self.stats["tree_score_fallbacks"] += 1
-                    self.log_event("rejected", run_id=run_id,
-                                   episode_id=episode,
-                                   reason=replacement.get("reason"),
-                                   fallback="base")
         self.record_decision(
-            run_id=run_id, episode_id=episode,
-            scene_config_id=scene_config_id, seed=seed, map_id=str(map_field),
-            snapshot=snapshot, candidates=candidates,
+            episode_id=episode, scene_config_id=scene_config_id,
+            scene_config_source=scene_config_source, seed=seed,
+            map_id=str(map_field), snapshot=snapshot, candidates=candidates,
             teacher_choice=teacher, model_scores=meta["scores"],
             selected_candidate=selected, final_actions=final_actions_map,
             execution_status=execution_status,
-            skill_proposals=self._skill_proposals(manager, snapshot))
+            skill_proposals=self._skill_proposals(snapshot))
+        meta["selected_candidate"] = selected
         return rule_actions, summary, meta
 
-    def _skill_proposals(self, manager: Any, snapshot) -> Optional[Dict]:
-        collector = getattr(self, "_active_collector", None) or \
-            getattr(manager, "_zerg_collector", None)
-        if collector is None or snapshot is None:
+    # -- complete-plan candidates (Task 4.1) --------------------------------
+    def _base_complete_candidate(self, manager, snapshot, summary,
+                                 candidates, teacher
+                                 ) -> Optional[CompletePlanCandidate]:
+        pending = getattr(manager, "_pending_commit", None)
+        if not pending:
             return None
-        try:
-            return collector.records_for(int(snapshot.snapshot_id),
-                                         int(snapshot.game_loop))
-        except Exception:
+        plans = list(pending[1] or ())
+        if not plans:
             return None
+        chosen = (summary.get("chosen_plans") or [{}])[0] \
+            if summary.get("chosen_plans") else {}
+        score = chosen.get("score")
+        actions_by_actor = {f"u{i}": action for i, action
+                            in enumerate(summary.get("actions", ()) or ())}
+        claims = {}
+        dependencies = []
+        for plan in plans:
+            for control in getattr(getattr(plan, "claims", None),
+                                   "controls", ()) or ():
+                claims.setdefault("controls", []).append(control)
+            dependencies.extend(
+                {"kind": getattr(d, "kind", ""),
+                 "refs": list(getattr(d, "refs", ()) or ())}
+                for d in getattr(plan, "dependencies", ()) or ())
+        return CompletePlanCandidate(
+            candidate_id=teacher or "joint_rule_choice",
+            snapshot_id=int(getattr(snapshot, "snapshot_id", 0) or 0),
+            plans=plans,
+            actions=actions_by_actor,
+            resource_claims=claims,
+            dependencies=dependencies,
+            execution_duties=dict(
+                (summary.get("execution_duties") or {}).get("actors") or {}),
+            rule_score=float(score) if isinstance(score, (int, float))
+            else None,
+            candidate_features={},
+            legal=True,
+            source_plan_ids=[str(getattr(p, "proposal_id", ""))
+                             for p in plans],
+            candidate_skill=str(chosen.get("skill") or "joint"),
+            plan_objects_available=True)
 
+    # -- tree_score gate (Task 4.4) -----------------------------------------
+    def _tree_score_ready(self, manager, model: Optional[ScorerModel],
+                          base_complete: Optional[CompletePlanCandidate]
+                          ) -> bool:
+        checks = {
+            "model_loaded": model is not None,
+            "model_target_sortable": model is not None
+            and model.record.get("target") in SORTABLE_MODEL_TARGETS,
+            "source_fingerprint_verified": self._source_fingerprint is not None,
+            "feature_schema_verified": True,   # enforced at model load time
+            "complete_plan_objects": bool(base_complete
+                                          and base_complete.plans
+                                          and base_complete.
+                                          plan_objects_available),
+            "validator_available":
+                getattr(manager, "evaluator", None) is not None,
+            "manager_state_updatable": getattr(manager, "_pending_commit",
+                                               None) is not None
+            and getattr(manager, "_cache", None) is not None,
+        }
+        if not all(checks.values()):
+            self.last_tree_score_gate = checks
+            return False
+        self.last_tree_score_gate = checks
+        return True
+
+    last_tree_score_gate: Dict[str, bool] = {}
+
+    # -- manager state (Task 4.3) -------------------------------------------
     @staticmethod
     def _update_manager_plan_state(manager: Any, plans, actions_list,
                                    summary: Dict[str, Any]) -> None:
-        """Task 5.2 (6/7): refresh the manager's final plan state so the
-        ORIGINAL commit logic sees the replaced plan set. Memory commit
-        conditions themselves are untouched."""
         pending = getattr(manager, "_pending_commit", None)
         if pending:
             snapshot, _, micro_actions, risk_now, context = pending
@@ -479,6 +793,27 @@ class ZergTreeRuntime:
         if cache:
             manager._cache = (cache[0], list(actions_list), cache[2],
                               list(plans), cache[4])
+        if summary is not None:
+            summary["chosen_plans"] = [
+                {"id": str(getattr(p, "proposal_id", "")),
+                 "skill": getattr(p, "primary_skill", ""),
+                 "provider": getattr(p, "specialization_provider", None),
+                 "actors": list(getattr(p, "controlled_actors", ()) or ()),
+                 "goal": getattr(p, "goal", None),
+                 "score": None,
+                 "rationale": getattr(p, "rationale", "")
+                 or "tree_score_replacement"}
+                for p in plans]
+
+    def _skill_proposals(self, snapshot) -> Optional[Dict]:
+        collector = self._active_collector
+        if collector is None or snapshot is None:
+            return None
+        try:
+            return collector.records_for(int(snapshot.snapshot_id),
+                                         int(snapshot.game_loop))
+        except Exception:
+            return None
 
     @staticmethod
     def _actions_list(actions_by_actor: Dict[str, int],
@@ -509,27 +844,47 @@ class ZergTreeRuntime:
         return None
 
 
+def import_module_of(manager: Any):
+    import importlib
+    return importlib.import_module(type(manager).__module__)
+
+
+def sys_module(manager: Any):        # kept for interface compatibility
+    return import_module_of(manager)
+
+
 class _RuntimeController:
-    """Wraps a SkillManager without touching its class: step -> optional
-    shadow/tree_score processing; commit_final_actions passes straight
-    through so the ORIGINAL memory-commit conditions keep control."""
+    """Wraps a SkillManager without touching its class; commit_final_actions
+    delegates straight through so the ORIGINAL memory-commit conditions keep
+    control."""
 
     def __init__(self, manager: Any, runtime: ZergTreeRuntime):
+        if hasattr(manager, "source_fingerprint"):
+            manager = manager.manager       # unwrap a factory bundle
         self.manager = manager
         self.runtime = runtime
         self.collector: Optional[SkillProposalCollector] = None
         self.last_meta: Optional[Dict[str, Any]] = None
         self._pending_actions: Optional[List[int]] = None
 
-    def __getattr__(self, name):          # delegate everything else
+    def __getattr__(self, name):
         return getattr(self.manager, name)
 
     def reset(self) -> None:
         self.manager.reset()
+        # Task 1.1.6 / 1.4: run identity survives; episode state drops.
+        self.runtime.reset()
+        if self.collector is not None:
+            self.collector.reset()
 
     def step(self, payload: Dict[str, Any], n_agents: int):
-        actions, summary = self.manager.step(payload, n_agents)
         runtime = self.runtime
+        if runtime.mode != "off":
+            try:
+                runtime.prepare_decision(payload, self.manager)
+            except Exception as exc:
+                runtime.last_error = f"identity:{type(exc).__name__}: {exc}"
+        actions, summary = self.manager.step(payload, n_agents)
         try:
             processed, annotated, meta = runtime.observe_step(
                 payload, self.manager, actions, summary)
@@ -548,7 +903,8 @@ class _RuntimeController:
                 "tree_actions": [int(a) for a in processed],
                 "execution_context_hash": runtime.execution_context_hash,
             }
-            runtime.log_event("submitted", run_id=meta.get("run_id"),
+            runtime.log_event("submitted",
+                              episode_id=meta.get("episode_id"),
                               rule_actions_hash=actions_hash(actions),
                               final_actions_hash=actions_hash(processed),
                               replaced_units=[
@@ -561,7 +917,8 @@ class _RuntimeController:
             annotated = copy.deepcopy(annotated)
             annotated["zerg_tree"] = {"mode": runtime.mode,
                                       "changed": False}
-            runtime.log_event("submitted", run_id=meta.get("run_id"),
+            runtime.log_event("submitted",
+                              episode_id=meta.get("episode_id"),
                               rule_actions_hash=actions_hash(actions),
                               final_actions_hash=actions_hash(actions),
                               replaced_units=[], reason=None)
@@ -569,16 +926,38 @@ class _RuntimeController:
         return actions, summary
 
     def commit_final_actions(self, final_actions: List[int]) -> None:
-        # Straight delegation: TacticalMemory commits remain governed by the
-        # manager's own surviving-plan checks against the FINAL action list.
-        self.manager.commit_final_actions(final_actions)
+        """Phase 7: distinguish (a) the commit call completing, (b) the
+        manager's memory actually committing new plan state, (c) nothing new
+        committed (idempotent re-read or plans dropped by arbitration). The
+        decision tree NEVER controls this — full delegation to the manager's
+        own surviving-plan logic."""
         runtime = self.runtime
+        before_actions = getattr(self.manager.memory,
+                                 "last_committed_actions", None)
+        before_flag = bool(getattr(self.manager.memory, "committed", False))
+        self.manager.commit_final_actions(final_actions)
+        after_actions = getattr(self.manager.memory,
+                                "last_committed_actions", None)
+        final_map = {f"u{i}": a for i, a in enumerate(final_actions)}
+        if after_actions is None:
+            memory_commit = "none"
+        elif before_actions is not None and after_actions == before_actions:
+            memory_commit = ("idempotent" if before_flag
+                             else "none")
+        elif all(after_actions.get(actor) == action
+                 for actor, action in final_map.items()
+                 if actor in after_actions):
+            memory_commit = "new_commit"
+        else:
+            memory_commit = "partial_or_arbitrated"
         if runtime.mode != "off":
             runtime.log_event(
                 "committed",
-                run_id=self.last_meta.get("run_id") if self.last_meta else None,
+                episode_id=(self.last_meta or {}).get("episode_id"),
                 rule_actions_hash=actions_hash(
                     self._pending_actions or final_actions),
                 final_actions_hash=actions_hash(final_actions),
+                commit_call_completed=True,
+                memory_commit=memory_commit,
                 note=("original surviving-plan memory commit passed; NOT an "
                       "SC2 engine acknowledgement"))

@@ -1,6 +1,6 @@
 """A-class (skill-internal) proposal collection without re-calling propose.
 
-Phase 4 contract:
+Phase 4 contract (V1.1) + V1.2 cross-episode isolation:
 
 - the ONLY source of A-class candidates is the plans each skill already
   returned to the Coordinator inside the normal ``step`` flow. The
@@ -10,14 +10,22 @@ Phase 4 contract:
   touched, the Coordinator's candidate set and the decision lifecycle
   (including the step cache) are unchanged, and Shadow mode never alters
   actions.
+- V1.2 (Task 1.4): every decision is keyed by
+  ``(run_id, episode_id, snapshot_id, game_loop)``. The runtime announces
+  the run/episode identity (and each new episode) via
+  ``start_episode``/``announce_decision``; retrieval validates the calling
+  snapshot identity against the announced one, so a second episode can
+  never read the first episode's buffered candidates — even when
+  snapshot_ids repeat across episodes.
 - per-decision output: for every recorded skill, the candidate records
   (target/phase/goal/controlled actors/ResourceClaims/Dependencies/rule
-  feature channels/source proposal id) plus the decision key that links
-  them to the B-class joint candidates of the SAME decision point.
+  feature channels/source proposal id/task identity) plus the decision
+  key that links them to the B-class joint candidates of the SAME
+  decision point.
 - A-class candidates keep ``candidate_family="skill_internal"`` and their
-  own candidate groups (one group per decision point per skill); they are
-  never counted as complete joint plans and joint plans are never split
-  into per-unit "action samples".
+  own candidate groups (one group per decision point, skill AND task
+  identity); they are never counted as complete joint plans and joint
+  plans are never split into per-unit "action samples".
 """
 from __future__ import annotations
 
@@ -30,6 +38,8 @@ PRIORITY_SKILLS = ("focus_fire", "coordinated_engage", "combat_reposition",
                    "disengage_reenter", "ranged_fire_formation",
                    "burst_engage")
 
+DecisionKey = Tuple[str, str, int, int]
+
 
 class SkillProposalCollector:
     """Passive recorder over the skill instances owned by a SkillManager."""
@@ -40,9 +50,13 @@ class SkillProposalCollector:
         self.enabled = tuple(enabled)
         self.schema = schema
         self.propose_calls: Dict[str, int] = {name: 0 for name in self.enabled}
-        # (snapshot_id, game_loop) -> {skill: [ZergCandidate]}
-        self._decisions: Dict[Tuple[int, int], Dict[str, List[Any]]] = {}
+        # (run_id, episode_id, snapshot_id, game_loop) -> {skill: [ZergCandidate]}
+        self._decisions: Dict[DecisionKey, Dict[str, List[Any]]] = {}
         self._manager: Optional[Any] = None
+        # Current episode identity announced by the runtime.
+        self.run_id: Optional[str] = None
+        self.episode_id: Optional[str] = None
+        self._episodes_seen: set = set()
 
     # -- installation -------------------------------------------------------
     def install(self, manager: Any) -> "SkillProposalCollector":
@@ -69,15 +83,43 @@ class SkillProposalCollector:
             skill._zerg_propose_wrapped = True
         return self
 
+    # -- episode lifecycle (V1.2 Task 1.4) ----------------------------------
+    def start_run(self, run_id: str) -> None:
+        self.run_id = str(run_id)
+        self.episode_id = None
+        self._decisions.clear()
+        self._episodes_seen.clear()
+
+    def start_episode(self, run_id: str, episode_id: str) -> None:
+        """Announce a NEW episode: wipes the previous episode's buffer so a
+        later decision can never read candidates from an earlier game."""
+        self.run_id = str(run_id)
+        if episode_id in self._episodes_seen and \
+                episode_id != self.episode_id:
+            raise ValueError(f"episode_id {episode_id!r} already used in "
+                             f"run {self.run_id!r}")
+        self.episode_id = str(episode_id)
+        self._episodes_seen.add(self.episode_id)
+        self._decisions.clear()
+
+    def reset(self) -> None:
+        """Full reset (controller.reset): run identity survives in the
+        runtime; the collector drops ALL buffered state."""
+        self._decisions.clear()
+        self.episode_id = None
+
     # -- recording ----------------------------------------------------------
     def _record(self, skill_name: str, context, plans: Sequence[Any]) -> None:
         if skill_name not in self.propose_calls:
             return
+        if self.run_id is None or self.episode_id is None:
+            return                      # no announced identity: never buffer
         self.propose_calls[skill_name] += 1
         snapshot = getattr(context, "snapshot", None)
         if snapshot is None:
             return
-        key = (int(getattr(snapshot, "snapshot_id", 0) or 0),
+        key = (self.run_id, self.episode_id,
+               int(getattr(snapshot, "snapshot_id", 0) or 0),
                int(getattr(snapshot, "game_loop", 0) or 0))
         bucket = self._decisions.setdefault(key, {})
         stored = bucket.setdefault(skill_name, [])
@@ -88,15 +130,25 @@ class SkillProposalCollector:
                 schema=self.schema))
 
     # -- retrieval ----------------------------------------------------------
-    def decision_key(self, snapshot_id: int, game_loop: int) -> Tuple[int, int]:
-        return (int(snapshot_id), int(game_loop))
+    def decision_key(self, snapshot_id: int, game_loop: int
+                     ) -> Tuple[Optional[str], Optional[str], int, int]:
+        return (self.run_id, self.episode_id,
+                int(snapshot_id), int(game_loop))
 
     def candidates_for(self, snapshot_id: int, game_loop: int
                        ) -> Dict[str, List[Any]]:
-        """ZergCandidate objects per skill for one decision point. Read-only;
-        calling this never triggers propose."""
-        return dict(self._decisions.get(
-            self.decision_key(snapshot_id, game_loop), {}))
+        """ZergCandidate objects per skill for the CURRENT decision point.
+
+        Task 1.4.4: the request is validated against the announced
+        (run_id, episode_id); a snapshot_id/game_loop pair from another
+        episode returns nothing instead of leaking stale candidates.
+        Read-only; calling this never triggers propose."""
+        if self.run_id is None or self.episode_id is None:
+            return {}
+        key = self.decision_key(snapshot_id, game_loop)
+        if key not in self._decisions:
+            return {}                   # identity mismatch -> no stale reads
+        return dict(self._decisions[key])
 
     def records_for(self, snapshot_id: int, game_loop: int
                     ) -> Dict[str, List[Dict[str, Any]]]:
@@ -108,13 +160,15 @@ class SkillProposalCollector:
 
     def forget_before(self, snapshot_id: int, game_loop: int) -> None:
         """Drop decision buffers strictly older than the given key (memory
-        hygiene for long episodes; committed decisions are already
+        hygiene within one episode; committed decisions are already
         persisted by the runtime's record writer)."""
-        stale = [key for key in self._decisions if key < (snapshot_id,
-                                                          game_loop)]
+        floor = self.decision_key(snapshot_id, game_loop)
+        stale = [key for key in self._decisions if key < floor]
         for key in stale:
             del self._decisions[key]
 
     def summary(self) -> Dict[str, Any]:
         return {"propose_calls": dict(self.propose_calls),
-                "buffered_decisions": len(self._decisions)}
+                "buffered_decisions": len(self._decisions),
+                "run_id": self.run_id,
+                "episode_id": self.episode_id}

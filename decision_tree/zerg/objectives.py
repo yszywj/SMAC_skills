@@ -91,6 +91,10 @@ def ranking_pairs(rows: Sequence[Dict[str, Any]],
                     "lower_id": lower["candidate_id"],
                     "higher_features": higher["features"],
                     "lower_features": lower["features"],
+                    # candidate-level realised gains (for gain-based NDCG);
+                    # None when that side has no realised outcome
+                    "higher_gain": higher.get("gain"),
+                    "lower_gain": lower.get("gain"),
                     "margin": abs(margin),
                     "weight": min(a["weight"], b["weight"]),
                     "provenance": provenance,

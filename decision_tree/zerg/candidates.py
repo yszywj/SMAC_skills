@@ -28,6 +28,7 @@ from .features import (
     DEFAULT_SCHEMA, ZergFeatureSchema, extract_candidate_features)
 
 CANDIDATE_SCHEMA = "zerg_candidate_v1"
+COMPLETE_PLAN_SCHEMA = "zerg_complete_plan_candidate_v1"
 FAMILY_SKILL_INTERNAL = "skill_internal"
 FAMILY_JOINT_PLAN = "joint_plan"
 
@@ -63,7 +64,9 @@ def _dependencies_list(dependencies: Any) -> List[Dict[str, Any]]:
 @dataclass
 class ZergCandidate:
     """Uniform candidate record; ``plan`` keeps the live source object and is
-    excluded from serialisation and equality."""
+    excluded from serialisation and equality. ``instance_id``/``task_key``
+    carry the skill-internal task identity used to build A-class proposal
+    groups (never model features)."""
     candidate_id: str
     candidate_family: str
     candidate_skill: str
@@ -80,6 +83,8 @@ class ZergCandidate:
     rejection_reason: Optional[str]
     source_plan_id: str
     rule_score: Optional[float] = None
+    instance_id: Optional[str] = None
+    task_key: Optional[str] = None
     plan: Any = field(default=None, repr=False, compare=False)
 
     def to_record(self) -> Dict[str, Any]:
@@ -101,6 +106,57 @@ class ZergCandidate:
             "rejection_reason": self.rejection_reason,
             "source_plan_id": self.source_plan_id,
             "rule_score": self.rule_score,
+            "instance_id": self.instance_id,
+            "task_key": self.task_key,
+        }
+
+
+@dataclass
+class CompletePlanCandidate:
+    """Task 4.1: a B-class candidate bound to the Coordinator's REAL
+    complete plan objects for the current decision step.
+
+    ``plans`` must be the full plan set of one Coordinator branch (BASE from
+    the manager's pending commit; a Coordinator alternative when the runner
+    exposes those objects). ``plan_objects_available=False`` marks
+    summary-level candidates (actions only) — they may be scored and
+    recorded but can NEVER trigger a Tree Score replacement, and a set of
+    per-skill local plans must never be presented as one joint branch.
+    """
+    candidate_id: str
+    snapshot_id: int
+    plans: List[Any]
+    actions: Dict[str, int]
+    resource_claims: Dict[str, Any]
+    dependencies: List[Dict[str, Any]]
+    execution_duties: Dict[str, Any]
+    rule_score: Optional[float]
+    candidate_features: Dict[str, float]
+    legal: bool
+    source_plan_ids: List[str]
+    candidate_skill: str = "joint"
+    plan_objects_available: bool = False
+
+    @property
+    def atomic(self) -> bool:
+        return True        # a complete branch is replaced as a whole
+
+    def to_record(self) -> Dict[str, Any]:
+        return {
+            "schema": COMPLETE_PLAN_SCHEMA,
+            "candidate_id": self.candidate_id,
+            "snapshot_id": self.snapshot_id,
+            "actions": dict(self.actions),
+            "resource_claims": self.resource_claims,
+            "dependencies": self.dependencies,
+            "execution_duties": self.execution_duties,
+            "rule_score": self.rule_score,
+            "candidate_features": dict(self.candidate_features),
+            "legal": bool(self.legal),
+            "source_plan_ids": list(self.source_plan_ids),
+            "candidate_skill": self.candidate_skill,
+            "plan_objects_available": bool(self.plan_objects_available),
+            "n_plans": len(self.plans),
         }
 
 
@@ -167,6 +223,10 @@ def candidate_from_plan(plan, snapshot, context=None,
         rejection_reason=reason,
         source_plan_id=str(getattr(plan, "proposal_id", "")),
         rule_score=rule_score,
+        instance_id=(str(getattr(plan, "instance_id", None))
+                     if getattr(plan, "instance_id", None) else None),
+        task_key=(str(getattr(plan, "task_key", None))
+                  if getattr(plan, "task_key", None) else None),
         plan=plan)
 
 
