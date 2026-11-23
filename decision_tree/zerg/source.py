@@ -140,6 +140,31 @@ class ZergSkillSourceResolver:
             return alt
         return candidate
 
+    def _relative_to_workspace(self, path: Path) -> str:
+        try:
+            return str(path.resolve().relative_to(self.workspace.resolve()))
+        except ValueError:
+            return str(path)
+
+    def write_gitignore(self) -> Optional[Path]:
+        """Task 3.3: the resolved tree is a generated artefact — exclude it
+        from version control (append-only; existing entries preserved)."""
+        gitignore = self.workspace / ".gitignore"
+        entry = "decision_tree/zerg/resolved/"
+        existing = set()
+        if gitignore.is_file():
+            existing = {line.strip()
+                        for line in gitignore.read_text().splitlines()}
+        if entry in existing:
+            return gitignore
+        with gitignore.open("a", encoding="utf-8") as handle:
+            if existing:
+                handle.write("")
+            handle.write(f"\n# generated artefact: rebuild via "
+                         f"decision_tree/scripts/linux/resolve_source.py\n"
+                         f"{entry}\n")
+        return gitignore
+
     # -- resolution ---------------------------------------------------------
 
     def resolve(self, verify_syntax: bool = True,
@@ -172,9 +197,11 @@ class ZergSkillSourceResolver:
             "schema_version": MANIFEST_SCHEMA,
             "fingerprint_schema": FINGERPRINT_SCHEMA,
             "fingerprint": fingerprint,
-            "base_dir": str(self.base_dir),
-            "overlay_dir": str(self.overlay_dir),
-            "output_dir": str(self.output_dir),
+            # Task 3.3: the resolved tree is a REGENERABLE artefact — the
+            # manifest stores workspace-relative paths where possible.
+            "base_dir": self._relative_to_workspace(self.base_dir),
+            "overlay_dir": self._relative_to_workspace(self.overlay_dir),
+            "output_dir": self._relative_to_workspace(self.output_dir),
             "counts": {
                 "base": sum(1 for r in rows if r["source"] == "base"
                             and not r["overridden"]),

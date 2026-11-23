@@ -123,3 +123,31 @@ Ran 7 tests ... OK
 6. 收益标签（gain/ranking/correction）依赖真实配对反事实回执，本框架只提供
    契约与审计，不生成任何无证据标签；
 7. 192 棵树（`number_of_trees=192`）为可选容量，未做默认，也未做超参搜索。
+
+---
+
+# V1.1 新增文件与变更（2026-11-23）
+
+新增：`factory.py`（统一 SkillManager 工厂，resolved 树绑定）、
+`proposal_collector.py`（A 类候选采集，不重复调 propose）、
+`experiment.py` + `configs/exploration.json`（有界干预预算/冷却/族预算）、
+`experiment_manifest.py`（实验冻结清单与进度）、
+`TRAINING_PROTOCOL.md`、`LIMITATIONS.md`、`tests/test_v11.py`（16 项 V1.1 验收）。
+
+关键修复：
+- 特征训练/推理不一致 → 唯一拼接 `schema.build_model_features`，模型
+  feature_names 强制同序；整层缺失拒绝评分，单点缺失才可插补并记录比例；
+- 数据身份 → run_id/episode_id/scene_config_id/seed/map_id，
+  record_key 含 run_id；切分按独立 Episode（跨配置按 scene_config_id 留出），
+  分组清单落盘；
+- 反事实配对 → `zerg_counterfactual_pair_v1` + 审计（gain 恒等于
+  candidate_return - baseline_return，不完整配对不进训练）；
+- ranking → 真 Pairwise Ranking（`zerg_pairwise_ranking_model_v1`，
+  a./b. 成对布局 + 锦标赛推理）；correction → 冻结旧模型赢家重放
+  （veto_target = -赢家真实 gain），不再用实际最优替代；
+- tree_score → `apply_selected_plan` 完整计划替换（Validator+repair+
+  失败整体回退 BASE），无计划对象即拒绝；默认仍 off；
+- resolved 目录加入 .gitignore，manifest 相对路径，可随时重建。
+
+最小测试：`python -m unittest decision_tree.zerg.tests.test_minimal
+decision_tree.zerg.tests.test_v11` → 23 tests OK。

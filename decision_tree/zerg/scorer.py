@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .candidates import FAMILY_JOINT_PLAN, ZergCandidate
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema
+from .schema import FeatureLayerMissing, build_model_features, missing_report
 
 Score = Dict[str, Any]
 FallbackFn = Callable[[Dict[str, Any], Sequence[ZergCandidate]], Dict[str, float]]
@@ -60,6 +61,9 @@ class CandidateScores:
     rule_score: Optional[float] = None
     support_groups: int = 0
     support_samples: int = 0
+    missing_count: int = 0
+    missing_ratio: float = 0.0
+    missing_features: Optional[List[str]] = None
 
     def to_record(self) -> Dict[str, Any]:
         return {
@@ -71,6 +75,9 @@ class CandidateScores:
             "rule_score": self.rule_score,
             "support_groups": self.support_groups,
             "support_samples": self.support_samples,
+            "missing_count": self.missing_count,
+            "missing_ratio": self.missing_ratio,
+            "missing_features": self.missing_features or [],
         }
 
 
@@ -165,8 +172,10 @@ class ScorerModel:
 
 
 def _candidate_flat_features(candidate: ZergCandidate,
+                             state_features: Dict[str, Any],
                              schema: ZergFeatureSchema) -> Dict[str, float]:
-    return dict(candidate.features)
+    """Task 1.1: online rows use the SAME join as offline training."""
+    return build_model_features(state_features, candidate.features, schema)
 
 
 def score_candidates(state_features: Dict[str, Any],
@@ -208,7 +217,17 @@ def score_candidates(state_features: Dict[str, Any],
             row.reason = "candidate_not_legal_rule_fallback"
             results.append(row)
             continue
-        flat = _candidate_flat_features(candidate, schema)
+        try:
+            flat = _candidate_flat_features(candidate, state_features, schema)
+        except FeatureLayerMissing as exc:
+            # A whole layer absent is a plumbing error, never imputed away.
+            row.reason = f"layer_missing_{exc.layer}_rule_fallback"
+            results.append(row)
+            continue
+        report = missing_report(flat, model.feature_names)
+        row.missing_count = report["missing_count"]
+        row.missing_ratio = report["missing_ratio"]
+        row.missing_features = report["missing_features"]
         try:
             leaves = model.estimate(flat,
                                     candidate_skill=candidate.candidate_skill)
@@ -336,3 +355,75 @@ def build_default_scorers() -> Dict[str, SkillScorer]:
         "baneling_scorer": SkillScorer("baneling_scorer", "baneling"),
         "joint_scorer": SkillScorer("joint_scorer", None),
     }
+
+
+class PairwiseRankModel:
+    """Loaded pairwise ranking model (Phase 6.3).
+
+    Training unit = one ordered candidate comparison with the ``a.``/``b.``
+    feature layout and a positive margin target. Inference scores a
+    decision point by tournament counting: for each ordered pair (i, j),
+    score_i += p(i,j) - p(j,i). Deterministic, no action output, same
+    fallback semantics as the gain scorers."""
+
+    def __init__(self, model_record: Dict[str, Any]):
+        from .schema import validate_ranking_model
+        self.record = validate_ranking_model(model_record)
+        self.feature_names = list(self.record["feature_names"])
+        self.trees: List[Dict[str, Any]] = self.record["trees"]
+        self.aggregation = self.record.get("aggregation", "mean")
+        self.base_value = float(self.record.get("base_value", 0.0))
+        self.missing_imputation: Dict[str, float] = dict(
+            self.record.get("missing_imputation", {}))
+        self.tie_tolerance = float(self.record.get("tie_tolerance", 1e-9))
+
+    def _compare(self, higher_flat: Dict[str, float],
+                 lower_flat: Dict[str, float]) -> Tuple[float, bool]:
+        features = {f"a.{k}": v for k, v in higher_flat.items()}
+        features.update({f"b.{k}": v for k, v in lower_flat.items()})
+        leaves = []
+        total = 0.0
+        for tree in self.trees:
+            node = tree["root"]
+            while "feature" in node:
+                name = node["feature"]
+                value = features.get(name)
+                if value is None or (isinstance(value, float)
+                                     and math.isnan(value)):
+                    value = self.missing_imputation.get(name)
+                if value is None:
+                    return 0.0, False
+                node = node["left"] if value <= node["threshold"] \
+                    else node["right"]
+            total += float(tree.get("weight", 1.0)) * float(node["value"])
+            leaves.append(node)
+        if self.aggregation == "mean":
+            weights = math.fsum(float(t.get("weight", 1.0))
+                                for t in self.trees)
+            value = total / weights if weights else 0.0
+        else:
+            value = total + self.base_value
+        supported = all(bool(leaf.get("supported", False)) for leaf in leaves)
+        return value, supported
+
+    def score_candidates(self, flat_by_candidate: Dict[str, Dict[str, float]],
+                         candidate_ids: Optional[Sequence[str]] = None
+                         ) -> Dict[str, Dict[str, Any]]:
+        """Tournament scores per candidate id; unsupported pairs contribute
+        0 and mark the whole point unsupported."""
+        ids = list(candidate_ids or flat_by_candidate)
+        scores = {cid: 0.0 for cid in ids}
+        supported = True
+        for i, a in enumerate(ids):
+            for b in ids[i + 1:]:
+                ab, ab_ok = self._compare(flat_by_candidate[a],
+                                          flat_by_candidate[b])
+                ba, ba_ok = self._compare(flat_by_candidate[b],
+                                          flat_by_candidate[a])
+                if not (ab_ok and ba_ok):
+                    supported = False
+                    continue
+                scores[a] += ab - ba
+                scores[b] += ba - ab
+        return {cid: {"score": scores[cid], "supported": supported}
+                for cid in ids}

@@ -274,6 +274,7 @@ class TestTrainingRoundTrip(unittest.TestCase):
                     layer="unit", unit_type="hydralisk")}
             records.append({
                 "schema": zs.DECISION_RECORD_SCHEMA,
+                "run_id": "run_test",
                 "episode_id": f"ep{scene:03d}", "scene_id": f"scene{scene:03d}",
                 "game_loop": 100 + scene, "snapshot_id": scene + 1,
                 "source_hash": "0" * 64, "execution_context_hash": "1" * 64,
@@ -292,7 +293,7 @@ class TestTrainingRoundTrip(unittest.TestCase):
                 "final_actions": {"u0": 6},
                 "execution_status": "committed",
                 "outcome": "win", "return": base_return,
-                "base_return": base_return,
+                "baseline_return": base_return,
                 "reward_provenance": {"ally_losses": 0, "enemy_losses": 1},
             })
         return records
@@ -340,7 +341,13 @@ class TestTrainingRoundTrip(unittest.TestCase):
                 resource_claims={}, dependencies=[], atomic=False,
                 legal=True, rejection_reason=None, source_plan_id="x",
                 rule_score=1.0)
-            scores = zscore.score_candidates({}, [candidate], model=model)
+            state_features = {
+                "team": {name: 1.0 for name in
+                         DEFAULT_SCHEMA.names(layer="team")},
+                "skill": {name: 0.0 for name in
+                          DEFAULT_SCHEMA.names(layer="skill")}}
+            scores = zscore.score_candidates(state_features, [candidate],
+                                             model=model)
             self.assertEqual(len(scores), 1)
             self.assertIn(scores[0].reason, {
                 "model_score", "leaf_below_support_rule_confidence",

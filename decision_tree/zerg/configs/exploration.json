@@ -1,0 +1,36 @@
+{
+  "kind": "zerg_exploration_config",
+  "schema_version": 1,
+  "description": "Bounded intervention protocol for counterfactual collection. Existing rule skill is always the BASE; random exploration is forbidden by default.",
+  "limits": {
+    "max_interventions_per_episode": 2,
+    "max_interventions_per_unit": 1,
+    "unit_cooldown_steps": 3,
+    "family_budgets": {
+      "focus_fire": 4,
+      "coordinated_engage": 4,
+      "combat_reposition": 4,
+      "disengage_reenter": 4,
+      "ranged_fire_formation": 4,
+      "burst_engage": 4
+    },
+    "max_counterfactual_branches_per_scene": 8,
+    "intervention_horizon_steps": 1
+  },
+  "gating": {
+    "candidate_min_support_groups": 4,
+    "min_model_confidence": 0.5,
+    "low_confidence_fallback": "base",
+    "require_validated_candidate": true
+  },
+  "association": {
+    "experiment_group_field": "experiment_id",
+    "baseline_id": "BASE",
+    "link_records_by": ["run_id", "episode_id", "snapshot_id", "game_loop"]
+  },
+  "incomplete_experiment": {
+    "completion_status_default": "unknown",
+    "allow_unfinished": true,
+    "unfinished_pairs_enter_training": false
+  }
+}

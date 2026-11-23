@@ -1,15 +1,17 @@
-"""Zerg data-record and model-file contracts.
+"""Zerg data-record and model-file contracts (V1.1).
 
-All artefacts are canonical JSON (sorted keys, no NaN) — the same
-serialisation discipline as the rest of decision_tree. Three record kinds:
+All artefacts are canonical JSON (sorted keys, NaN -> null on disk). The
+single feature-join function :func:`build_model_features` is the ONLY place
+where a model-row feature vector is assembled; offline training
+(``training.py``/``dataset.py``) and online scoring (``scorer.py``) must both
+call it, so names, order, values and missing states are identical on both
+sides.
 
-- decision record (JSONL, one per decision point, candidates nested);
-- scorer model (one JSON file per scorer slot, embedded trees);
-- training config (capacity + task declaration).
-
-``episode_id`` / ``scene_id`` / actor ids are association keys only: they
-appear in records for joining, and are rejected if ever offered as model
-features (see FEATURE_FORBIDDEN).
+Identity keys (association only, never model features): ``run_id``,
+``episode_id``, ``scene_config_id``, ``seed``, ``map_id``, ``snapshot_id``.
+Counterfactual pair records (``zerg_counterfactual_pair_v1``) carry their own
+audit contract: gain must equal candidate_return - baseline_return, missing
+returns stay None, and incomplete pairs never enter gain training.
 """
 from __future__ import annotations
 
@@ -22,16 +24,22 @@ from typing import Any, Dict, List, Sequence
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema
 
 DECISION_RECORD_SCHEMA = "zerg_decision_record_v1"
+PAIR_RECORD_SCHEMA = "zerg_counterfactual_pair_v1"
 SCORER_MODEL_SCHEMA = "zerg_scorer_model_v1"
 MODEL_KIND = "zerg_scorer_model"
 TARGETS = ("imitation", "gain", "correction", "ranking")
 EXECUTION_STATUSES = ("pending", "committed", "arbitrated_changed",
                       "skipped", "unknown")
 OUTCOMES = ("win", "loss", "draw", "timeout", "unknown")
+INTERVENTION_TYPES = ("single_step", "multi_step_continuous", "unknown")
+COMPLETION_STATUSES = ("complete", "prefix_mismatch", "context_mismatch",
+                       "candidate_not_executed", "missing_return",
+                       "rejected", "unknown")
 
 FEATURE_FORBIDDEN = frozenset({
-    "episode_id", "episode", "scene_id", "seed", "sc2_seed", "unit_tag",
-    "actor", "actor_id", "tag", "snapshot_id", "group_id", "game_version"})
+    "episode_id", "episode", "run_id", "scene_id", "scene_config_id",
+    "seed", "sc2_seed", "map_id", "unit_tag", "actor", "actor_id", "tag",
+    "snapshot_id", "group_id", "game_version"})
 
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 
@@ -72,6 +80,91 @@ def _identifier(value: Any, name: str) -> str:
     return value
 
 
+def as_feature_float(value: Any) -> float:
+    """Value coercion for the join function: non-numeric / non-finite /
+    absent -> NaN (missing). Real 0.0 stays 0.0."""
+    if value is None or isinstance(value, bool):
+        return float("nan")
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return resolved if math.isfinite(resolved) else float("nan")
+
+
+# -- Task 1.1/1.2: THE single feature join ----------------------------------
+
+class FeatureLayerMissing(ValueError):
+    """A whole required feature layer was not passed (distinct from a
+    single missing feature, which is imputable)."""
+
+    def __init__(self, layer: str):
+        super().__init__(f"feature layer '{layer}' missing entirely")
+        self.layer = layer
+
+
+def build_model_features(global_features: Dict[str, Any],
+                         candidate_features: Dict[str, Any],
+                         schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                         shared_layers: Sequence[str] = ("team", "skill")
+                         ) -> Dict[str, float]:
+    """THE single feature-join function (training AND inference).
+
+    Returns a fixed-ORDER dict: ``team.<name>`` then ``skill.<name>`` then
+    ``candidate.<name>``, each layer iterated in schema declaration order.
+    A single absent value becomes NaN (imputable downstream); a layer that
+    was never passed raises :class:`FeatureLayerMissing` — imputation must
+    never mask a plumbing error.
+    """
+    global_features = global_features or {}
+    ordered: Dict[str, float] = {}
+    for layer in shared_layers:
+        layer_values = global_features.get(layer)
+        if layer_values is None:
+            raise FeatureLayerMissing(layer)
+        for name in schema.names(layer=layer):
+            ordered[f"{layer}.{name}"] = as_feature_float(
+                layer_values.get(name))
+    candidate_features = candidate_features or {}
+    for name in schema.names(layer="candidate"):
+        ordered[f"candidate.{name}"] = as_feature_float(
+            candidate_features.get(name))
+    return ordered
+
+
+def missing_report(flat_features: Dict[str, float],
+                   feature_names: Sequence[str]) -> Dict[str, Any]:
+    """Which model features are missing (NaN) and the ratio."""
+    missing = [name for name in feature_names
+               if math.isnan(flat_features.get(name, float("nan")))]
+    return {
+        "missing_features": missing,
+        "missing_count": len(missing),
+        "missing_ratio": (len(missing) / len(feature_names))
+        if feature_names else 0.0,
+    }
+
+
+def scorer_feature_names(schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                         shared_layers: Sequence[str] = ("team", "skill")
+                         ) -> List[str]:
+    """The exact, ordered feature list every scorer model must declare —
+    identical to :func:`build_model_features` key order."""
+    return list(build_model_features(
+        {layer: {} for layer in shared_layers}, {}, schema,
+        shared_layers).keys())
+
+
+def flatten_row_features(global_features: Dict[str, Any],
+                         candidate_features: Dict[str, Any],
+                         schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                         shared_layers: Sequence[str] = ("team", "skill")
+                         ) -> Dict[str, float]:
+    """Deprecated alias; delegates to the single join."""
+    return build_model_features(global_features, candidate_features, schema,
+                                shared_layers)
+
+
 # -- decision records -------------------------------------------------------
 
 def validate_decision_record(record: Dict[str, Any],
@@ -80,9 +173,18 @@ def validate_decision_record(record: Dict[str, Any],
     if record.get("schema") != DECISION_RECORD_SCHEMA:
         raise ValueError("decision record requires "
                          f"{DECISION_RECORD_SCHEMA}")
-    for field in ("episode_id", "scene_id", "source_hash",
-                  "execution_context_hash"):
+    # Task 2.1 identity keys
+    for field in ("run_id", "episode_id"):
         _identifier(record.get(field), field)
+    for field in ("source_hash", "execution_context_hash"):
+        if record.get(field):
+            _identifier(record[field], field)
+    for field in ("scene_config_id", "map_id"):
+        value = record.get(field)
+        if value is not None:
+            _identifier(value, field)
+    if record.get("seed") is not None and type(record.get("seed")) is not int:
+        raise ValueError("seed must be an integer when present")
     if type(record.get("game_loop")) is not int:
         raise ValueError("game_loop must be an integer loop count")
     if type(record.get("snapshot_id")) is not int:
@@ -128,54 +230,93 @@ def validate_decision_record(record: Dict[str, Any],
     if record.get("execution_status") not in EXECUTION_STATUSES:
         raise ValueError("unknown execution_status")
     outcome = record.get("outcome")
-    if outcome is not None:
-        if outcome not in OUTCOMES:
-            raise ValueError("unknown outcome")
+    if outcome is not None and outcome not in OUTCOMES:
+        raise ValueError("unknown outcome")
     if record.get("return") is not None:
         _finite(record["return"], "return")
+    if record.get("baseline_return") is not None:
+        _finite(record["baseline_return"], "baseline_return")
     provenance = record.get("reward_provenance")
     if provenance is not None and not isinstance(provenance, dict):
         raise ValueError("reward_provenance must be an object when present")
     return record
 
 
+# -- counterfactual pair records (Task 2.3) ---------------------------------
+
+def validate_pair_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """One BASE-vs-candidate counterfactual comparison."""
+    if record.get("schema") != PAIR_RECORD_SCHEMA:
+        raise ValueError(f"pair record requires {PAIR_RECORD_SCHEMA}")
+    for field in ("experiment_id", "run_id", "episode_id", "anchor_id",
+                  "pair_id", "baseline_id", "execution_context_hash"):
+        _identifier(record.get(field), field)
+    _identifier(record.get("candidate_id"), "candidate_id")
+    for field in ("initial_state_hash", "prefix_hash"):
+        value = record.get(field)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{field} must be a hash string when present")
+    if record.get("scene_config_id") is not None:
+        _identifier(record["scene_config_id"], "scene_config_id")
+    if record.get("intervention_type") not in INTERVENTION_TYPES:
+        raise ValueError("intervention_type must be one of "
+                         + ", ".join(INTERVENTION_TYPES))
+    if type(record.get("intervention_horizon")) is not int \
+            or record["intervention_horizon"] < 1:
+        raise ValueError("intervention_horizon must be a positive integer "
+                         "(decision steps)")
+    if record.get("completion_status") not in COMPLETION_STATUSES:
+        raise ValueError("unknown completion_status")
+    candidate_return = record.get("candidate_return")
+    baseline_return = record.get("baseline_return")
+    gain = record.get("gain")
+    for name, value in (("candidate_return", candidate_return),
+                        ("baseline_return", baseline_return),
+                        ("gain", gain)):
+        if value is not None:
+            _finite(value, name)
+    outcome = record.get("outcome")
+    if outcome is not None and outcome not in OUTCOMES:
+        raise ValueError("unknown outcome")
+    if gain is not None:
+        if candidate_return is None or baseline_return is None:
+            raise ValueError("gain requires both returns")
+        if abs(gain - (candidate_return - baseline_return)) > 1e-9:
+            raise ValueError("gain must equal candidate_return - "
+                             "baseline_return")
+    return record
+
+
+def audit_pair(record: Dict[str, Any]) -> List[str]:
+    """Pair-integrity audit: problems that disqualify the pair from gain
+    training. Missing returns are legitimate (kept None) but the pair is
+    then incomplete."""
+    problems: List[str] = []
+    if record.get("initial_state_hash") is None \
+            or record.get("prefix_hash") is None:
+        problems.append("missing initial_state_hash or prefix_hash: "
+                        "paired start not evidenced")
+    if record.get("execution_context_hash") is None:
+        problems.append("missing execution_context_hash: contexts may differ")
+    if record.get("completion_status") != "complete":
+        problems.append(f"completion_status="
+                        f"{record.get('completion_status')!r}")
+    if record.get("candidate_return") is None \
+            or record.get("baseline_return") is None:
+        problems.append("missing return (kept None, never fabricated)")
+    try:
+        validate_pair_record(record)
+    except ValueError as exc:
+        problems.append(str(exc))
+    return problems
+
+
+def pair_is_trainable(record: Dict[str, Any]) -> bool:
+    """A pair may produce a gain label only when fully evidenced."""
+    return not audit_pair(record)
+
+
 # -- scorer models ----------------------------------------------------------
-
-def scorer_feature_names(schema: ZergFeatureSchema = DEFAULT_SCHEMA,
-                         shared_layers: Sequence[str] = ("team", "skill")
-                         ) -> List[str]:
-    """Flat feature list for scorer rows: candidate-layer features plus the
-    declared shared decision-point layers, prefixed by layer."""
-    names: List[str] = []
-    for layer in shared_layers:
-        names.extend(f"{layer}.{name}" for name in schema.names(layer=layer))
-    names.extend(f"candidate.{name}"
-                 for name in schema.names(layer="candidate"))
-    return names
-
-
-def flatten_row_features(global_features: Dict[str, Any],
-                         candidate_features: Dict[str, Any],
-                         schema: ZergFeatureSchema = DEFAULT_SCHEMA,
-                         shared_layers: Sequence[str] = ("team", "skill")
-                         ) -> Dict[str, float]:
-    import math as _math
-
-    def as_float(value: Any) -> float:
-        try:
-            resolved = float(value)
-        except (TypeError, ValueError):
-            return float("nan")
-        return resolved if _math.isfinite(resolved) else float("nan")
-
-    flat: Dict[str, float] = {}
-    for layer in shared_layers:
-        for name, value in (global_features.get(layer, {}) or {}).items():
-            flat[f"{layer}.{name}"] = as_float(value)
-    for name, value in (candidate_features or {}).items():
-        flat[f"candidate.{name}"] = as_float(value)
-    return flat
-
 
 def validate_tree_node(node: Any, feature_names: Sequence[str],
                        max_depth: int, depth: int = 0) -> None:
@@ -212,10 +353,13 @@ def validate_scorer_model(model: Dict[str, Any],
     feature_names = model.get("feature_names")
     if not isinstance(feature_names, list) or not feature_names:
         raise ValueError("feature_names required")
-    declared = set(scorer_feature_names(schema))
-    unknown = sorted(set(feature_names) - declared)
-    if unknown:
-        raise ValueError(f"features outside the zerg schema: {unknown}")
+    # Task 1.3: names AND order must match the single join exactly.
+    expected = scorer_feature_names(schema)
+    if feature_names != expected:
+        raise ValueError(
+            "model feature_names must exactly equal the "
+            "build_model_features order "
+            f"(got {len(feature_names)} names, expected {len(expected)})")
     forbidden = sorted(set(feature_names) & FEATURE_FORBIDDEN)
     if forbidden:
         raise ValueError(f"association keys cannot be features: {forbidden}")
@@ -224,6 +368,16 @@ def validate_scorer_model(model: Dict[str, Any],
             or embedded.get("version") != schema.version:
         raise ValueError("model feature schema mismatch — refusing to load")
     _identifier(model.get("execution_context_hash"), "execution_context_hash")
+    if model.get("source_fingerprint"):
+        _identifier(model["source_fingerprint"], "source_fingerprint")
+    if model.get("dataset_hash") is not None:
+        _identifier(model["dataset_hash"], "dataset_hash")
+    if model.get("validation_report") is not None \
+            and not isinstance(model["validation_report"], dict):
+        raise ValueError("validation_report must be an object when present")
+    if model.get("training_configuration") is not None \
+            and not isinstance(model["training_configuration"], dict):
+        raise ValueError("training_configuration must be an object")
 
     capacity = model.get("capacity", {})
     estimator = capacity.get("estimator_type", "single_threshold_tree")
@@ -249,7 +403,6 @@ def validate_scorer_model(model: Dict[str, Any],
     if type(capacity.get("random_seed", 0)) is not int:
         raise ValueError("random_seed must be an integer")
 
-    tree_weight_total = 0.0
     trees = model.get("trees", [])
     families = model.get("families", {})
     if families:
@@ -287,6 +440,42 @@ def _validate_tree_bundle(bundle: Dict[str, Any], feature_names,
         validate_tree_node(tree.get("root"), feature_names, max_depth)
     if total_weight <= 0:
         raise ValueError("tree weights must sum positive")
+
+
+# -- pairwise ranking model (Phase 6.3) -------------------------------------
+
+RANKING_MODEL_KIND = "zerg_pairwise_ranking_model_v1"
+
+
+def ranking_feature_names(schema: ZergFeatureSchema = DEFAULT_SCHEMA,
+                          shared_layers: Sequence[str] = ("team", "skill")
+                          ) -> List[str]:
+    """Feature layout of one ordered comparison: side 'a' then side 'b'."""
+    base = scorer_feature_names(schema, shared_layers)
+    return [f"a.{name}" for name in base] + [f"b.{name}" for name in base]
+
+
+def validate_ranking_model(model: Dict[str, Any],
+                           schema: ZergFeatureSchema = DEFAULT_SCHEMA
+                           ) -> Dict[str, Any]:
+    if model.get("schema_version") != 1 \
+            or model.get("kind") != RANKING_MODEL_KIND:
+        raise ValueError(f"model requires kind={RANKING_MODEL_KIND} version 1")
+    feature_names = model.get("feature_names")
+    expected = ranking_feature_names(schema)
+    if feature_names != expected:
+        raise ValueError("ranking model feature_names must exactly equal the "
+                         "a./b. pairwise layout in schema order")
+    _identifier(model.get("execution_context_hash"),
+                "execution_context_hash")
+    embedded = model.get("feature_schema", {})
+    if embedded.get("digest") != schema.digest():
+        raise ValueError("model feature schema mismatch — refusing to load")
+    _validate_tree_bundle({"trees": model.get("trees", [])}, feature_names,
+                          int(model.get("capacity", {}).get("max_depth", 2)),
+                          int(model.get("capacity", {}).get(
+                              "number_of_trees", 1)))
+    return model
 
 
 def validate_training_config(config: Dict[str, Any]) -> Dict[str, Any]:

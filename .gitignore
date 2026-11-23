@@ -114,3 +114,6 @@ reports/
 !/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/
 /runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/*
 !/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/tactical_v1/
+
+# generated artefact: rebuild via decision_tree/scripts/linux/resolve_source.py
+decision_tree/zerg/resolved/

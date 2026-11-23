@@ -1,5 +1,5 @@
 {
-  "base_dir": "/home/amax/ry/SMAC_skill/skills/tactical_v1",
+  "base_dir": "skills/tactical_v1",
   "counts": {
     "base": 71,
     "overlay": 65,
@@ -962,8 +962,8 @@
   ],
   "fingerprint": "2f135a09b7374512731583c2b511425066b4fa78a64493b842676a1115d302a7",
   "fingerprint_schema": "zerg_source_fingerprint_v1",
-  "output_dir": "/home/amax/ry/SMAC_skill/decision_tree/zerg/resolved/tactical_v1",
-  "overlay_dir": "/home/amax/ry/SMAC_skill/runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/tactical_v1",
+  "output_dir": "decision_tree/zerg/resolved/tactical_v1",
+  "overlay_dir": "runs/contact_all_attack_20261122_230107_662982/marginal_near/skills/tactical_v1",
   "schema_version": "zerg_source_manifest_v1",
   "syntax_errors": []
 }

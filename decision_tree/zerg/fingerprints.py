@@ -104,3 +104,20 @@ def validate_deployment(model_record: Dict[str, Any],
     embedded = model_record.get("context")
     if embedded is not None and embedded != context:
         raise ValueError("model embedded context differs from live context")
+
+
+def assert_model_source(model_record: Dict[str, Any],
+                        live_source_fingerprint: str,
+                        allow_missing: bool = False) -> None:
+    """Task 3.2: a model recorded under one source fingerprint cannot run on
+    another. Shadow mode is bound by the same rule — data collected against
+    the wrong source must never be marked as a valid version."""
+    recorded = model_record.get("source_fingerprint")
+    if recorded is None:
+        if allow_missing:
+            return
+        raise ValueError("model lacks source_fingerprint — refusing to load")
+    if recorded != live_source_fingerprint:
+        raise ValueError(
+            "model source fingerprint mismatch: refusing to load "
+            f"(model={str(recorded)[:16]}… live={live_source_fingerprint[:16]}…)")

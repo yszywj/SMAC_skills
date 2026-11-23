@@ -1,5 +1,5 @@
 """ZergTrainingBackend — training framework adapter over the existing
-decision_tree learning machinery.
+decision_tree learning machinery (V1.1).
 
 Reuse boundary (deliberately narrow and explicit):
 
@@ -9,19 +9,27 @@ Reuse boundary (deliberately narrow and explicit):
 - tree semantics: the same audited contract as ``decision_tree.local.models``
   and ``decision_tree.learning.vector_train`` — weighted-SSE greedy
   threshold splits, midpoint thresholds, per-side minimum row AND minimum
-  independent-scene support, masked per-candidate estimates, missing labels
-  stay absent. The fitter below is the schema-generalised port of that ONE
-  algorithm (the existing entries hard-bind the Protoss feature schema at
-  their validation layer), extended with the optional ensemble capacity the
-  zerg config exposes. It is not a new training algorithm;
-- correction labels follow ``decision_tree.local.training.correction_rows``:
-  veto target = negative gain of the frozen model's own winner.
+  independent-scene support, missing labels stay absent. The fitter below is
+  the schema-generalised port of that ONE algorithm (the existing entries
+  hard-bind the Protoss feature schema at their validation layer), extended
+  with the optional ensemble capacity (single / bagged / boosted,
+  ``number_of_trees`` up to 192+ as an explicit option; the default stays 1).
 
-Model capacity (``capacity``) is explicit in every model record: estimator
-type, number_of_trees (192 allowed as a capacity option; the default stays
-1 — no existing default changes), max_depth, learning_rate,
-minimum_leaf_support, minimum_leaf_groups, random_seed, feature schema and
-training context.
+Tasks (Phase 6):
+
+- imitation: rows labelled by the actual rule choice;
+- gain: audited counterfactual gains only (missing pairs never enter);
+- ranking: REAL pairwise ranking — the training unit is the ordered
+  candidate comparison (a./b. feature layout, margin target); realised
+  paired gains are the evidence, rule-score priors are flagged weak
+  supervision and their share is reported. This is NOT gain regression;
+- correction: veto target = minus the real gain of the FROZEN old model's
+  own winner (old model replayed per decision point; empirically-best
+  substitution is forbidden; points without a supported winner or a real
+  winner gain are skipped).
+
+Feature vectors on every row come from the single join
+``schema.build_model_features`` — identical to online scoring.
 """
 from __future__ import annotations
 
@@ -32,9 +40,11 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .dataset import candidate_rows, split_records
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema
-from .objectives import gain_rows, group_weights_for
-from .schema import MODEL_KIND, digest as canonical_digest, \
-    scorer_feature_names, validate_scorer_model
+from .objectives import correction_rows, gain_rows, group_weights_for, \
+    imitation_rows, ranking_pairs
+from .schema import MODEL_KIND, RANKING_MODEL_KIND, digest as canonical_digest, \
+    ranking_feature_names, scorer_feature_names, validate_ranking_model, \
+    validate_scorer_model
 
 DEFAULT_CAPACITY = {
     "estimator_type": "single_threshold_tree",
@@ -51,8 +61,8 @@ TOLERANCE = 1e-12
 
 @dataclass
 class ZergCandidateAdapter:
-    """Convert ZergCandidates / decision records into the flat per-candidate
-    training rows the framework understands (Task 7.1 interface)."""
+    """Convert decision records into flat per-candidate training rows
+    (features via the single join — Task 1.1)."""
 
     schema: ZergFeatureSchema = field(default_factory=lambda: DEFAULT_SCHEMA)
     shared_layers: Sequence[str] = ("team", "skill")
@@ -113,16 +123,9 @@ def _row_vector(row: Dict[str, Any], feature_names: Sequence[str],
     return vector
 
 
-def _scene_weights(rows: List[Dict[str, Any]]) -> List[float]:
-    """Equal scene mass, split across the scene's decision points, then
-    across each point's candidate rows."""
-    scene_mass = group_weights_for(rows)
-    return scene_mass
-
-
 def _bootstrap_scene_counts(groups: Sequence[str], n_draws: int,
                             seed: int, tree_index: int) -> Dict[str, int]:
-    """Deterministic bootstrap over scene groups (hash-counter RNG)."""
+    """Deterministic bootstrap over group ids (hash-counter RNG)."""
     counts = {group: 0 for group in groups}
     ordered = sorted(groups)
     for draw in range(n_draws):
@@ -137,15 +140,16 @@ def fit_threshold_forest(rows: List[Dict[str, Any]], feature_names: Sequence[str
                          y_field: str, *, capacity: Dict[str, Any],
                          weights: Optional[List[float]] = None
                          ) -> Tuple[Dict[str, Any], Dict[str, float]]:
-    """Fit one scorer model body (trees / families excluded) from rows.
+    """Fit one model body (trees) from rows with fields
+    ``{group_id, decision_key, features, <y_field>}``.
 
-    Returns ``{"trees": [...], "aggregation": ..., "base_value": ...}`` plus
-    the imputation map. Semantics per estimator type:
+    Semantics per estimator type:
 
     - single_threshold_tree: one tree, weight 1.0, mean aggregation;
-    - bagged_threshold_tree: deterministic scene bootstrap, mean aggregation;
+    - bagged_threshold_tree: deterministic group bootstrap, mean aggregation;
     - boosted_threshold_tree: SSE gradient boosting on residuals from the
-      base mean, learning_rate shrinkage, weighted-sum aggregation.
+      base mean, learning_rate shrinkage, weighted-sum aggregation
+      (prediction = base_value + learning_rate * sum(tree leaf values)).
     """
     spec = {**DEFAULT_CAPACITY, **(capacity or {})}
     estimator = spec["estimator_type"]
@@ -167,7 +171,7 @@ def fit_threshold_forest(rows: List[Dict[str, Any]], feature_names: Sequence[str
     imputation = _impute(usable, feature_names)
     vectors = [_row_vector(row, feature_names, imputation) for row in usable]
     targets = [_finite(row[y_field], y_field) for row in usable]
-    row_weights = _scene_weights(usable) if weights is None else weights
+    row_weights = group_weights_for(usable) if weights is None else weights
     groups = [row["group_id"] for row in usable]
 
     def stats(indices: Sequence[int]) -> Tuple[float, float]:
@@ -277,8 +281,10 @@ def _leaf_of(body: Dict[str, Any], vector: Dict[str, float]
             value = vector[node["feature"]]
             node = node["left"] if value <= node["threshold"] else node["right"]
         leaves.append(node)
-    worst = min(leaves, key=lambda leaf: (leaf["supported"], leaf["groups"]))
-    return worst
+    if not leaves:
+        return None
+    return min(leaves, key=lambda leaf: (leaf.get("supported", False),
+                                         leaf.get("groups", 0)))
 
 
 class ZergTrainingBackend:
@@ -289,6 +295,7 @@ class ZergTrainingBackend:
         self.schema = schema
         self.adapter = ZergCandidateAdapter(schema, shared_layers)
         self.feature_names = self.adapter.feature_names()
+        self.shared_layers = tuple(shared_layers)
 
     # -- core ---------------------------------------------------------------
     def train(self, task: str, records: Sequence[Dict[str, Any]], *,
@@ -299,54 +306,75 @@ class ZergTrainingBackend:
               split_seed: int = 0,
               old_model: Optional[Dict[str, Any]] = None,
               group_by_family: bool = False,
-              candidate_skill_filter: Optional[str] = None
+              candidate_skill_filter: Optional[str] = None,
+              dataset_hash: Optional[str] = None
               ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if task not in ("imitation", "gain", "correction", "ranking"):
             raise ValueError("unknown training task")
-        all_rows = self.adapter.to_rows(records)
-        if candidate_skill_filter:
-            all_rows = [row for row in all_rows
-                        if row["candidate_skill"] == candidate_skill_filter]
+        if dataset_hash is None:
+            dataset_hash = canonical_digest(list(records))
         train_records, validation_records = split_records(
             records, validation_fraction=validation_fraction,
             split_seed=split_seed)
-        train_rows = [row for row in self.adapter.to_rows(train_records)
-                      if not candidate_skill_filter
-                      or row["candidate_skill"] == candidate_skill_filter]
-        validation_rows = [row for row in self.adapter.to_rows(validation_records)
-                           if not candidate_skill_filter
-                           or row["candidate_skill"] == candidate_skill_filter]
+
+        def filtered(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            if not candidate_skill_filter:
+                return rows
+            return [row for row in rows
+                    if row["candidate_skill"] == candidate_skill_filter]
+
+        train_rows = filtered(self.adapter.to_rows(train_records))
+        validation_rows = filtered(self.adapter.to_rows(validation_records))
+        all_rows = filtered(self.adapter.to_rows(records))
+
+        common = {
+            "execution_context_hash": execution_context_hash,
+            "source_fingerprint": source_fingerprint or None,
+            "dataset_hash": dataset_hash,
+            "training_configuration": {
+                "task": task, "split_seed": split_seed,
+                "validation_fraction": validation_fraction,
+                "candidate_skill_filter": candidate_skill_filter,
+                "group_by_family": group_by_family,
+                "scorer": scorer,
+            },
+        }
 
         if task == "imitation":
             body, report = self._fit_supervised(
                 train_rows, validation_rows, y_field="teacher",
                 capacity=capacity, group_by_family=group_by_family,
-                y_of=self._imitation_targets)
+                task="imitation")
             target = "imitation"
-        elif task in ("gain", "ranking"):
+        elif task in ("gain",):
             fit_rows, problems = gain_rows(train_rows, strict=True)
             if problems:
                 raise ValueError(f"gain audit failed: {problems[:3]}")
             val_rows, _ = gain_rows(validation_rows, strict=False)
             body, report = self._fit_supervised(
                 fit_rows, val_rows, y_field="gain", capacity=capacity,
-                group_by_family=group_by_family,
-                y_of=self._gain_targets)
-            target = "gain" if task == "gain" else "ranking"
-            report["ranking_limitation"] = (
-                "ranking labels equal paired counterfactual gains; anchors "
-                "without re-execution evidence carry no ranking label")
+                group_by_family=group_by_family, task="gain")
+            target = "gain"
+        elif task == "ranking":
+            return self._train_ranking(all_rows, train_rows, validation_rows,
+                                       scorer=scorer, common=common,
+                                       capacity=capacity)
         else:
             if old_model is None:
                 raise ValueError("correction training requires the frozen "
                                  "old gain model record")
-            veto_train = self.correction_rows(train_rows, old_model)
-            veto_validation = self.correction_rows(validation_rows, old_model)
+            from .scorer import ScorerModel
+            old_scorer = ScorerModel(old_model)
+            veto_train = correction_rows(train_rows, old_scorer)
+            veto_validation = correction_rows(validation_rows, old_scorer)
             body, report = self._fit_supervised(
                 veto_train, veto_validation, y_field="veto_target",
                 capacity=capacity, group_by_family=group_by_family,
-                y_of=self._veto_targets)
+                task="correction")
             target = "correction"
+            report["correction_skipped_points"] = {
+                "train_points_without_supported_winner_or_gain":
+                    report.get("correction_skipped_points", 0)}
 
         record = {
             "schema_version": 1,
@@ -357,18 +385,13 @@ class ZergTrainingBackend:
             "feature_schema": {"name": self.schema.name,
                                "version": self.schema.version,
                                "digest": self.schema.digest()},
-            "execution_context_hash": execution_context_hash,
-            "source_fingerprint": source_fingerprint,
             "capacity": {**DEFAULT_CAPACITY, **(capacity or {})},
             "min_gain": 0.0,
             "tie_tolerance": 1e-9,
-            "training_context": {
-                "task": task,
-                "split_seed": split_seed,
-                "validation_fraction": validation_fraction,
-                "candidate_skill_filter": candidate_skill_filter,
-            },
+            **common,
         }
+        if target == "correction":
+            record["old_model_hash"] = canonical_digest(old_model)
         if group_by_family:
             record["families"] = body["families"]
         else:
@@ -376,59 +399,149 @@ class ZergTrainingBackend:
             record["aggregation"] = body["aggregation"]
             record["base_value"] = body["base_value"]
             record["missing_imputation"] = body["missing_imputation"]
+        record["validation_report"] = report.get("validation", {})
         record = validate_scorer_model(record, self.schema)
         report["model_sha256"] = canonical_digest(record)
         return record, report
 
-    # -- task wiring --------------------------------------------------------
-    @staticmethod
-    def _imitation_targets(rows: Sequence[Dict[str, Any]]
-                           ) -> List[Optional[float]]:
-        return [row.get("teacher") for row in rows]
+    # -- pairwise ranking (Phase 6.3) ---------------------------------------
+    def _train_ranking(self, all_rows, train_rows, validation_rows, *,
+                       scorer: str, common: Dict[str, Any],
+                       capacity: Optional[Dict[str, Any]]) -> Tuple[Dict, Dict]:
+        train_pairs, train_provenance = ranking_pairs(train_rows)
+        validation_pairs, validation_provenance = ranking_pairs(
+            validation_rows)
+        if not train_pairs:
+            raise ValueError("ranking training requires pairwise comparisons "
+                             "(realised paired gains or rule prior)")
+        pair_feature_names = ranking_feature_names(self.schema,
+                                                   self.shared_layers)
+        prepared = []
+        for pair in train_pairs:
+            features = {f"a.{k}": v for k, v
+                        in pair["higher_features"].items()}
+            features.update({f"b.{k}": v for k, v
+                             in pair["lower_features"].items()})
+            prepared.append({
+                "group_id": pair["group_id"],
+                "decision_key": pair["decision_key"],
+                "features": features,
+                "margin": float(pair["margin"]),
+                "provenance": pair["provenance"],
+            })
+        spec = {**DEFAULT_CAPACITY, **(capacity or {})}
+        body, _ = fit_threshold_forest(prepared, pair_feature_names,
+                                       "margin", capacity=spec)
+        record = {
+            "schema_version": 1,
+            "kind": RANKING_MODEL_KIND,
+            "scorer": scorer,
+            "target": "ranking",
+            "feature_names": pair_feature_names,
+            "feature_schema": {"name": self.schema.name,
+                               "version": self.schema.version,
+                               "digest": self.schema.digest()},
+            "trees": body["trees"],
+            "aggregation": body["aggregation"],
+            "base_value": body["base_value"],
+            "missing_imputation": body["missing_imputation"],
+            "capacity": spec,
+            **common,
+        }
+        report = {
+            "pair_provenance": {"training": train_provenance,
+                                "validation": validation_provenance},
+            "validation": self._ranking_report(body, pair_feature_names,
+                                               validation_pairs),
+            "training": self._ranking_report(body, pair_feature_names,
+                                             train_pairs),
+            "limitations": [
+                "pairwise comparisons are local preferences at isolated "
+                "decision points; they are not whole-policy returns",
+                "rule_score_prior pairs are weak supervision; their share is "
+                "reported and must not be read as outcome evidence",
+            ],
+        }
+        record["validation_report"] = report["validation"]
+        record = validate_ranking_model(record, self.schema)
+        report["model_sha256"] = canonical_digest(record)
+        return record, report
 
-    @staticmethod
-    def _gain_targets(rows: Sequence[Dict[str, Any]]
-                      ) -> List[Optional[float]]:
-        return [row.get("gain") for row in rows]
-
-    @staticmethod
-    def _veto_targets(rows: Sequence[Dict[str, Any]]
-                      ) -> List[Optional[float]]:
-        return [row.get("veto_target") for row in rows]
-
-    def correction_rows(self, rows: Sequence[Dict[str, Any]],
-                        old_model: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Veto labels: target = negative gain of the frozen model's own
-        winning candidate at each decision point (framework pattern)."""
+    def _ranking_report(self, body, feature_names, pairs) -> Dict[str, Any]:
+        if not pairs:
+            return {"n_pairs": 0}
+        correct = total = 0
         by_decision: Dict[str, List[Dict[str, Any]]] = {}
-        for row in rows:
-            by_decision.setdefault(row["decision_key"], []).append(row)
-        out: List[Dict[str, Any]] = []
-        old_hash = canonical_digest(old_model)
-        for decision_key, group in sorted(by_decision.items()):
-            scored = []
-            for row in group:
-                gain = row.get("gain")
-                if gain is None:
-                    continue
-                scored.append((gain, row))
-            if not scored:
+        for pair in pairs:
+            by_decision.setdefault(pair["decision_key"], []).append(pair)
+            vector = self._pair_vector(body, feature_names, pair)
+            predicted = _predict_body(body, vector)
+            total += 1
+            correct += 1 if predicted > 0 else 0
+        # NDCG over decision points where realised gains exist for members
+        ndcgs = []
+        for decision_key, group in by_decision.items():
+            cands: Dict[str, Dict[str, Any]] = {}
+            for pair in group:
+                cands.setdefault(pair["higher_id"],
+                                 {"features": pair["higher_features"]})
+                cands.setdefault(pair["lower_id"],
+                                 {"features": pair["lower_features"]})
+            ids = sorted(cands)
+            if len(ids) < 2:
                 continue
-            gain, winner = max(scored, key=lambda pair: pair[0])
-            out.append({**winner, "veto_target": -float(gain),
-                        "objective": "correction",
-                        "old_model_hash": old_hash})
-        return out
+            # realised-gain relevance when both sides carry gains
+            gains = {pair["higher_id"]: pair["margin"] for pair in group
+                     if pair["provenance"] == "paired_gain"}
+            if not gains:
+                continue
+            def pair_score(cid: str) -> float:
+                # tournament score against the first peer (deterministic)
+                other = next(x for x in ids if x != cid)
+                va = self._pair_vector(body, feature_names, {
+                    "higher_features": cands[cid]["features"],
+                    "lower_features": cands[other]["features"]})
+                vb = self._pair_vector(body, feature_names, {
+                    "higher_features": cands[other]["features"],
+                    "lower_features": cands[cid]["features"]})
+                return _predict_body(body, va) - _predict_body(body, vb)
+            ordered = sorted(ids, key=pair_score, reverse=True)
+            dcg = math.fsum(
+                gains.get(cid, 0.0) / math.log2(rank + 2)
+                for rank, cid in enumerate(ordered) if cid in gains)
+            ideal = sorted(gains.values(), reverse=True)
+            idcg = math.fsum(value / math.log2(rank + 2)
+                             for rank, value in enumerate(ideal))
+            if idcg > 0:
+                ndcgs.append(dcg / idcg)
+        return {"n_pairs": total,
+                "pairwise_accuracy": correct / total if total else None,
+                "ndcg_realised_gain_points": (
+                    math.fsum(ndcgs) / len(ndcgs) if ndcgs else None),
+                "ndcg_points": len(ndcgs)}
 
-    # -- fitting with optional family split ---------------------------------
+    def _pair_vector(self, body, feature_names, pair) -> Dict[str, float]:
+        features = {f"a.{k}": v for k, v in pair["higher_features"].items()}
+        features.update({f"b.{k}": v for k, v in pair["lower_features"].items()})
+        imputation = body.get("missing_imputation", {})
+        vector = {}
+        for name in feature_names:
+            value = features.get(name)
+            if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                    or not math.isfinite(float(value)):
+                value = imputation.get(name)
+            if value is None:
+                value = 0.0      # fully-unknown pair side; recorded reason
+            vector[name] = float(value)
+        return vector
+
+    # -- supervised fitting with task metrics -------------------------------
     def _fit_supervised(self, train_rows: List[Dict[str, Any]],
                         validation_rows: List[Dict[str, Any]],
                         *, y_field: str, capacity: Optional[Dict[str, Any]],
-                        group_by_family: bool,
-                        y_of: Callable[[Sequence[Dict[str, Any]]],
-                                       List[Optional[float]]]
+                        group_by_family: bool, task: str
                         ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        prepared_train = self._attach_targets(train_rows, y_of)
+        prepared_train = self._attach_targets(train_rows, y_field)
         spec = {**DEFAULT_CAPACITY, **(capacity or {})}
         if group_by_family:
             families: Dict[str, Dict[str, Any]] = {}
@@ -447,21 +560,50 @@ class ZergTrainingBackend:
             if not families:
                 raise ValueError("no candidate family had enough support")
             body = {"families": families}
-            report = self._report(body, prepared_train, validation_rows,
-                                  y_field, families=families)
-            return body, report
-        body, _ = fit_threshold_forest(prepared_train, self.feature_names,
-                                       y_field, capacity=spec)
-        report = self._report(body, prepared_train, validation_rows,
-                              y_field)
+            imputation = next(iter(families.values()))["missing_imputation"]
+        else:
+            body, _ = fit_threshold_forest(prepared_train, self.feature_names,
+                                           y_field, capacity=spec)
+            imputation = body["missing_imputation"]
+
+        def predict_local(row) -> Tuple[float, Optional[Dict[str, Any]]]:
+            vector = _row_vector(row, self.feature_names, imputation)
+            if group_by_family:
+                bundle = body["families"].get(row["candidate_skill"])
+                if bundle is None:
+                    return 0.0, None
+                local = {"trees": bundle["trees"],
+                         "aggregation": bundle["aggregation"],
+                         "base_value": bundle["base_value"]}
+                return _predict_body(local, vector), _leaf_of(local, vector)
+            return _predict_body(body, vector), _leaf_of(body, vector)
+
+        report = {
+            "training": self._task_metrics(task, prepared_train, y_field,
+                                           predict_local),
+            "validation": self._task_metrics(task, self._attach_targets(
+                validation_rows, y_field) if validation_rows else [],
+                y_field, predict_local),
+            "limitations": [
+                "offline estimates reuse supplied outcomes; they are not new games",
+                "support counts are independent episodes, not rows or candidates",
+                "anchor gains cannot be summed into a multi-intervention policy gain",
+                "frozen-context models are not deployable after source or config changes",
+            ],
+        }
+        tree_count, depth = self._tree_stats(body,
+                                             body.get("families")
+                                             if group_by_family else None)
+        report["capacity_used"] = tree_count
+        report["max_depth_used"] = depth
         return body, report
 
     @staticmethod
-    def _attach_targets(rows: List[Dict[str, Any]],
-                        y_of: Callable) -> List[Dict[str, Any]]:
-        targets = y_of(rows)
+    def _attach_targets(rows: List[Dict[str, Any]], y_field: str
+                        ) -> List[Dict[str, Any]]:
         out = []
-        for row, target in zip(rows, targets):
+        for row in rows:
+            target = row.get(y_field)
             if target is None:
                 continue
             row = dict(row)
@@ -469,59 +611,126 @@ class ZergTrainingBackend:
             out.append(row)
         return out
 
-    def _report(self, body: Dict[str, Any], train_rows, validation_rows,
-                y_field: str, families: Optional[Dict[str, Any]] = None
-                ) -> Dict[str, Any]:
-        imputation = (next(iter(families.values()))["missing_imputation"]
-                      if families else body["missing_imputation"])
+    def _task_metrics(self, task, rows, y_field, predict_local) -> Dict[str, Any]:
+        """Per-independent-episode metrics (equal episode mass)."""
+        if not rows:
+            return {"n_rows": 0}
+        by_group: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            by_group.setdefault(row["group_id"], []).append(row)
 
-        def evaluate(rows: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-            prepared = self._attach_targets(
-                rows, lambda rs: [r.get("_target") for r in rs])
-            if not prepared:
-                return {"n_rows": 0}
-            errors, supported = [], 0
-            correct = total_teacher = 0
-            for row in prepared:
-                vector = _row_vector(row, self.feature_names, imputation)
-                if families:
-                    bundle = families.get(row["candidate_skill"])
-                    if bundle is None:
-                        continue
-                    local = {"trees": bundle["trees"],
-                             "aggregation": bundle["aggregation"],
-                             "base_value": bundle["base_value"]}
-                    prediction = _predict_body(local, vector)
-                    leaf = _leaf_of(local, vector)
-                else:
-                    prediction = _predict_body(body, vector)
-                    leaf = _leaf_of(body, vector)
-                errors.append((prediction - row["_target"]) ** 2)
+        def group_metrics(group: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+            errors, abs_errors = [], []
+            supported = 0
+            # point grouping for top-k and ranking metrics
+            points: Dict[str, List[Dict[str, Any]]] = {}
+            for row in group:
+                prediction, leaf = predict_local(row)
                 supported += 1 if leaf and leaf.get("supported") else 0
-                if row.get("teacher") is not None:
-                    total_teacher += 1
-                    predicted_choice = prediction >= 0.5
-                    correct += predicted_choice == (row["teacher"] >= 0.5)
-            n = len(prepared)
-            return {"n_rows": n,
-                    "mse": math.fsum(errors) / n if n else None,
-                    "supported_leaf_fraction": supported / n if n else None,
-                    "teacher_agreement": correct / total_teacher
-                    if total_teacher else None}
+                errors.append((prediction - row["_target"]) ** 2)
+                abs_errors.append(abs(prediction - row["_target"]))
+                points.setdefault(row["decision_key"], []).append(
+                    (prediction, row))
+            top1 = topk_total = topk_hit = teacher_rows = 0
+            positive = negative = 0
+            pos_hit = neg_hit = 0
+            for _, members in points.items():
+                members_sorted = sorted(members, key=lambda m: -m[0])
+                teacher_id = next((m[1]["candidate_id"] for m in members
+                                   if m[1].get("teacher") == 1.0), None)
+                predicted_ids = [m[1]["candidate_id"] for m in members_sorted]
+                if teacher_id is not None:
+                    teacher_rows += 1
+                    if predicted_ids and predicted_ids[0] == teacher_id:
+                        top1 += 1
+                    if teacher_id in predicted_ids[:3]:
+                        topk_hit += 1
+                    topk_total += 1
+                if task == "gain":
+                    for prediction, row in members:
+                        actual = row["_target"]
+                        if actual > 0:
+                            positive += 1
+                            pos_hit += prediction > 0
+                        elif actual < 0:
+                            negative += 1
+                            neg_hit += prediction < 0
+            return {
+                "n_rows": len(group),
+                "mse": math.fsum(errors) / len(errors) if errors else None,
+                "supported_leaf_fraction": supported / len(group),
+                **({"teacher_top1_agreement": top1 / topk_total
+                    if topk_total else None,
+                    "teacher_top3_agreement": topk_hit / topk_total
+                    if topk_total else None} if task == "imitation" else {}),
+                **({"positive_recognition": pos_hit / positive
+                    if positive else None,
+                    "negative_recognition": neg_hit / negative
+                    if negative else None} if task == "gain" else {}),
+            }
 
-        tree_count, depth = self._tree_stats(body, families)
-        return {
-            "capacity_used": tree_count,
-            "max_depth_used": depth,
-            "training": evaluate(train_rows),
-            "validation": evaluate(validation_rows),
-            "limitations": [
-                "offline estimates reuse supplied outcomes; they are not new games",
-                "support counts are independent scenes, not rows or candidates",
-                "anchor gains cannot be summed into a multi-intervention policy gain",
-                "frozen-context models are not deployable after source or config changes",
-            ],
-        }
+        groups = [by_group[key] for key in sorted(by_group)]
+        metrics = [group_metrics(group) for group in groups]
+
+        def weighted(field: str) -> Optional[float]:
+            values = [(m[field], m["n_rows"]) for m in metrics
+                      if m.get(field) is not None]
+            if not values:
+                return None
+            return math.fsum(v for v, _ in values) / len(values)
+
+        result = {"n_rows": sum(m["n_rows"] for m in metrics),
+                  "n_scenarios": len(metrics)}
+        for key in ("mse", "supported_leaf_fraction", "teacher_top1_agreement",
+                    "teacher_top3_agreement", "positive_recognition",
+                    "negative_recognition"):
+            result[key] = weighted(key)
+        result["per_scenario"] = [
+            {"group_id": group_id, **metric}
+            for group_id, metric in zip(sorted(by_group), metrics)]
+        if task == "imitation":
+            result["rule_score_correlation"] = self._rule_score_correlation(rows)
+        if task == "gain":
+            result["mae"] = self._per_scenario_mae(rows, predict_local)
+        return result
+
+    @staticmethod
+    def _per_scenario_mae(rows, predict_local) -> Optional[float]:
+        by_group: Dict[str, List[float]] = {}
+        for row in rows:
+            prediction, _ = predict_local(row)
+            by_group.setdefault(row["group_id"], []).append(
+                abs(prediction - row["_target"]))
+        if not by_group:
+            return None
+        return math.fsum(math.fsum(v) / len(v)
+                         for v in by_group.values()) / len(by_group)
+
+    @staticmethod
+    def _rule_score_correlation(rows) -> Optional[float]:
+        """Pearson correlation between the declared rule score and the
+        teacher label across candidate rows."""
+        xs: List[float] = []
+        ys: List[float] = []
+        for row in rows:
+            rule = row.get("rule_score")
+            teacher = row.get("teacher")
+            if rule is None or teacher is None:
+                continue
+            if not math.isfinite(float(rule)):
+                continue
+            xs.append(float(rule))
+            ys.append(float(teacher))
+        if len(xs) < 2:
+            return None
+        mean_x = math.fsum(xs) / len(xs)
+        mean_y = math.fsum(ys) / len(ys)
+        cov = math.fsum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+        var_x = math.fsum((x - mean_x) ** 2 for x in xs)
+        var_y = math.fsum((y - mean_y) ** 2 for y in ys)
+        if var_x <= 0 or var_y <= 0:
+            return None
+        return cov / math.sqrt(var_x * var_y)
 
     @staticmethod
     def _tree_stats(body: Dict[str, Any],
@@ -547,8 +756,15 @@ class ZergTrainingBackend:
         return count, max_depth
 
 
-def load_scorer_model(path: str) -> "ScorerModel":
+def load_scorer_model(path: str):
     """Load + validate a scorer model file into the runtime model wrapper."""
     from .scorer import ScorerModel
     from .schema import load_json
     return ScorerModel(load_json(path))
+
+
+def load_ranking_model(path: str):
+    """Load + validate a pairwise ranking model file."""
+    from .scorer import PairwiseRankModel
+    from .schema import load_json
+    return PairwiseRankModel(load_json(path))
