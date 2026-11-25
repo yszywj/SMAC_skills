@@ -106,6 +106,9 @@ class Test01RunIdentity(unittest.TestCase):
             self.assertNotEqual(episode_ids[0], episode_ids[1])
             self.assertEqual({r["episode_id"] for r in records},
                              set(episode_ids))
+            for record in records:
+                self.assertEqual(record["reward_provenance"]["enemy_losses"], 2)
+                self.assertIsNone(record["reward_provenance"]["damage_dealt"])
 
 
 class Test02SplitsAndSceneConfig(unittest.TestCase):
@@ -195,6 +198,26 @@ class Test03ConstantMissing(unittest.TestCase):
 class Test04FeatureParity(unittest.TestCase):
     """Check 5 (+2.4): offline record rows and online scoring produce the
     identical vector for BOTH layouts; metadata keys are forbidden."""
+
+    def test_local_engagement_ids_round_trip(self):
+        payload = _zerg_payload()
+        manager = _manager()
+        _, summary = manager.step(payload, 4)
+        snapshot = manager._pending_commit[0]
+        source_id = "local_engagement-9fbb91ce3a:4299423745/4294967297:4299423745"
+        summary = {**summary, "chosen_plans": [{"id": source_id}],
+                   "actions": {"u0": 5}, "top_alternates": [
+                       {"id": "invalid", "actions": {"u0": 9}}]}
+        candidates = zc.joint_candidates_from_summary(
+            summary, snapshot, payload={"questions": {"u0": {"criteria": {"5": "Move"}}}})
+        self.assertTrue(candidates[0].legal)
+        self.assertFalse(candidates[1].legal)
+        selected = candidates[0]
+        record = zd.build_decision_record(run_id="run1", episode_id="ep1",
+                                          snapshot=snapshot, candidates=candidates,
+                                          teacher_choice=selected.candidate_id)
+        self.assertEqual(record["candidates"][0]["source_plan_id"], source_id)
+        self.assertEqual(record["teacher_choice"], record["candidates"][0]["candidate_id"])
 
     def test_real_snapshot_parity(self):
         payload = _zerg_payload()

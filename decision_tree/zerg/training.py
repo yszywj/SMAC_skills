@@ -38,7 +38,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .dataset import candidate_rows, split_records
+from .dataset import candidate_rows, episode_group, split_records
 from .features import DEFAULT_SCHEMA, ZergFeatureSchema
 from .objectives import correction_rows, gain_rows, group_weights_for, \
     imitation_rows, ranking_pairs
@@ -274,33 +274,103 @@ def fit_threshold_forest(rows: List[Dict[str, Any]], feature_names: Sequence[str
 
     def build(indices: List[int], depth: int) -> Dict[str, Any]:
         mean, error = stats(indices)
-        leaf_groups = sorted({groups[i] for i in indices})
-        leaf = {"value": mean, "groups": len(leaf_groups),
+        counts = {}
+        for i in indices:  # Each bootstrap occurrence has mass and row support.
+            counts[groups[i]] = counts.get(groups[i], 0) + 1
+        n = len(indices)
+        leaf = {"value": mean, "groups": len(counts),
                 "samples": len(indices), "supported":
-                    len(indices) >= min_support and len(leaf_groups) >= min_groups}
-        if depth >= max_depth or error <= TOLERANCE:
+                    n >= min_support and len(counts) >= min_groups}
+        if depth >= max_depth or not error > TOLERANCE or n < 2 * min_support \
+                or len(counts) < min_groups:
             return leaf
+
+        def scaled(values):
+            # Binary floats share a power-of-two denominator. Integer moments
+            # make prefix addition and suffix subtraction order-independent,
+            # even for very unequal weights or labels with a large offset.
+            ratios = [v.as_integer_ratio() for v in values]
+            unit = max(d for _, d in ratios)
+            return [a * (unit // d) for a, d in ratios], unit
+
+        w, wu = scaled(row_weights[i] for i in indices)
+        y, yu = scaled(targets[i] for i in indices)
+        wy = [a * b for a, b in zip(w, y)]
+        wyy = [a * b for a, b in zip(wy, y)]
+        tw, twy, twyy = sum(w), sum(wy), sum(wyy)
+        unit = wu * yu * yu
+
+        def sse(m, s, q):
+            return (m * q - s * s) / (m * unit) if m > 0 else 0.0
+
+        def partition(name, threshold):
+            left, right = [], []
+            for i in indices:
+                (left if vectors[i][name] <= threshold else right).append(i)
+            return left, right
+
+        def direct_loss(split):
+            left, right = partition(*split)
+            return stats(left)[1] + stats(right)[1]
+
+        # stats() evaluates residuals at a rounded mean. Near the original
+        # strict comparison boundary, resolve roundoff with stats() itself.
+        # For nonnegative normal weights mean roundoff is O(ulp(max |y|));
+        # moving the mean by d adds mass*d*d to least-squares error.
+        mass = tw / wu
+        dy = 8 * math.ulp(max(abs(targets[i]) for i in indices))
+        mean_slack = (mass * dy) * dy + mass * math.ulp(0.0)
+        # Signed weights invalidate the roundoff bound; a subnormal w*y
+        # can also lose more than a relative ulp. Preserve stats() there.
+        from sys import float_info
+        direct_only = min(w) < 0 or any(
+            row_weights[i] and targets[i] and
+            abs(row_weights[i] * targets[i]) < float_info.min
+            for i in indices)
         best, best_loss = None, error
+        best_direct = error
         for name in active:
-            values = sorted({vectors[i][name] for i in indices})
-            for low, high in zip(values, values[1:]):
+            values = [vectors[i][name] for i in indices]
+            if min(values) == max(values):
+                continue
+            order = sorted(range(n), key=values.__getitem__)
+            remaining = counts.copy()
+            nl = 0
+            nr = len(counts)
+            m = s = q = 0
+            for k, pos in enumerate(order[:-1], 1):
+                m += w[pos]
+                s += wy[pos]
+                q += wyy[pos]
+                group = groups[indices[pos]]
+                nl += remaining[group] == counts[group]
+                remaining[group] -= 1
+                nr -= remaining[group] == 0
+                low, high = values[pos], values[order[k]]
+                if low == high or k < min_support or n - k < min_support \
+                        or nl < min_groups or nr < min_groups:
+                    continue
                 threshold = low / 2.0 + high / 2.0
                 if threshold >= high:
                     threshold = low
-                left = [i for i in indices if vectors[i][name] <= threshold]
-                right = [i for i in indices if vectors[i][name] > threshold]
-                left_groups = {groups[i] for i in left}
-                right_groups = {groups[i] for i in right}
-                if len(left) < min_support or len(right) < min_support \
-                        or len(left_groups) < min_groups \
-                        or len(right_groups) < min_groups:
-                    continue
-                loss = stats(left)[1] + stats(right)[1]
-                if loss < best_loss - TOLERANCE:
-                    best, best_loss = (name, threshold, left, right), loss
+                cutoff = best_loss - TOLERANCE
+                exact = direct_only
+                if not direct_only:
+                    loss = sse(m, s, q) + sse(tw - m, twy - s, twyy - q)
+                    slack = 16 * math.ulp(max(loss, best_loss)) + 2 * mean_slack
+                    exact = abs(loss - cutoff) <= slack
+                if exact:
+                    loss = direct_loss((name, threshold))
+                    if best_direct is None:
+                        best_direct = direct_loss(best)
+                    cutoff = best_direct - TOLERANCE
+                if loss < cutoff:
+                    best, best_loss = (name, threshold), loss
+                    best_direct = loss if exact else None
         if best is None:
             return leaf
-        name, threshold, left, right = best
+        name, threshold = best
+        left, right = partition(name, threshold)
         return {"feature": name, "threshold": threshold,
                 "left": build(left, depth + 1), "right": build(right, depth + 1)}
 
@@ -397,9 +467,10 @@ class ZergTrainingBackend:
               old_model: Optional[Dict[str, Any]] = None,
               group_by_family: bool = False,
               candidate_skill_filter: Optional[str] = None,
-              dataset_hash: Optional[str] = None,
-              feature_layout: str = "standard",
-              audit_envelope: Optional[Dict[str, Any]] = None
+               dataset_hash: Optional[str] = None,
+               feature_layout: str = "standard",
+               audit_envelope: Optional[Dict[str, Any]] = None,
+               validation_episodes: Optional[Sequence[str]] = None
               ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if task not in ("imitation", "gain", "correction", "ranking"):
             raise ValueError("unknown training task")
@@ -416,9 +487,17 @@ class ZergTrainingBackend:
             verify_gain_envelope(audit_envelope, records_hash, task=task,
                                  execution_context_hash=execution_context_hash,
                                  source_fingerprint=source_fingerprint or None)
-        train_records, validation_records = split_records(
-            records, validation_fraction=validation_fraction,
-            split_seed=split_seed)
+        if validation_episodes is None:
+            train_records, validation_records = split_records(
+                records, validation_fraction=validation_fraction, split_seed=split_seed)
+        else:
+            held = set(validation_episodes)
+            groups = {episode_group(r) for r in records}
+            if task != 'imitation' or not held or not held < groups:
+                raise ValueError('explicit validation episodes must be a nonempty proper subset for imitation')
+            train_records = [r for r in records if episode_group(r) not in held]
+            validation_records = [r for r in records if episode_group(r) in held]
+            validation_fraction = len(held) / len(groups)
 
         def filtered(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if not candidate_skill_filter:
@@ -428,7 +507,7 @@ class ZergTrainingBackend:
 
         train_rows = filtered(self.adapter.to_rows(train_records))
         validation_rows = filtered(self.adapter.to_rows(validation_records))
-        all_rows = filtered(self.adapter.to_rows(records))
+        all_rows = filtered(self.adapter.to_rows(records)) if task == 'ranking' else []
 
         common = {
             "execution_context_hash": execution_context_hash,
@@ -437,6 +516,7 @@ class ZergTrainingBackend:
             "training_configuration": {
                 "task": task, "split_seed": split_seed,
                 "validation_fraction": validation_fraction,
+                **({"validation_episodes": sorted(held)} if validation_episodes is not None else {}),
                 "candidate_skill_filter": candidate_skill_filter,
                 "group_by_family": group_by_family,
                 "scorer": scorer,

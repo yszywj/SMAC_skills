@@ -116,7 +116,7 @@ def finalise_outcome(record: Dict[str, Any], *, outcome: str,
     record["return"] = episode_return
     if baseline_return is not None:
         record["baseline_return"] = baseline_return
-    provenance = record.setdefault("reward_provenance", {}) or {}
+    provenance = dict(record.get("reward_provenance") or {})
     provenance.update({
         "ally_losses": int(ally_losses),
         "enemy_losses": int(enemy_losses),
@@ -125,6 +125,7 @@ def finalise_outcome(record: Dict[str, Any], *, outcome: str,
     })
     if reward_provenance:
         provenance.update(reward_provenance)
+    record["reward_provenance"] = provenance
     return record
 
 

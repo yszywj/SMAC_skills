@@ -1,0 +1,17 @@
+{
+  "rule_id": "zerg_dual_lane_clearance_v1",
+  "parent": "marginal_near / tactical_v1 / native 10gen_zerg / micro8-all",
+  "parent_source": "2f135a09b7374512731583c2b511425066b4fa78a64493b842676a1115d302a7",
+  "parent_context": "1cbf9c466265f041b1fa13d1e90a2b49878a5593a044fb39cf0b7ea37c191ee4",
+  "scope": "Optional complete joint proposal at a single decision; never force C during ordinary games.",
+  "evidence": {
+    "input": "runs/zerg_workflow/round-001/review/llm_train_facts.json and corresponding pre-action observations, never validation outcomes",
+    "discovery": "pair-023, seed 20262358, loop 50. The old southbound Baneling move on its own was already in the retained set (B won against A). That is not the new rule. Combining it with an eastbound Zergling move avoiding a projected crossing was absent from all 41 distinct full action vectors among 234 native evaluated entries. Diagnostic action vector only: [3,4,3,4,15,15,4,4,4,4]. No C outcome measured.",
+    "counterexamples": "pair-019 seed 20261169 loop 42 and pair-020 seed 20261190 loop 114: replacing an executable Baneling attack by movement changed wins into losses. Never cancel an available attack for either mover. pair-024: no allied attack on the baseline action vector; abstain.",
+    "limitation": "Absence was demonstrated for one native decision, not for every match. Action vectors, not names or individual movement directions, define novelty. A geometric proxy is not damage or return."
+  },
+  "generation": "When another ally is actually attacking, consider one Baneling and one Zergling both closing contact without an executable attack. Recombine two real singleton move plans from the parent into its full plan. Require improved forward clearance for the Baneling and reduced predicted path conflict for the Zergling; preserve all other actions and plans, including existing attacks. The frozen implementation determines legal geometry, deterministic ordering and abstentions. Do not use seed, outcomes, future observations, or a learned gain as rule inputs.",
+  "risk": "Projected body overlap can be benign. Extra sidestepping may delay a useful detonation or melee contact. If native duties, legality, exclusivity, execution masks, or complete-vector novelty cannot be certified, abstain.",
+  "experiment": "Outcome-blind unseen training episodes, excluding the entire source pilot plan. Seed 2471 orders episodes, at most the first qualifying anchor per episode, up to 24 complete anchors. A is the parent choice; B is the first reported legal distinct complete alternative (no search for a better result); C is the new proposal. All arms return to the parent next step. Require three accepted engine receipts and a matched prefix. Missing is not zero. No new gain labels via the A/B exporter.",
+  "decision": "Development only. Proceed to an independent full-game test only with 24 complete anchors, positive mean C-A and C-B return differences, nonnegative net win flips C-A, and no more than one C-A drop of 5 return points or more. Otherwise stop or record insufficient coverage; never deploy based on a single branch win. For whole games: freeze selector and rule; 120 fresh paired scenarios, 10 per roster. Include non-triggering games. Require positive mean paired return, nonnegative net wins, at most six drops of at least five. Repeat on a disjoint confirmation set without retuning."
+}

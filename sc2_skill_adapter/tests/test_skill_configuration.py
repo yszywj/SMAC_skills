@@ -128,6 +128,7 @@ class SkillConfigurationTests(unittest.TestCase):
             payload["state"]["game_loop"] = 2
             with patch("bridge.skill_runtime.load_manager", return_value=CapturingManager), \
                     patch("bridge.environment.ReplayableEnv", FakeEnv), \
+                    patch.object(runner, "score_snapshot", return_value={}), \
                     patch("bridge.policy.build_request", return_value=payload), \
                     patch("bridge.feedback.action_feedback", return_value={}), \
                     patch("bridge.client.JevClient", side_effect=AssertionError("model forbidden")), \
@@ -153,6 +154,7 @@ class SkillConfigurationTests(unittest.TestCase):
             meta = json.loads((destination / "run.json").read_text(encoding="utf-8"))
             stored = json.loads((destination / "summary.json").read_text(encoding="utf-8"))
             for record in (meta, stored, result):
+                self.assertNotIn("zerg_shadow", record)
                 self.assertEqual(record["skill_source"], str(skill_runtime.SOURCE))
                 self.assertEqual(record["unit_value_parameters"], effective)
                 self.assertEqual(record["unit_value_mode"], "contextual")

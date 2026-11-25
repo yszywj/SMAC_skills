@@ -21,17 +21,27 @@ the pre-check here.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .features import (
     DEFAULT_SCHEMA, ZergFeatureSchema, extract_candidate_features)
+from .schema import IDENTIFIER
 
 CANDIDATE_SCHEMA = "zerg_candidate_v1"
 COMPLETE_PLAN_SCHEMA = "zerg_complete_plan_candidate_v1"
 FAMILY_SKILL_INTERNAL = "skill_internal"
 FAMILY_JOINT_PLAN = "joint_plan"
+
+
+def _record_id(source_id: str) -> str:
+    # Local-engagement plans can contain '/' between SC2 tags. Preserve
+    # the original in source_plan_id, and keep join keys schema-safe.
+    if not source_id or IDENTIFIER.fullmatch(source_id):
+        return source_id
+    return "plan_sha256_" + hashlib.sha256(source_id.encode()).hexdigest()
 
 
 def _claims_dict(claims: Any) -> Dict[str, Any]:
@@ -208,7 +218,7 @@ def candidate_from_plan(plan, snapshot, context=None,
     goal = getattr(plan, "goal", None)
     target = goal if isinstance(goal, str) and goal else None
     return ZergCandidate(
-        candidate_id=str(getattr(plan, "proposal_id", "")),
+        candidate_id=_record_id(str(getattr(plan, "proposal_id", ""))),
         candidate_family=family,
         candidate_skill=str(getattr(plan, "primary_skill", "") or "baseline"),
         controlled_actors=tuple(getattr(plan, "controlled_actors", ()) or ()),
@@ -294,15 +304,16 @@ def joint_candidates_from_summary(summary: Dict[str, Any], snapshot,
         if payload is None:
             return True
         questions = payload.get("questions", {}) or {}
-        question = questions.get(actor)
+        actor = str(actor)
+        question = questions.get(actor if actor.startswith("u") else f"u{actor}")
         if not isinstance(question, dict):
             return True
         criteria = question.get("criteria")
-        return True if criteria is None else action in criteria
+        return criteria is None or action in criteria or str(action) in criteria
 
     chosen_score = primary.get("score")
     candidates.append(ZergCandidate(
-        candidate_id=chosen_id,
+        candidate_id=_record_id(chosen_id),
         candidate_family=FAMILY_JOINT_PLAN,
         candidate_skill=str(primary.get("skill") or "joint"),
         controlled_actors=tuple(primary.get("actors") or ()),
@@ -316,7 +327,7 @@ def joint_candidates_from_summary(summary: Dict[str, Any], snapshot,
         resource_claims={},
         dependencies=[],
         atomic=True,
-        legal=all(_actor_legal_ok(f"u{i}", action)
+        legal=all(_actor_legal_ok(i, action)
                   for i, action in actions.items()),
         rejection_reason=None,
         source_plan_id=chosen_id,
@@ -334,11 +345,11 @@ def joint_candidates_from_summary(summary: Dict[str, Any], snapshot,
         alt_actions = dict(row.get("actions", {}) or {})
         if not alt_actions:
             continue
-        legal = all(_actor_legal_ok(f"u{i}", action)
+        legal = all(_actor_legal_ok(i, action)
                     for i, action in alt_actions.items())
         score = row.get("score")
         candidates.append(ZergCandidate(
-            candidate_id=alt_id,
+            candidate_id=_record_id(alt_id),
             candidate_family=FAMILY_JOINT_PLAN,
             candidate_skill=str(row.get("skill") or "joint"),
             controlled_actors=tuple(row.get("actors") or ()),

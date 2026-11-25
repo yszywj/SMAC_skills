@@ -128,6 +128,64 @@ def initial_state_digest(env):
 
 
 async def evaluate(args, manifest, method, output):
+    if any(k.startswith(('ZERG_SQUAD_', 'ZERG_RELAY_')) for k in os.environ):
+        if str(ROOT.parent) not in sys.path:
+            sys.path.insert(0, str(ROOT.parent))
+        if any(k.startswith('ZERG_RELAY_') for k in os.environ):
+            from .zerg_relay import check_options
+        else:
+            from .zerg_squad import check_options
+        check_options(os.environ, method)
+    if 'ZERG_SWARM_GATE' in os.environ or 'ZERG_SWARM_GATE_SHA256' in os.environ:
+        required = ('ZERG_SWARM_GATE', 'ZERG_SWARM_GATE_SHA256', 'ZERG_SWARM_SHA256',
+                    'ZERG_DISTILL_MODEL', 'ZERG_DISTILL_MODEL_SHA256', 'ZERG_DISTILL_OPENING_SHA256',
+                    'ZERG_DISTILL_SELECTOR_SHA256', 'ZERG_DISTILL_TRIAL_ID')
+        if (method != 'adaptive-skill' or os.environ.get('ZERG_DISTILL_VERSION') != 'v2'
+                or not all(os.environ.get(k) for k in required) or 'ZERG_ROUTE_IDENTITY' in os.environ):
+            raise ValueError('online Swarm routing requires a frozen full v2 parent and gate')
+    if method == 'radical-swarm':
+        if (manifest['env_args']['map_name'] != '10gen_zerg' or args.execution_mode != 'micro8-off'
+                or args.native_teacher_control != 'off' or args.pair_mode != 'off'
+                or any(k.startswith('ZERG_') and k not in ('ZERG_SWARM_SHA256', 'ZERG_SWARM_TRIAL_ID')
+                       for k in os.environ)):
+            raise ValueError('radical-swarm requires 10gen_zerg, micro8-off and no other controller')
+        return await _evaluate(args, manifest, method, output)
+    versions = ('v2','alternative','route') if 'ZERG_ROUTE_IDENTITY' in os.environ else ('v1','v2','v3')
+    if 'ZERG_DISTILL_VERSION' in os.environ and ('ZERG_DISTILL_MODEL' not in os.environ or
+            os.environ['ZERG_DISTILL_VERSION'] not in versions):
+        raise ValueError(f'Explicit tree version requires one of {versions} and a distill model')
+    if 'ZERG_DISTILL_MODEL' in os.environ:
+        if (not all(os.environ.get(k, '').strip() for k in ('ZERG_DISTILL_MODEL', 'ZERG_SHADOW_DIR', 'ZERG_SHADOW_ROSTER'))
+                or any(k in os.environ for k in ('ZERG_FORK_SPEC', 'ZERG_WHOLE_AC_ARM'))
+                or getattr(args, 'auto_spatial_dispatch', False) or args.execution_mode != 'micro8-all'
+                or args.adaptive_posture != 'balanced'):
+            raise ValueError('Distillation requires a model, explicit Shadow dir/roster and the balanced micro8-all parent only')
+        return await _evaluate(args, manifest, method, output, distill_path=os.environ['ZERG_DISTILL_MODEL'])
+    if 'ZERG_WHOLE_AC_ARM' in os.environ:
+        arm = os.environ['ZERG_WHOLE_AC_ARM']
+        if arm not in ('A', 'C') or 'ZERG_FORK_SPEC' in os.environ:
+            raise ValueError('ZERG_WHOLE_AC_ARM must be A or C and is mutually exclusive with ZERG_FORK_SPEC')
+        if not all(os.environ.get(k, '').strip() for k in ('ZERG_SHADOW_DIR', 'ZERG_SHADOW_ROSTER')):
+            raise ValueError('Whole-game A/C requires explicit ZERG_SHADOW_DIR and ZERG_SHADOW_ROSTER')
+        if getattr(args, 'auto_spatial_dispatch', False):
+            raise ValueError('Whole-game A/C requires the frozen tactical parent, not spatial dispatch')
+        return await _evaluate(args, manifest, method, output, whole_arm=arm)
+    if 'ZERG_FORK_SPEC' not in os.environ:
+        return await _evaluate(args, manifest, method, output)
+    from .zerg_fork import Fork
+    output.mkdir(parents=True, exist_ok=False)
+    fork = Fork(output / 'fork_receipt.json')
+    try:
+        fork.load(os.environ['ZERG_FORK_SPEC'], manifest)
+        summary = await _evaluate(args, manifest, method, output, fork)
+        fork.finish()
+        return summary
+    except BaseException as exc:
+        fork.save(status='failed', error=f'{type(exc).__name__}: {exc}')
+        raise
+
+
+async def _evaluate(args, manifest, method, output, fork=None, whole_arm=None, distill_path=None):
     if method in ("jev", "astra-jev") and manifest["env_args"]["map_name"] != "10gen_protoss":
         raise ValueError("Cross-race support is validated for local policies only; model planning remains Protoss-specific")
     execution_mode = getattr(args, "execution_mode", "legacy8")
@@ -183,10 +241,17 @@ async def evaluate(args, manifest, method, output):
         from tree_skills.integration.native_teacher import NativeTeacherRuntime, validate_control
         validate_control(args, method, manifest["env_args"])
 
-    output.mkdir(parents=True, exist_ok=False)
+    if fork is None:
+        output.mkdir(parents=True, exist_ok=False)
+    shadow = None
+    skill_manager = None
+    if 'ZERG_SHADOW_DIR' in os.environ or 'ZERG_SHADOW_ROSTER' in os.environ:
+        from .zerg_shadow import start_shadow
+        shadow, skill_manager = start_shadow(
+            os.environ.get('ZERG_SHADOW_DIR'), os.environ.get('ZERG_SHADOW_ROSTER'),
+            manifest, method, args, skill_config['manager_kwargs'] if is_skill else {})
     os.environ["SC2PATH"] = str(args.sc2_path.resolve())
     env, client, planner = None, None, None
-    skill_manager = None
     skill_tree_controller = None
     local_controller = None
     pair_runtime = None
@@ -202,6 +267,39 @@ async def evaluate(args, manifest, method, output):
         events.flush()
 
     sources = list((ROOT / "bridge").glob("*.py"))
+    route = None
+    squad = None
+    relay = None
+    if 'ZERG_RELAY_MODE' in os.environ:
+        from .zerg_relay import SOURCE as RELAY_SOURCE, RelayRuntime
+        sources.append(ROOT.parent / RELAY_SOURCE)
+    if 'ZERG_SQUAD_MODE' in os.environ:
+        from .zerg_squad import CROSS_MODES, CROSS_SOURCE, SOURCE, SquadRuntime
+        sources.append(ROOT.parent / SOURCE)
+        if os.environ['ZERG_SQUAD_MODE'] in CROSS_MODES:
+            sources.append(ROOT.parent / CROSS_SOURCE)
+    if 'ZERG_SWARM_GATE' in os.environ:
+        sources.extend(ROOT.parent / name for name in ('decision_tree/zerg/radical_swarm.py',
+            'decision_tree/zerg/policy_route_gate.py', 'decision_tree/scripts/linux/fit_swarm_explorer.py',
+            'decision_tree/scripts/linux/fit_swarm_gate_324.py'))
+    if method == 'radical-swarm':
+        if str(ROOT.parent) not in sys.path:
+            sys.path.insert(0, str(ROOT.parent))
+        from decision_tree.zerg import radical_swarm
+        swarm_source = Path(radical_swarm.__file__).resolve()
+        if swarm_source != ROOT.parent / 'decision_tree/zerg/radical_swarm.py':
+            raise ValueError('unexpected swarm controller source')
+        sources.append(swarm_source)
+    if distill_path is not None:
+        sources.append(ROOT.parent / 'decision_tree/zerg/policy_distill.py')
+        if 'ZERG_ROUTE_IDENTITY' in os.environ:
+            sources.extend(ROOT.parent / f'decision_tree/zerg/{name}.py' for name in ('policy_route_alt','policy_route_gate'))
+        if os.environ.get('ZERG_DISTILL_VERSION') in ('v2', 'v3','alternative','route'):
+            sources.append(ROOT.parent / 'decision_tree/zerg/policy_repair_v2.py')
+            if os.environ.get('ZERG_DISTILL_OPENING_SHA256'):
+                sources.append(ROOT.parent / 'decision_tree/zerg/opening_support_v2.py')
+            if os.environ['ZERG_DISTILL_VERSION'] == 'v3':
+                sources.append(ROOT.parent / 'decision_tree/zerg/policy_repair_v3.py')
     sources += [SMAC_ROOT / "smacv2/env/starcraft2" / name
                 for name in ("starcraft2.py", "wrapper.py", "distributions.py")]
     selected_map = map_file(manifest['env_args'])
@@ -211,6 +309,10 @@ async def evaluate(args, manifest, method, output):
         from scripts.make_damage_map import RACE_TYPES, begin_resource_damage, read_resource_damage
         sources.append(ROOT / 'scripts' / 'make_damage_map.py')
     selected_skill_sources = skill_source_files(skill_version) if is_skill else []
+    if shadow is not None:
+        resolved_source = Path(shadow.bundle_provenance['module_file']).parent
+        skill_config['source'] = str(resolved_source)
+        selected_skill_sources = [p for p in sorted(resolved_source.rglob('*.py')) if 'tests' not in p.parts]
     medivac_mode = skill_config.get("medivac_policy", "legacy") if is_skill else "legacy"
     medivac_runtime = skill_config["manager_kwargs"].get("medivac_tree") if is_skill else None
     if medivac_runtime is not None:
@@ -264,6 +366,40 @@ async def evaluate(args, manifest, method, output):
                      for n in ("pysc2", "numpy", "protobuf", "s2clientprotocol", "httpx")},
         **({'action_extensions': action_extensions} if action_extensions else {}),
     }
+    if method == 'radical-swarm':
+        swarm_hash = metadata['source_hashes']['decision_tree/zerg/radical_swarm.py']
+        if os.environ.get('ZERG_SWARM_SHA256', swarm_hash) != swarm_hash:
+            raise ValueError('swarm controller changed after freeze')
+        metadata['swarm'] = dict(controller_sha256=swarm_hash, trial_id=os.environ.get('ZERG_SWARM_TRIAL_ID'),
+                                 protocol='macro-only; one decision per 8 loops; no interior orders')
+        metadata['information'] = 'centralized union of visible SMACv2 observations and per-unit action masks'
+    if shadow is not None:
+        metadata['zerg_shadow'] = {
+            'run_id': shadow.run_id, 'scene_config_id': shadow.config['scene_config']['scene_config_id'],
+            'records_path': shadow.config['records_path'], 'events_path': shadow.config['events_path'],
+              'execution_context_hash': shadow.execution_context_hash, **shadow.bundle_provenance}
+    whole = None
+    if distill_path is not None:
+        from .zerg_distill import Distill, check_protocol
+        check_protocol(metadata)
+        if 'ZERG_SQUAD_MODE' in os.environ:
+            if 'ZERG_RELAY_MODE' in os.environ:
+                relay = squad = whole = RelayRuntime(output, distill_path, metadata['zerg_shadow'])
+                metadata['combat_relay'] = relay.configure_relay(os.environ, metadata['source_hashes'])
+            else:
+                squad = whole = SquadRuntime(output, distill_path, metadata['zerg_shadow'])
+            metadata['squad_rendezvous'] = squad.configure(os.environ, metadata['source_hashes'])
+        else:
+            whole = Distill(output, distill_path, metadata['zerg_shadow'])
+        metadata['zerg_distill'] = whole.contract
+        if 'ZERG_SWARM_GATE' in os.environ:
+            from .zerg_swarm_route import OnlineRoute
+            route = OnlineRoute(os.environ, whole.contract, metadata['source_hashes']['decision_tree/zerg/radical_swarm.py'])
+            metadata['swarm_route'] = route.contract
+    if whole_arm is not None:
+        from .zerg_whole_ac import WholeAC
+        whole = WholeAC(output, whole_arm, metadata['zerg_shadow'])
+        metadata['whole_ac'] = whole.contract
     if skill_tree_policy is not None:
         from decision_tree.experiment import policy_contract, validate_deployment
         from decision_tree.schema import policy_hash
@@ -293,6 +429,8 @@ async def evaluate(args, manifest, method, output):
              metadata=medivac_runtime.metadata)
     failure = None
     try:
+        if fork is not None:
+            fork.check_context(metadata, shadow)
         if medivac_runtime is not None and medivac_runtime.metadata.get('selection_mode') == 'model':
             from medivac_tree.experiment import validate_deployment
             audit = validate_deployment(metadata, medivac_runtime.selection['model'])
@@ -326,8 +464,11 @@ async def evaluate(args, manifest, method, output):
                 model_dir=args.pair_model_dir, last_token=args.pair_last_token)
             emit("pair_configuration", **pair_metadata)
         if is_skill and native_control != "all":
-            skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
-            skill_manager.micro_all_attackers = all_attackers
+            if shadow is None:
+                skill_manager = load_manager(skill_version)(**skill_config["manager_kwargs"])
+            # The Shadow wrapper forwards reads/methods but not attribute assignments.
+            acting_manager = skill_manager if shadow is None else skill_manager.manager
+            acting_manager.micro_all_attackers = all_attackers
             if skill_tree_policy is not None:
                 from decision_tree.integration import SkillTreeController
                 skill_tree_controller = SkillTreeController(
@@ -344,9 +485,14 @@ async def evaluate(args, manifest, method, output):
                                  effort=args.planner_effort, timeout=args.planner_timeout,
                                  executable=args.codex_path)
         for episode, scenario in enumerate(manifest["episodes"], 1):
+            if route is not None:
+                route.reset()
+            swarm = radical_swarm.RadicalSwarm() if method == 'radical-swarm' else None
             if skill_manager is not None:
                 skill_manager.reset()
-                skill_manager.micro_all_attackers = all_attackers
+                acting_manager.micro_all_attackers = all_attackers
+            if shadow is not None:
+                shadow.episode_seed = scenario['sc2_seed']
             if skill_tree_controller is not None:
                 skill_tree_controller.reset()
             if local_controller is not None:
@@ -385,6 +531,10 @@ async def evaluate(args, manifest, method, output):
                 if not expected or env._controller.ping().game_version != expected:
                     raise ValueError('Local model requires matching recorded SC2 game version')
             game_version = env._controller.ping().game_version
+            if fork is not None:
+                fork.start(scenario, initial_digest, game_version, env._obs.observation.game_loop)
+            if whole is not None:
+                whole.start(episode, scenario, initial_digest, game_version)
             emit("episode_started", episode=episode, scenario_sha256=scenario["sha256"],
                  initial_state_sha256=initial_digest,
                  game_loop=env._obs.observation.game_loop,
@@ -403,7 +553,17 @@ async def evaluate(args, manifest, method, output):
                 if pair_runtime is not None:
                     pair_runtime.begin_step(f"ep{episode:04d}", int(loop), env,
                                             reset=(steps == 0))
-                if native_control == "all":
+                if route is not None and route.choice == 'swarm':
+                    emit('skill_observation', episode=episode, step=steps, payload=payload)
+                    actions = None  # Generate the live Swarm action below, once per beat.
+                elif swarm is not None:
+                    emit('policy_observation', episode=episode, step=steps, payload=payload)
+                    masks = [list(map(int, env.get_avail_agent_actions(i))) for i in range(env.n_agents)]
+                    decision = swarm.choose(payload, masks)
+                    actions = decision['actions']
+                    emit('swarm_decision', episode=episode, step=steps, game_loop=loop,
+                         avail_actions=masks, decision=decision)
+                elif native_control == "all":
                     emit("policy_observation", episode=episode, step=steps, payload=payload)
                     actions = None  # full actor chooses below, without executing any rules
                 elif local_controller is not None:
@@ -438,7 +598,14 @@ async def evaluate(args, manifest, method, output):
                              skill=selected,
                              **({"source": "auto_spatial_dispatch"}
                                 if spatial_choice else {}))
-                    step_result = skill_manager.step(payload, env.n_agents)
+                    hook = fork or whole
+                    step_result = (hook.step(steps, loop, skill_manager, payload, env) if hook is not None
+                                   else skill_manager.step(payload, env.n_agents))
+                    if shadow is not None:
+                        expected = whole.receipt['steps'] + int(squad.handoff) if squad is not None else steps + 1
+                        if relay is not None:
+                            expected = whole.receipt['steps'] + int(relay.native)
+                        shadow.check_step(episode, expected)
                     if isinstance(step_result[0], dict) and selected_spatial(
                             skill_manager.current_skill):
                         # Spatial skills return partial proposals; the declared
@@ -462,11 +629,18 @@ async def evaluate(args, manifest, method, output):
                             telemetry["merged_units"] = sorted(partial or {})
                     else:
                         actions, telemetry = step_result
-                    emit("skill_step", episode=episode, step=steps, game_loop=loop, **telemetry)
+                    if squad is not None:
+                        emit('squad_rendezvous_decision', episode=episode, step=steps, game_loop=loop, **squad.row)
+                    skill_event = 'squad_v2_proposal' if squad is not None and not squad.handoff else 'skill_step'
+                    if relay is not None:
+                        emit('combat_relay_decision', episode=episode, step=steps, game_loop=loop, **relay.relay_row)
+                        if relay.owner == 'custom':
+                            skill_event = 'relay_r6_proposal'
+                    emit(skill_event, episode=episode, step=steps, game_loop=loop, **telemetry)
                     if pair_runtime is not None:
                         pair_runtime.collect_step(episode, steps, int(loop),
                                                   telemetry, actions)
-                    if telemetry.get("termination_reason"):
+                    if (squad is None or squad.handoff) and (relay is None or relay.native) and telemetry.get("termination_reason"):
                         emit("skill_terminated", episode=episode, step=steps,
                              reason=telemetry["termination_reason"])
                 elif client is not None:
@@ -517,6 +691,17 @@ async def evaluate(args, manifest, method, output):
                     actions = decode_actions(payload, {
                         actor: {"choice": rng.choice(list(question["criteria"]))}
                         for actor, question in payload["questions"].items()}, env.n_agents)
+                if route is not None:
+                    masks = [list(map(int, env.get_avail_agent_actions(i))) for i in range(env.n_agents)]
+                    row = route.decide(payload, masks, actions)
+                    actions = row['actions']
+                    if row['reason'] == 'first_macro_difference' and route.choice == 'swarm':
+                        # Distill prepared a real pending plan. It is NOT a commit or an engine order.
+                        row['uncommitted_v2'] = whole.discard_for_swarm(shadow)
+                    emit('swarm_route_decision', episode=episode, step=steps, game_loop=loop, **row)
+                use_native = (route is None or route.choice != 'swarm') and (squad is None or squad.handoff)
+                if relay is not None:
+                    use_native = relay.native
                 if native_runtime is not None:
                     actions, native_telemetry = native_runtime.choose(
                         f"ep{episode:04d}", int(loop), env, actions)
@@ -529,8 +714,14 @@ async def evaluate(args, manifest, method, output):
                     mask = env.get_avail_agent_actions(i)
                     if not isinstance(action, int) or isinstance(action, bool) or not 0 <= action < len(mask) or not mask[action]:
                         raise RuntimeError(f"Illegal action for u{i}: {action}")
-                if skill_manager is not None and hasattr(skill_manager, "commit_final_actions"):
+                if use_native and skill_manager is not None and hasattr(skill_manager, "commit_final_actions"):
+                    if whole is not None:
+                        whole.before_commit(acting_manager, actions)
                     skill_manager.commit_final_actions(actions)
+                    if whole is not None:
+                        whole.committed(acting_manager, actions)
+                    if fork is not None and steps == fork.anchor:
+                        fork.committed(acting_manager, actions)
                 if medivac_runtime is not None:
                     tree_trace = telemetry.get('race_telemetry', {}).get('medivac_tree')
                     if tree_trace is None:
@@ -560,12 +751,13 @@ async def evaluate(args, manifest, method, output):
                     # only re-checks the policy's registered authorizations;
                     # the next command still comes from the next decision.
                     intents = []
-                    if skill_manager is not None and hasattr(skill_manager, "last_micro_intents"):
+                    allow_micro = use_native or (relay is not None and relay.owner == 'custom')
+                    if allow_micro and skill_manager is not None and hasattr(skill_manager, "last_micro_intents"):
                         intents = skill_manager.last_micro_intents
                     window = MicroAttackWindow(
                         env, intents, macro_step=steps, issued_loop=int(loop),
-                        macro_loops=8, execute=(execution_mode != "micro8-off"),
-                        emit=emit, episode=episode, all_attackers=all_attackers, static_data=data)
+                        macro_loops=8, execute=(allow_micro and execution_mode != "micro8-off"),
+                        emit=emit, episode=episode, all_attackers=allow_micro and all_attackers, static_data=data)
                     reward, terminated, info = env.step_micro_window(actions, window, macro_loops=8)
                     window.close(env._obs.observation.game_loop)
                     micro_windows += 1
@@ -592,8 +784,22 @@ async def evaluate(args, manifest, method, output):
                     raise RuntimeError(f"Unexpected simulation step: {delta}")
                 emit("step", episode=episode, step=steps, game_loop=loop,
                      actions=actions, reward=float(reward), terminated=terminated, feedback=feedback)
+                if fork is not None and steps == fork.anchor + 1:
+                    fork.check_engine(feedback)
+                if relay is not None:
+                    emit('combat_relay_receipt', episode=episode, step=steps-1, game_loop=loop,
+                         **relay.after_engine(acting_manager, feedback, steps-1, loop))
+                elif whole is not None and use_native:
+                    whole.engine(feedback)
+                elif squad is not None:
+                    squad.acknowledge_squad(acting_manager, feedback)
+                if route is not None and route.after_engine(feedback['micro_submissions']):
+                    emit('swarm_route_micro_lock', episode=episode, step=steps-1, game_loop=loop,
+                         choice='v2', reason='v2_micro_only', submissions=feedback['micro_submissions'])
                 if terminated:
                     break
+            if fork is not None:
+                fork.check_reached()
             if (local_controller is not None and local_policy['selection']['mode'] == 'forced'
                     and local_controller.interventions != 1):
                 raise RuntimeError('Forced local intervention was never reached')
@@ -658,6 +864,23 @@ async def evaluate(args, manifest, method, output):
                 'steps': steps, 'outcome': record['outcome'],
                 'initial': initial_score, 'final': final_score,
             })
+            v2_steps = whole.receipt['steps'] if route is not None or squad is not None else steps
+            if squad is not None:
+                record['squad_rendezvous'] = dict(v2_steps=v2_steps, squad_steps=squad.squad_steps)
+            if relay is not None:
+                record['squad_rendezvous']['v2_steps'] = relay.counts['r6_steps']
+                record['combat_relay'] = dict(relay.counts)
+            if route is not None:
+                record['swarm_route'] = dict(choice=route.choice, v2_steps=v2_steps, swarm_steps=steps-v2_steps)
+            if shadow is not None:
+                record['zerg_shadow_decisions'] = shadow.finish(dict(record, steps=v2_steps), initial_score, final_score)
+            if whole is not None:
+                if route is not None and route.choice == 'swarm':
+                    whole.finish_swarm_prefix(v2_steps)
+                else:
+                    whole.finish(steps)
+                if distill_path is not None:
+                    record['zerg_distill'] = whole.receipt['stats']
             records.append(record)
             emit("episode_completed", **record)
             write_json(output / "episodes.json", records)
@@ -667,6 +890,8 @@ async def evaluate(args, manifest, method, output):
             env = None
     except BaseException as exc:
         failure = f"{type(exc).__name__}: {exc}"
+        if whole is not None:
+            whole.fail(failure)
         emit("run_failed", error=failure, completed_episodes=len(records))
         raise
     finally:
@@ -713,6 +938,8 @@ async def evaluate(args, manifest, method, output):
             "skill_parameters": metadata["skill_parameters"],
             "manifest_sha256": manifest["sha256"], "completed_episodes": len(records),
             "expected_episodes": len(manifest["episodes"]),
+            **({'zerg_shadow': {**metadata['zerg_shadow'], 'stats': shadow.stats}} if shadow is not None else {}),
+            **({'zerg_distill': {**whole.contract, 'stats': whole.totals}} if distill_path is not None else {}),
             "outcomes": {name: sum(r["outcome"] == name for r in records)
                          for name in ("win", "loss", "draw", "timeout")},
             "win_rate": sum(r["outcome"] == "win" for r in records) / len(records) if records else None,
@@ -744,7 +971,7 @@ def parser():
     make.add_argument("--unit-balance", choices=("original", "native"), default="original")
     make.add_argument("--output", type=Path, required=True)
     run = sub.add_parser("run", help="Run one method on a manifest")
-    run.add_argument("--method", choices=("random", "nearest", "jev", "astra-jev", "adaptive-skill"), default="nearest")
+    run.add_argument("--method", choices=("random", "nearest", "jev", "astra-jev", "adaptive-skill", "radical-swarm"), default="nearest")
     run.add_argument("--execution-mode", choices=EXECUTION_MODES,
                      default="legacy8",
                      help="legacy8 (default): one env.step per tactical decision, unchanged behavior. "
@@ -835,7 +1062,10 @@ def main():
     args = parser().parse_args()
     if args.command in ("run", "suite"):
         methods = [args.method] if args.command == "run" else args.methods
-        if getattr(args, "execution_mode", "legacy8") != "legacy8":
+        if methods == ['radical-swarm']:
+            if args.execution_mode != 'micro8-off':
+                raise SystemExit('radical-swarm requires --execution-mode micro8-off (no interior orders)')
+        elif getattr(args, "execution_mode", "legacy8") != "legacy8":
             if any(m != "adaptive-skill" for m in methods):
                 raise SystemExit("--execution-mode micro8-* requires --method adaptive-skill only")
             if args.skill_version != "tactical_v1":

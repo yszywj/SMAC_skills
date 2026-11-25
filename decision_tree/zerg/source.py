@@ -214,8 +214,14 @@ class ZergSkillSourceResolver:
         }
         self.output_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = self.output_dir / "source_manifest.json"
-        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True),
-                                 encoding="utf-8")
+        encoded = json.dumps(manifest, indent=2, sort_keys=True)
+        if not manifest_path.exists() or manifest_path.read_text(encoding='utf-8') != encoded:
+            # Concurrent workers load this immediately after resolving. Publish
+            # atomically; keep the temporary file outside the verified source tree.
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.output_dir.parent,
+                                             delete=False) as tmp:
+                tmp.write(encoded)
+            Path(tmp.name).replace(manifest_path)
 
         counts = manifest["counts"]
         return ResolveResult(
